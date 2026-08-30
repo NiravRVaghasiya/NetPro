@@ -22,5 +22,9 @@
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "@netpro/config": "^0.1.0",
+    "commander": "^15.0.0"
   }
 }

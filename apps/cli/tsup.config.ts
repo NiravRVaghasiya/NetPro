@@ -9,6 +9,6 @@ export default defineConfig({
   sourcemap: true,
   splitting: false,
   noExternal: [/@netpro\/.*/],
-  external: ['better-sqlite3', 'commander'],
+  external: ['better-sqlite3'],
   banner: { js: '#!/usr/bin/env node' },
 });
