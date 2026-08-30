@@ -25,6 +25,6 @@
   },
   "dependencies": {
     "@netpro/config": "^0.1.0",
-    "commander": "^15.0.0"
+    "commander": "^14.0.3"
   }
 }
