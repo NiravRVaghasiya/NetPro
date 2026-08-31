@@ -2,6 +2,7 @@
 import NextAuth from 'next-auth';
 import GitHub from 'next-auth/providers/github';
 import { DrizzleAdapter } from '@auth/drizzle-adapter';
+import { authConfig } from './auth.config';
 import { conn } from './db';
 
 // `conn` is the discriminated union `SqliteConn | PgConn` from packages/db's
@@ -31,6 +32,7 @@ const adapter =
       });
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  ...authConfig,
   adapter,
   providers: [
     GitHub({
@@ -38,21 +40,4 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       clientSecret: process.env.GITHUB_CLIENT_SECRET!,
     }),
   ],
-  session: {
-    strategy: 'jwt',
-    maxAge: 30 * 24 * 60 * 60,
-  },
-  callbacks: {
-    async jwt({ token, user }) {
-      if (user) token.userId = user.id;
-      return token;
-    },
-    async session({ session, token }) {
-      if (session.user) session.user.id = token.userId as string;
-      return session;
-    },
-  },
-  pages: {
-    signIn: '/login',
-  },
 });
