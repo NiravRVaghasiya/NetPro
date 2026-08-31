@@ -1,20 +1,31 @@
-# NOTE: the plan brief for this task specified `node:20-alpine` for all three
-# stages (matching the root package.json `engines.node: >=20` and the Node 20
-# pin planned for CI). That does not work here: @netpro/db's dependency
-# better-sqlite3@13.0.3 declares `engines.node: >=22`. It still compiles
-# against Node 20 headers via node-gyp without error, but the resulting native
-# addon segfaults (SIGSEGV) as soon as it is loaded — which happens
-# unconditionally, because packages/db/src/index.ts does a static top-level
-# `import Database from 'better-sqlite3'` regardless of DB_DIALECT. This
-# reproduced identically under both Turbopack and webpack, confirming it is a
-# Node/V8 ABI mismatch, not a bundler issue — and confirmed fixed by switching
-# to node:22-alpine, which is what the following FROM lines use. See the
-# task-13 report for the full investigation; this is worth reconciling with
-# the workspace-wide Node 20 pin in a follow-up (bump to >=22 everywhere, or
-# pin better-sqlite3 to a Node-20-compatible version).
+# NOTE: an earlier version of this Dockerfile used node:22-alpine because
+# @netpro/db's dependency better-sqlite3@13.0.3 declares `engines.node: >=22`
+# — it compiled against Node 20 headers via node-gyp without error, but the
+# resulting native addon segfaulted (SIGSEGV) at runtime, since it's loaded
+# unconditionally (packages/db/src/index.ts does a static top-level
+# `import Database from 'better-sqlite3'` regardless of DB_DIALECT).
+# Reconciled with the workspace-wide Node >=20 floor (root/apps package.json
+# `engines`, planned CI `node-version: '20'`) by pinning better-sqlite3 to
+# ^12.11.1 instead — the newest 12.x release whose `engines.node` still lists
+# `20.x` — rather than raising the floor project-wide, consistent with how
+# Task 7 handled the same class of conflict with `commander@15`. All three
+# stages are back on node:20-alpine.
+#
+# Pinning alone left a second bug: npm's workspace hoisting nests
+# better-sqlite3@12.11.1 inside packages/db/node_modules instead of the root
+# node_modules (13.0.3 hoisted to root; 12.11.1 reproducibly does not, on a
+# from-scratch `npm install`, even with `overrides` or `dedupe` — this looks
+# like an Arborist placement quirk specific to this dependency shape, not a
+# real version conflict). Since drizzle-orm sits in root node_modules and does
+# a static `import ... from "better-sqlite3"` in its own driver file, Node's
+# module resolution can't find a nested copy from there — `next build` fails
+# with "Module not found: Can't resolve 'better-sqlite3'". Fixed by also
+# declaring `better-sqlite3` as a direct root `dependencies` entry (see root
+# package.json), which forces it to hoist to root and resolves cleanly for
+# both `next build` and this Dockerfile's `npm ci`.
 
 # ── Stage 1: Dependencies ──
-FROM node:22-alpine AS deps
+FROM node:20-alpine AS deps
 WORKDIR /app
 # python3/make/g++ are required by node-gyp to compile better-sqlite3's native
 # addon (@netpro/db imports better-sqlite3 unconditionally, so it must build
@@ -30,7 +41,7 @@ COPY packages/config/package.json ./packages/config/
 RUN npm ci
 
 # ── Stage 2: Build ──
-FROM node:22-alpine AS builder
+FROM node:20-alpine AS builder
 WORKDIR /app
 # libc6-compat is Next.js's own standard recommendation for Alpine (musl)
 # images, so Node-native addons and the SWC/Turbopack binary have the glibc
@@ -43,7 +54,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build -w apps/web
 
 # ── Stage 3: Production runner ──
-FROM node:22-alpine AS runner
+FROM node:20-alpine AS runner
 WORKDIR /app
 RUN apk add --no-cache libc6-compat
 ENV NODE_ENV=production
