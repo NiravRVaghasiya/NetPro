@@ -8,9 +8,9 @@ describe('CLI root program', () => {
     expect(program.version()).toBe('0.1.0-alpha.0');
   });
 
-  it('registers all seven top-level commands', () => {
+  it('registers all eight top-level commands', () => {
     const program = createProgram();
     const names = program.commands.map((c) => c.name());
-    expect(names).toEqual(['init', 'import', 'search', 'outreach', 'analyze', 'track', 'export']);
+    expect(names).toEqual(['init', 'import', 'enrich', 'search', 'outreach', 'analyze', 'track', 'export']);
   });
 });

@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { registerInitCommand } from './commands/init';
 import { registerImportCommand } from './commands/import';
+import { registerEnrichCommand } from './commands/enrich';
 import { registerSearchCommand } from './commands/search';
 import { registerOutreachCommand } from './commands/outreach';
 import { registerAnalyzeCommand } from './commands/analyze';
@@ -17,6 +18,7 @@ export function createProgram(): Command {
 
   registerInitCommand(program);
   registerImportCommand(program);
+  registerEnrichCommand(program);
   registerSearchCommand(program);
   registerOutreachCommand(program);
   registerAnalyzeCommand(program);
