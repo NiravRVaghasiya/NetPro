@@ -46,6 +46,17 @@ describe('People Data Labs provider', () => {
     expect(result.confidence).toBeCloseTo(0.8);
   });
 
+  it('picks the highest-ranked seniority when job_title_levels has multiple entries, regardless of order', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ likelihood: 8, job_title_levels: ['senior', 'director', 'manager'] }), { status: 200 })
+    );
+
+    const provider = createPDLProvider('test-key');
+    const result = await provider.enrich({ id: '1', fullName: 'Jane Doe', email: 'jane@example.com' });
+
+    expect(result.data.seniority).toBe('director');
+  });
+
   it('falls back to personal_emails when work_email is absent', async () => {
     vi.spyOn(global, 'fetch').mockResolvedValueOnce(
       new Response(JSON.stringify({ likelihood: 5, personal_emails: ['jane@gmail.com'] }), { status: 200 })
