@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@netpro/db/src/schema.sqlite';
@@ -29,19 +32,26 @@ function createTestConn(): SqliteConn {
 
 describe('executeEnrich', () => {
   let conn: SqliteConn;
+  let tempHome: string;
 
   beforeEach(() => {
     conn = createTestConn();
+    // Isolate Keychain from any real credentials the developer's machine
+    // may have stored (same pattern as config/keychain.test.ts) so this
+    // test's "no keys configured" assumption holds regardless of machine
+    // state, instead of relying on the real OS home directory.
+    tempHome = mkdtempSync(join(tmpdir(), 'netpro-enrich-'));
+    vi.stubEnv('HOME', tempHome);
+    vi.stubEnv('USERPROFILE', tempHome);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    rmSync(tempHome, { recursive: true, force: true });
   });
 
   it('reports zero enrichments when no API keys are configured', async () => {
-    // No Keychain mock needed: apps/cli's real Keychain reads from an
-    // encrypted-file store that starts empty in a fresh test environment,
-    // so Keychain.get() naturally resolves to null for all three providers.
     const output = await executeEnrich({ source: 'all' }, conn);
     expect(output).toContain('Enriched 0 of 1 contacts');
     expect(output).toContain('no API key configured');
