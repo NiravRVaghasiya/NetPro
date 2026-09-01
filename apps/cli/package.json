@@ -25,6 +25,8 @@
   },
   "dependencies": {
     "@netpro/config": "^0.1.0",
+    "@netpro/core": "^0.1.0",
+    "@netpro/db": "^0.1.0",
     "commander": "^14.0.3"
   }
 }
