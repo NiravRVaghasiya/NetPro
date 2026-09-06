@@ -1,6 +1,8 @@
 import { Command } from 'commander';
 import { registerInitCommand } from './commands/init';
+import { registerConfigCommand } from './commands/config';
 import { registerImportCommand } from './commands/import';
+import { registerEnrichCommand } from './commands/enrich';
 import { registerSearchCommand } from './commands/search';
 import { registerOutreachCommand } from './commands/outreach';
 import { registerAnalyzeCommand } from './commands/analyze';
@@ -16,7 +18,9 @@ export function createProgram(): Command {
     .version('0.1.0-alpha.0');
 
   registerInitCommand(program);
+  registerConfigCommand(program);
   registerImportCommand(program);
+  registerEnrichCommand(program);
   registerSearchCommand(program);
   registerOutreachCommand(program);
   registerAnalyzeCommand(program);

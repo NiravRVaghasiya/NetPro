@@ -8,9 +8,17 @@ describe('CLI root program', () => {
     expect(program.version()).toBe('0.1.0-alpha.0');
   });
 
-  it('registers all seven top-level commands', () => {
+  it('registers all nine top-level commands', () => {
     const program = createProgram();
     const names = program.commands.map((c) => c.name());
-    expect(names).toEqual(['init', 'import', 'search', 'outreach', 'analyze', 'track', 'export']);
+    expect(names).toEqual(['init', 'config', 'import', 'enrich', 'search', 'outreach', 'analyze', 'track', 'export']);
+  });
+
+  it('registers config subcommands set/get/delete/list', () => {
+    const program = createProgram();
+    const config = program.commands.find((c) => c.name() === 'config');
+    expect(config).toBeDefined();
+    const subNames = (config as import('commander').Command).commands.map((c) => c.name());
+    expect(subNames).toEqual(['set', 'get', 'delete', 'list']);
   });
 });
