@@ -11,7 +11,7 @@ vi.mock("next-auth", () => ({
     },
   }),
 }));
-import middleware from "./middleware";
+import proxy from "./proxy";
 
 const run = (path: string, signedIn = false): Response => {
   const request = Object.assign(
@@ -20,11 +20,11 @@ const run = (path: string, signedIn = false): Response => {
       auth: signedIn ? { user: { id: "owner" } } : null,
     },
   );
-  return (middleware as unknown as (req: typeof request) => Response)(request);
+  return (proxy as unknown as (req: typeof request) => Response)(request);
 };
 
 beforeEach(() => vi.clearAllMocks());
-describe("middleware route boundaries", () => {
+describe("proxy route boundaries", () => {
   it("does not read sessions or create auth cookies for public visitors", () => {
     run("/card");
     run("/card/vcard");

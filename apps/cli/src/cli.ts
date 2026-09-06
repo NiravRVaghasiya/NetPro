@@ -9,6 +9,7 @@ import { registerAnalyzeCommand } from './commands/analyze';
 import { registerTrackCommand } from './commands/track';
 import { registerCardCommand } from './commands/card';
 import { registerExportCommand } from './commands/export';
+import { registerMigrateCommand } from './commands/migrate';
 
 export function createProgram(): Command {
   const program = new Command();
@@ -28,6 +29,7 @@ export function createProgram(): Command {
   registerTrackCommand(program);
   registerExportCommand(program);
   registerCardCommand(program);
+  registerMigrateCommand(program);
 
   return program;
 }

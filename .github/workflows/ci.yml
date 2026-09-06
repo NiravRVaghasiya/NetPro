@@ -14,13 +14,20 @@ jobs:
   build:
     name: Lint, Typecheck, Test, Build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20 is the workspace-wide `engines` floor; 22 is what contributors and
+        # Vercel actually run. A native addon (better-sqlite3) and Next.js 16
+        # make the difference worth covering.
+        node-version: ['20', '22']
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
       - name: Install dependencies
@@ -37,3 +44,163 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  postgres:
+    # Phases 1–5 shipped Postgres support that compiled but was never executed
+    # against a real server. That gap hid a migration race that failed 5 of 6
+    # concurrent cold starts — precisely what a Vercel deploy does. This job
+    # exists so that can never regress unnoticed again.
+    name: PostgreSQL integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: netpro
+          POSTGRES_PASSWORD: netpro
+          POSTGRES_DB: netpro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U netpro"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      NETPRO_TEST_DATABASE_URL: postgresql://netpro:netpro@127.0.0.1:5432/netpro
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run live PostgreSQL integration tests
+        run: npm run test -w @netpro/db
+
+      - name: Verify the migration CLI against a real database
+        env:
+          DB_DIALECT: postgresql
+          DATABASE_URL: postgresql://netpro:netpro@127.0.0.1:5432/netpro?sslmode=disable
+        run: |
+          npm run build -w @netpro/cli
+          node apps/cli/dist/index.js migrate --status
+          node apps/cli/dist/index.js migrate
+          # Applying twice must be a no-op, not an error: every redeploy and
+          # every extra container repeats this.
+          node apps/cli/dist/index.js migrate
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the self-hosting image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: netpro:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Split into granular steps on purpose. GitHub's log blob is not always
+      # retrievable via the API/CLI, but per-step conclusions and ::error::
+      # annotations always are, so a failure here is diagnosable from the API
+      # alone instead of needing the raw log.
+      - name: Start Postgres
+        run: |
+          docker network create netpro-ci
+          docker run -d --name db --network netpro-ci \
+            -e POSTGRES_USER=netpro -e POSTGRES_PASSWORD=netpro -e POSTGRES_DB=netpro \
+            --health-cmd "pg_isready -U netpro" --health-interval 5s \
+            postgres:16-alpine
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' db)" = "healthy" ] && break
+            sleep 2
+          done
+          status="$(docker inspect -f '{{.State.Health.Status}}' db)"
+          if [ "$status" != "healthy" ]; then
+            echo "::error::Postgres never became healthy (status=$status)"
+            docker logs db 2>&1 | tail -50
+            exit 1
+          fi
+
+      # The migration job the compose stack runs, using the shipped CLI. This
+      # is the step that caught ERR_MODULE_NOT_FOUND for CLI dependencies that
+      # were left unbundled but not copied into the runner stage.
+      - name: Run migrations via the shipped CLI
+        run: |
+          if ! docker run --rm --network netpro-ci \
+            -e DB_DIALECT=postgresql \
+            -e DATABASE_URL='postgresql://netpro:netpro@db:5432/netpro?sslmode=disable' \
+            netpro:ci node /app/apps/cli/dist/index.js migrate > /tmp/migrate.log 2>&1; then
+            echo "::error::CLI migrate failed inside the image"
+            sed -n '1,80p' /tmp/migrate.log
+            echo "::error::migrate output: $(tr '\n' ' ' < /tmp/migrate.log | head -c 800)"
+            exit 1
+          fi
+          cat /tmp/migrate.log
+
+      - name: Start the web container
+        run: |
+          docker run -d --name web --network netpro-ci -p 3000:3000 \
+            -e DB_DIALECT=postgresql \
+            -e DATABASE_URL='postgresql://netpro:netpro@db:5432/netpro?sslmode=disable' \
+            -e NEXTAUTH_SECRET=ci-only-secret-not-a-real-credential \
+            -e NEXTAUTH_URL=http://localhost:3000 \
+            -e AUTH_URL=http://localhost:3000 \
+            -e NETPRO_OWNER_GITHUB_ID=1 \
+            netpro:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          if ! curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+            echo "::error::Web container never served /api/health"
+            docker logs web 2>&1 | tail -80
+            echo "::error::web log: $(docker logs web 2>&1 | tr '\n' ' ' | tail -c 800)"
+            exit 1
+          fi
+
+      - name: Check health, auth boundaries and logs
+        run: |
+          echo "--- health ---"
+          curl -fsS http://127.0.0.1:3000/api/health | tee /tmp/health.json
+          grep -q '"status":"healthy"' /tmp/health.json || {
+            echo "::error::health not healthy: $(cat /tmp/health.json)"; exit 1; }
+          grep -q '"dialect":"postgresql"' /tmp/health.json || {
+            echo "::error::health dialect not postgresql: $(cat /tmp/health.json)"; exit 1; }
+
+          echo "--- auth boundaries ---"
+          # Private API must reject anonymous callers; the unpublished public
+          # card must 404 rather than leak a draft.
+          api_card="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/card)"
+          [ "$api_card" = "401" ] || { echo "::error::/api/card expected 401, got $api_card"; exit 1; }
+          card="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/card)"
+          [ "$card" = "404" ] || { echo "::error::/card expected 404, got $card"; exit 1; }
+
+          echo "--- no UntrustedHost / auth misconfiguration in logs ---"
+          # This is the Phase 6 production auth bug: it only appears at runtime
+          # in a production build, so a build-only check cannot catch it.
+          docker logs web 2>&1 | tee /tmp/web.log
+          if grep -qi "UntrustedHost" /tmp/web.log; then
+            echo "::error::UntrustedHost present in web logs"
+            exit 1
+          fi
+
+      - name: Tear down
+        if: always()
+        run: |
+          docker rm -f web db >/dev/null 2>&1 || true
+          docker network rm netpro-ci >/dev/null 2>&1 || true

@@ -235,10 +235,35 @@ npm run test
 npm run build
 ```
 
-## Self-host with Docker
+## Database migrations
+
+Migrations are applied automatically the first time the CLI or web server
+opens the database, and re-running is always a no-op. To apply them as an
+explicit step instead — recommended for any hosted deployment:
+
+```bash
+npm run db:migrate                                  # apply pending migrations
+node apps/cli/dist/index.js migrate --status        # report without changing anything
+```
+
+Set `NETPRO_AUTO_MIGRATE=false` once you do this, so the server never runs
+schema changes on a request path.
+
+## Deploy
+
+For Vercel, Docker Compose, managed Postgres, TLS modes, security headers, and
+a production checklist, see **[deployment.md](deployment.md)**.
 
 ```bash
 cp .env.example .env
+# Edit .env — at minimum POSTGRES_PASSWORD, NEXTAUTH_SECRET, the GitHub OAuth
+# credentials, NETPRO_OWNER_GITHUB_ID, and APP_URL.
 docker compose build
 docker compose up -d
+curl http://localhost:3000/api/health
 ```
+
+> SQLite is for local development and the CLI only. Any hosted deployment
+> should use Postgres — on a serverless host the filesystem is ephemeral, so a
+> SQLite database is lost on redeploy (NetPro refuses that configuration on
+> Vercel rather than losing your data silently).

@@ -48,10 +48,32 @@ WORKDIR /app
 # compatibility shims they may probe for. Harmless to include even though it
 # was not, by itself, the fix for the segfault described above.
 RUN apk add --no-cache libc6-compat
+# Copy the *whole* installed layout, not just the root node_modules. npm
+# workspaces nest a dependency under apps/<pkg>/node_modules whenever the
+# hoisted root copy would conflict, and commander is exactly that case:
+# tsup's own sucrase dependency pins commander@4, which wins the root slot,
+# so the CLI's commander@14 is installed at apps/cli/node_modules/commander.
+#
+# Copying only ./node_modules silently left the builder with commander@4.
+# tsup resolved that, bundled it, and the image failed at runtime with
+# "TypeError: config.command(...).argument is not a function" — .argument()
+# was added in commander@9. Copying the workspace directories keeps whatever
+# npm ci actually resolved, with no per-package list to keep in sync.
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps ./apps
+COPY --from=deps /app/packages ./packages
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build -w apps/web
+# Build the CLI too: the compose stack runs `netpro migrate` as a one-shot
+# migration job before the web service starts, so the deploy path uses the
+# exact same command an operator runs by hand.
+RUN npm run build -w apps/web && npm run build -w apps/cli
+# Fail the build, not the container, if the bundled CLI is broken. Both bugs
+# fixed here (a missing external, then a bundled commander@4) produced an
+# image that built cleanly and only died when `netpro migrate` ran. `--help`
+# exercises module resolution and the full command tree without a database.
+RUN node apps/cli/dist/index.js --help > /dev/null \
+  && node apps/cli/dist/index.js config --help > /dev/null
 
 # ── Stage 3: Production runner ──
 FROM node:20-alpine AS runner
@@ -67,6 +89,26 @@ RUN addgroup --system --gid 1001 netpro && adduser --system --uid 1001 netpro
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
+# The bundled CLI plus the native drivers it needs at runtime. tsup inlines
+# every pure-JS dependency (commander, drizzle-orm, @netpro/*) into
+# dist/index.js and marks only better-sqlite3 and pg as external, because
+# those two cannot be bundled: better-sqlite3 is a native addon, and pg is
+# CommonJS that resolves its backends dynamically. Only they need to exist in
+# node_modules for `netpro migrate` to run in this image.
+#
+# Keep this list in sync with `external` in apps/cli/tsup.config.ts. An earlier
+# revision left commander and drizzle-orm unbundled but never copied them here,
+# so the image built fine and then died at runtime with ERR_MODULE_NOT_FOUND.
+# apps/cli/src/bundle.test.ts now asserts both ends of that contract.
+COPY --from=builder /app/apps/cli/dist ./apps/cli/dist
+COPY --from=builder /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
+# bindings and file-uri-to-path are better-sqlite3's own runtime requires.
+COPY --from=builder /app/node_modules/bindings ./node_modules/bindings
+COPY --from=builder /app/node_modules/file-uri-to-path ./node_modules/file-uri-to-path
+COPY --from=builder /app/node_modules/pg ./node_modules/pg
+# Next.js's standalone output already places the workspace packages (and the
+# committed migration SQL) at /app/packages/db, which is one of the resolver's
+# candidate paths, so no extra copy of the migrations is needed here.
 
 USER netpro
 EXPOSE 3000

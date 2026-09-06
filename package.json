@@ -2,7 +2,7 @@
   "name": "netpro",
   "private": true,
   "version": "0.1.0-alpha.0",
-  "description": "NetPro — open source LinkedIn Premium alternative",
+  "description": "NetPro \u2014 open source LinkedIn Premium alternative",
   "license": "MIT",
   "engines": {
     "node": ">=20"
@@ -18,8 +18,12 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "test:pg": "vitest run --project @netpro/db",
     "format": "prettier --write \"**/*.{ts,tsx,md,json}\" --ignore-path .gitignore",
-    "format:check": "prettier --check \"**/*.{ts,tsx,md,json}\" --ignore-path .gitignore"
+    "format:check": "prettier --check \"**/*.{ts,tsx,md,json}\" --ignore-path .gitignore",
+    "db:migrate": "npm run build -w @netpro/cli && node apps/cli/dist/index.js migrate",
+    "db:migrate:status": "node apps/cli/dist/index.js migrate --status",
+    "vercel-build": "node scripts/vercel-build.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1"
