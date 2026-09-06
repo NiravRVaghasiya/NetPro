@@ -6,12 +6,22 @@ import { authConfig } from '@/lib/auth.config';
 const { auth } = NextAuth(authConfig);
 
 const PROTECTED_ROUTES = ['/dashboard', '/search', '/outreach', '/contacts', '/settings', '/import'];
+// Data API routes return 401 JSON (not a redirect) per the Security & Auth
+// Architecture blueprint's §1.4 "API Route Protection" pattern.
+const API_ROUTES = ['/api/import', '/api/export', '/api/enrich'];
 const PUBLIC_ROUTES = ['/login', '/card', '/api/auth', '/api/health'];
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
 
   if (PUBLIC_ROUTES.some((route) => pathname.startsWith(route))) {
+    return NextResponse.next();
+  }
+
+  if (API_ROUTES.some((route) => pathname.startsWith(route))) {
+    if (!req.auth?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     return NextResponse.next();
   }
 
