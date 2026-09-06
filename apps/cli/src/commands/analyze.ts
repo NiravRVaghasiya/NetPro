@@ -156,7 +156,7 @@ export async function executeAnalyze(
     "",
     `Contacts: ${m.totalContacts} total · ${m.activeConnections} active (30d) · ${m.dormantConnections} dormant (${analyticsOptions.dormantDays}d+)`,
     `Avg relationship score: ${m.avgRelationshipScore === null ? "–" : m.avgRelationshipScore}`,
-    `Diversity: ${m.diversityEffective} effective ${m.diversityField}s · ${m.companiesDistinct} companies · ${m.industriesDistinct} industries`,
+    `Diversity: ${m.diversityEffective} effective ${m.diversityField} categories · ${m.companiesDistinct} companies · ${m.industriesDistinct} industries`,
     "",
     `Growth (last 30 days): +${g.last30} (${rate} vs prior 30d)`,
     ...growthLines(overview),
