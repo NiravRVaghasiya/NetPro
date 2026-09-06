@@ -1,15 +1,22 @@
 // apps/web/middleware.ts
-import { NextResponse } from 'next/server';
-import NextAuth from 'next-auth';
-import { authConfig } from '@/lib/auth.config';
+import { NextResponse } from "next/server";
+import NextAuth from "next-auth";
+import { authConfig } from "@/lib/auth.config";
 
 const { auth } = NextAuth(authConfig);
 
-const PROTECTED_ROUTES = ['/dashboard', '/search', '/outreach', '/contacts', '/settings', '/import'];
+const PROTECTED_ROUTES = [
+  "/dashboard",
+  "/search",
+  "/outreach",
+  "/contacts",
+  "/settings",
+  "/import",
+];
 // Data API routes return 401 JSON (not a redirect) per the Security & Auth
 // Architecture blueprint's §1.4 "API Route Protection" pattern.
-const API_ROUTES = ['/api/import', '/api/export', '/api/enrich'];
-const PUBLIC_ROUTES = ['/login', '/card', '/api/auth', '/api/health'];
+const API_ROUTES = ["/api/import", "/api/export", "/api/enrich", "/api/search"];
+const PUBLIC_ROUTES = ["/login", "/card", "/api/auth", "/api/health"];
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
@@ -20,14 +27,14 @@ export default auth((req) => {
 
   if (API_ROUTES.some((route) => pathname.startsWith(route))) {
     if (!req.auth?.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     return NextResponse.next();
   }
 
   if (PROTECTED_ROUTES.some((route) => pathname.startsWith(route))) {
     if (!req.auth?.user) {
-      return NextResponse.redirect(new URL('/login', req.url));
+      return NextResponse.redirect(new URL("/login", req.url));
     }
   }
 
@@ -35,5 +42,5 @@ export default auth((req) => {
 });
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
