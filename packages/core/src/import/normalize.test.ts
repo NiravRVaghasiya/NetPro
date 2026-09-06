@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeName, normalizeCompany, normalizeTitle, generateFingerprint, mergeContacts, type NormalizedContact } from './normalize';
+import { normalizeName, normalizeCompany, normalizeTitle, parseLinkedInDate, generateFingerprint, mergeContacts, type NormalizedContact } from './normalize';
 
 describe('normalizeName', () => {
   it('uses firstName/lastName directly when present', () => {
@@ -86,5 +86,32 @@ describe('mergeContacts', () => {
     expect(merged.fullName).toBe('Jane Doe');
     expect(merged.email).toBe('jane@old.com');
     expect(merged.company).toBe('Stripe');
+  });
+});
+
+describe('parseLinkedInDate', () => {
+  it.each([
+    ['01 Jan 2024', '2024-01-01T00:00:00.000Z'],
+    ['15 Mar 2023', '2023-03-15T00:00:00.000Z'],
+    ['3 Dec 2025', '2025-12-03T00:00:00.000Z'],
+    ['January 5, 2024', '2024-01-05T00:00:00.000Z'],
+    ['2024-01-05', '2024-01-05T00:00:00.000Z'],
+    ['2024-01-05T10:30:00.000Z', '2024-01-05T00:00:00.000Z'],
+    ['  01 Jan 2024  ', '2024-01-01T00:00:00.000Z'],
+  ])('parses %s', (input, expected) => {
+    expect(parseLinkedInDate(input)).toBe(expected);
+  });
+
+  it.each([
+    [''],
+    [undefined],
+    ['not a date'],
+    ['32 Jan 2024'],
+    ['31 Feb 2024'],
+    ['13 Lorem 2024'],
+    ['2024-13-01'],
+    ['2024-02-31'],
+  ])('rejects %s', (input) => {
+    expect(parseLinkedInDate(input)).toBeUndefined();
   });
 });

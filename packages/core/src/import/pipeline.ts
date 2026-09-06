@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { eq, and } from 'drizzle-orm';
 import type { SqliteConn, PgConn } from '@netpro/db';
 import { parseLinkedInCSV } from './linkedin-csv';
-import { normalizeName, normalizeCompany, normalizeTitle, generateFingerprint, mergeContacts, type NormalizedContact } from './normalize';
+import { normalizeName, normalizeCompany, normalizeTitle, parseLinkedInDate, generateFingerprint, mergeContacts, type NormalizedContact } from './normalize';
 
 export interface ImportError {
   row: number;
@@ -43,15 +43,23 @@ export async function runImport(csv: string, conn: SqliteConn | PgConn): Promise
 
       const existing = await findExistingContact(conn, normalized);
 
+      // The "Connected On" date is when the relationship started — the only
+      // truthful growth timeline and the contact's initial lastInteraction
+      // (see the Phase 3 analytics spec). Undefined falls back to import time.
+      const connectionDate = parseLinkedInDate(raw.connectedOn);
+
       if (existing) {
         const mergedContact = mergeContacts(
           { ...normalized, fullName: existing.fullName, email: existing.email ?? undefined, company: existing.company ?? undefined, role: existing.role ?? undefined, location: existing.location ?? undefined, fingerprint },
           normalized
         );
-        await updateContact(conn, existing.id, mergedContact, raw.linkedinUrl);
+        // Backfill lastInteraction only when the existing row has none —
+        // re-imports must never erase a newer recorded interaction.
+        const backfillDate = existing.lastInteraction === null ? connectionDate : undefined;
+        await updateContact(conn, existing.id, mergedContact, raw.linkedinUrl, backfillDate);
         merged++;
       } else {
-        await insertContact(conn, normalized, raw.linkedinUrl);
+        await insertContact(conn, normalized, raw.linkedinUrl, connectionDate);
         imported++;
       }
     } catch (e) {
@@ -96,7 +104,7 @@ async function findExistingContact(conn: SqliteConn | PgConn, normalized: Normal
   return null;
 }
 
-async function insertContact(conn: SqliteConn | PgConn, normalized: NormalizedContact, linkedinUrl: string | undefined): Promise<void> {
+async function insertContact(conn: SqliteConn | PgConn, normalized: NormalizedContact, linkedinUrl: string | undefined, connectionDate: string | undefined): Promise<void> {
   const now = new Date().toISOString();
   const values = {
     id: randomUUID(),
@@ -110,7 +118,11 @@ async function insertContact(conn: SqliteConn | PgConn, normalized: NormalizedCo
     location: normalized.location,
     linkedinUrl,
     source: 'linkedin_csv',
-    createdAt: now,
+    // When the CSV carries "Connected On", the relationship entered your
+    // network that day — createdAt reflects acquisition, lastInteraction
+    // starts at the connection itself (an accepted invite is an interaction).
+    createdAt: connectionDate ?? now,
+    lastInteraction: connectionDate ?? null,
     updatedAt: now,
   };
 
@@ -122,7 +134,7 @@ async function insertContact(conn: SqliteConn | PgConn, normalized: NormalizedCo
   await conn.db.insert(conn.schema.contacts).values(values);
 }
 
-async function updateContact(conn: SqliteConn | PgConn, id: string, merged: NormalizedContact, linkedinUrl: string | undefined): Promise<void> {
+async function updateContact(conn: SqliteConn | PgConn, id: string, merged: NormalizedContact, linkedinUrl: string | undefined, backfillInteractionDate?: string): Promise<void> {
   const set = {
     fullName: merged.fullName,
     email: merged.email,
@@ -132,6 +144,9 @@ async function updateContact(conn: SqliteConn | PgConn, id: string, merged: Norm
     location: merged.location,
     linkedinUrl,
     updatedAt: new Date().toISOString(),
+    // Backfill only when the caller asks — the pipeline passes a date solely
+    // for existing rows that have no interaction recorded yet.
+    ...(backfillInteractionDate ? { lastInteraction: backfillInteractionDate } : {}),
   };
 
   if (conn.dialect === 'sqlite') {

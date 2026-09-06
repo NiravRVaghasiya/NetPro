@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { eq } from 'drizzle-orm';
 import * as schema from '@netpro/db/src/schema.sqlite';
 import { runImport } from './pipeline';
 import type { SqliteConn } from '@netpro/db';
@@ -96,5 +97,80 @@ describe('runImport', () => {
     expect(summary.imported).toBe(1);
     expect(summary.errors).toHaveLength(1);
     expect(summary.errors[0]!.reason).toMatch(/missing name/);
+  });
+
+  // ─── Phase 3: connection-date persistence ────────────────────────────────
+
+  it('persists the Connected On date as createdAt and lastInteraction', async () => {
+    const csv = [
+      'First Name,Last Name,Email Address,Company,Position,Connected On,URL',
+      'Jane,Doe,jane@example.com,Stripe,Senior Engineer,01 Jan 2024,',
+    ].join('\n');
+
+    await runImport(csv, conn);
+
+    const rows = await conn.db.select().from(conn.schema.contacts);
+    expect(rows[0]!.createdAt).toBe('2024-01-01T00:00:00.000Z');
+    expect(rows[0]!.lastInteraction).toBe('2024-01-01T00:00:00.000Z');
+  });
+
+  it('falls back to import time when Connected On is missing or unparsable', async () => {
+    const csv = [
+      'First Name,Last Name,Email Address,Company,Position,Connected On,URL',
+      'Jane,Doe,jane@example.com,Stripe,Senior Engineer,,',
+      'John,Smith,john@example.com,Vercel,PM,not a date,',
+    ].join('\n');
+
+    const before = Date.now();
+    await runImport(csv, conn);
+
+    const rows = await conn.db.select().from(conn.schema.contacts);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.lastInteraction).toBeNull();
+      expect(Date.parse(row.createdAt)).toBeGreaterThanOrEqual(before);
+    }
+  });
+
+  it('backfills lastInteraction on merge when the existing row has none, without touching createdAt', async () => {
+    const first = [
+      'First Name,Last Name,Email Address,Company,Position,Connected On,URL',
+      'Jane,Doe,jane@example.com,Stripe,Senior Engineer,,',
+    ].join('\n');
+    const second = [
+      'First Name,Last Name,Email Address,Company,Position,Connected On,URL',
+      'Jane,Doe,jane@example.com,Stripe,Senior Engineer,01 Jan 2024,',
+    ].join('\n');
+
+    await runImport(first, conn);
+    const [before] = await conn.db.select().from(conn.schema.contacts);
+    const createdAtBefore = before!.createdAt;
+
+    const summary = await runImport(second, conn);
+    expect(summary).toEqual({ imported: 0, merged: 1, errors: [] });
+
+    const [row] = await conn.db.select().from(conn.schema.contacts);
+    expect(row!.createdAt).toBe(createdAtBefore);
+    expect(row!.lastInteraction).toBe('2024-01-01T00:00:00.000Z');
+  });
+
+  it('never overwrites an existing lastInteraction on re-import', async () => {
+    const csv = [
+      'First Name,Last Name,Email Address,Company,Position,Connected On,URL',
+      'Jane,Doe,jane@example.com,Stripe,Senior Engineer,01 Jan 2024,',
+    ].join('\n');
+
+    await runImport(csv, conn);
+    // Simulate a newer interaction recorded after import.
+    const [row] = await conn.db.select().from(conn.schema.contacts);
+    await conn.db.update(conn.schema.contacts)
+      .set({ lastInteraction: '2026-06-01T00:00:00.000Z' })
+      .where(eq(conn.schema.contacts.id, row!.id));
+
+    await runImport(csv, conn);
+
+    const [after] = await conn.db.select().from(conn.schema.contacts);
+    expect(after!.lastInteraction).toBe('2026-06-01T00:00:00.000Z');
+    expect(after!.createdAt).toBe('2024-01-01T00:00:00.000Z');
   });
 });

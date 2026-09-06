@@ -84,6 +84,32 @@ calls `GET /api/search`.
 > hybrid FTS5 + vector-semantic search is a later phase; it builds on the same
 > `searchContacts` core entry point.
 
+## Analyze your network
+
+```bash
+# Full report: network score, activity, diversity, growth, clusters, dormant ties
+node apps/cli/dist/index.js analyze
+
+# Section views
+node apps/cli/dist/index.js analyze --network-score
+node apps/cli/dist/index.js analyze --clusters
+node apps/cli/dist/index.js analyze --dormant --days 60 --limit 20
+
+# Machine-readable output (the full overview payload)
+node apps/cli/dist/index.js analyze --json
+```
+
+In the web app, the **Dashboard** page (`/dashboard`) renders the same numbers
+from `GET /api/analytics`: metric cards, a 12-month growth chart, top
+companies/industries, clusters, and your reconnect list.
+
+> Analytics reads LinkedIn's "Connected On" date — imports record it as the
+> contact's `createdAt` and initial `lastInteraction`, so growth reflects when
+> relationships actually formed, not when the CSV was imported. Graph-native
+> analytics (Louvain clusters, centrality, paths) arrive with the phase that
+> populates the `edges` table; per-contact relationship scoring arrives with
+> interaction logging (CRM).
+
 ## Verify everything
 
 ```bash
