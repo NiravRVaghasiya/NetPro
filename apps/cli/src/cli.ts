@@ -7,6 +7,7 @@ import { registerSearchCommand } from './commands/search';
 import { registerOutreachCommand } from './commands/outreach';
 import { registerAnalyzeCommand } from './commands/analyze';
 import { registerTrackCommand } from './commands/track';
+import { registerCardCommand } from './commands/card';
 import { registerExportCommand } from './commands/export';
 
 export function createProgram(): Command {
@@ -26,6 +27,7 @@ export function createProgram(): Command {
   registerAnalyzeCommand(program);
   registerTrackCommand(program);
   registerExportCommand(program);
+  registerCardCommand(program);
 
   return program;
 }

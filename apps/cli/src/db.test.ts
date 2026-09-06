@@ -39,6 +39,7 @@ describe('openDb', () => {
     expect(names).toContain('campaign_recipients');
     expect(names).toContain('search_index');
     expect(names).toContain('profile_views');
+    expect(names).toContain('profile_cards');
     expect(names).toContain('follow_ups');
     expect(names).toContain('activity_log');
     expect(names).toContain('user');

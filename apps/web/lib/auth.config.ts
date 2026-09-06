@@ -7,19 +7,40 @@
 // bundle, and the build will fail with a "Module not found" error tracing
 // through "Edge Middleware". See docs/superpowers/plans/2026-08-30-v0.1-alpha-scaffold.md,
 // Task 10 Step 6.
-import type { NextAuthConfig } from 'next-auth';
+import type { NextAuthConfig } from "next-auth";
+import { isOwnerGitHubId } from "./owner";
 
 export const authConfig = {
   pages: {
-    signIn: '/login',
+    signIn: "/login",
+    error: "/login",
   },
   session: {
-    strategy: 'jwt',
+    strategy: "jwt",
     maxAge: 30 * 24 * 60 * 60,
   },
   callbacks: {
-    async jwt({ token, user }) {
-      if (user) token.userId = user.id;
+    async signIn({ account }) {
+      return (
+        account?.provider === "github" &&
+        isOwnerGitHubId(account.providerAccountId)
+      );
+    },
+    async jwt({ token, user, account }) {
+      if (account) {
+        if (account.provider !== "github") return null;
+        token.githubId = account.providerAccountId;
+      }
+      if (user?.id) token.userId = user.id;
+      // Re-check every read, not only sign-in: configuration changes revoke
+      // old owners, and pre-upgrade JWTs cannot bypass the single-owner gate.
+      // Never accept identity fields from the client-controlled session update.
+      if (
+        !isOwnerGitHubId(token.githubId) ||
+        typeof token.userId !== "string" ||
+        !token.userId
+      )
+        return null;
       return token;
     },
     async session({ session, token }) {

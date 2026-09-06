@@ -237,3 +237,13 @@ export const verificationTokens = sqliteTable(
     compoundKey: primaryKey({ columns: [vt.identifier, vt.token] }),
   })
 );
+
+// Single-owner public card. Plain JSON text in both dialects; draft and published
+// snapshots are separate so private edits never change the live card implicitly.
+export const profileCards = sqliteTable('profile_cards', {
+  id: text('id').primaryKey(),
+  draft: text('draft').notNull(),
+  published: text('published'),
+  publishedAt: text('published_at'),
+  updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+});

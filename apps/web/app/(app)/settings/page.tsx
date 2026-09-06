@@ -1,3 +1,6 @@
+import Link from "next/link";
+import { isOwnerGitHubId } from "@/lib/owner";
+
 // Read-only integration status. The web app is configured server-side via
 // environment variables (self-hosted, single-owner deployment); this panel
 // reports presence only and never renders secret values.
@@ -19,8 +22,19 @@ function configured(...values: Array<string | undefined>): boolean {
 function integrationsFromEnv(env: NodeJS.ProcessEnv): Integration[] {
   return [
     {
+      name: "Instance owner",
+      configured: isOwnerGitHubId(
+        env.NETPRO_OWNER_GITHUB_ID?.trim(),
+        env.NETPRO_OWNER_GITHUB_ID,
+      ),
+      envVars: ["NETPRO_OWNER_GITHUB_ID"],
+      hint: "Required numeric GitHub account ID. All other accounts are denied access.",
+    },
+    {
       name: "GitHub OAuth (sign-in)",
-      configured: configured(env.GITHUB_CLIENT_ID, env.GITHUB_CLIENT_SECRET),
+      configured:
+        configured(env.GITHUB_CLIENT_ID) &&
+        configured(env.GITHUB_CLIENT_SECRET),
       envVars: ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"],
       hint: "OAuth app credentials from github.com/settings/developers.",
     },
@@ -63,6 +77,21 @@ export default function SettingsPage() {
   return (
     <div style={{ maxWidth: 720 }}>
       <h1>Settings</h1>
+      <section className="my-5 rounded-xl border border-slate-200 p-5">
+        <h2 className="text-base font-semibold text-[#183c30]">
+          Your profile card
+        </h2>
+        <p className="my-2 text-sm leading-6 text-slate-500">
+          Create a shareable introduction without exposing your contacts.
+          Private until you choose to publish.
+        </p>
+        <Link
+          href="/settings/card"
+          className="text-sm font-medium text-emerald-800 underline underline-offset-4"
+        >
+          Edit profile card →
+        </Link>
+      </section>
       <p style={{ color: "#555" }}>
         Integrations are configured with server-side environment variables (BYO
         API keys — NetPro never stores them). Restart the server after changing
