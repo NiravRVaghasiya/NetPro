@@ -5,7 +5,8 @@ describe("@netpro/core module boundaries", () => {
   it("exposes all seven feature modules", () => {
     expect(typeof core.search.searchContacts).toBe("function");
     expect(typeof core.enrichment.EnrichmentPipeline).toBe("function");
-    expect(core.analytics.MODULE_NAME).toBe("analytics");
+    // Real since v1.0 Phase 3 (network analytics).
+    expect(typeof core.analytics.getNetworkOverview).toBe("function");
     expect(core.ai.MODULE_NAME).toBe("ai");
     expect(core.crm.MODULE_NAME).toBe("crm");
     expect(typeof core.importPipeline.runImport).toBe("function");
