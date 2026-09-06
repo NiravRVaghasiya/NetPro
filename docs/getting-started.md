@@ -55,6 +55,35 @@ as server-side environment variables instead (see `apps/web/.env.example`).
 node apps/cli/dist/index.js export --format csv --output contacts.csv
 ```
 
+## Search your contacts
+
+Free-text search plus faceted filters (all flags optional; combine freely):
+
+```bash
+# Free-text across name, email, company, role, headline, location
+node apps/cli/dist/index.js search vercel engineer
+
+# Filter by company / role / location / seniority
+node apps/cli/dist/index.js search --company stripe --role engineer
+node apps/cli/dist/index.js search --seniority c_level --has-email
+
+# Minimum relationship score, recent activity, sorting, pagination
+node apps/cli/dist/index.js search --min-score 0.5 --active-within 30
+node apps/cli/dist/index.js search --sort name --limit 10 --offset 20
+
+# Machine-readable output (contacts, total, facets)
+node apps/cli/dist/index.js search stripe --json
+```
+
+Sort options: `relevance` (default), `score` (relationship score), `recent`
+(last interaction), `name`. In the web app, use the **Search** page
+(`/search`) — it has the same query/filter/sort/facet/pagination controls and
+calls `GET /api/search`.
+
+> Search runs in portable ANSI SQL on both SQLite and Postgres. The blueprint's
+> hybrid FTS5 + vector-semantic search is a later phase; it builds on the same
+> `searchContacts` core entry point.
+
 ## Verify everything
 
 ```bash
