@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
@@ -11,5 +11,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // `next build` (standalone output) copies workspace packages — including
+    // their *.test.ts files — into .next/standalone/. Without this exclude,
+    // any `npm test` run after a build fails transforming those copies.
+    exclude: [...configDefaults.exclude, '.next/**'],
   },
 });
