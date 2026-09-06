@@ -1,8 +1,12 @@
-import Link from 'next/link';
-import { redirect } from 'next/navigation';
-import { auth, signOut } from '@/lib/auth';
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { auth, signOut } from "@/lib/auth";
 
-export default async function AppLayout({ children }: { children: React.ReactNode }) {
+export default async function AppLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const session = await auth();
 
   // The route-group layout is the real gate — middleware.ts's PROTECTED_ROUTES
@@ -10,28 +14,32 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // without a matching middleware entry would otherwise render for anyone,
   // signed in or not.
   if (!session?.user) {
-    redirect('/login');
+    redirect("/login");
   }
 
   return (
     <div>
-      <nav>
+      <nav
+        aria-label="Main navigation"
+        className="flex flex-wrap items-center gap-x-5 gap-y-3 border-b border-slate-200 px-5 py-4 text-sm sm:px-8"
+      >
         <Link href="/dashboard">Dashboard</Link>
         <Link href="/search">Search</Link>
         <Link href="/outreach">Outreach</Link>
         <Link href="/contacts">Contacts</Link>
         <Link href="/import">Import</Link>
+        <Link href="/settings/card">Profile card</Link>
         <Link href="/settings">Settings</Link>
         <form
           action={async () => {
-            'use server';
+            "use server";
             await signOut();
           }}
         >
           <button type="submit">Sign out</button>
         </form>
       </nav>
-      <main>{children}</main>
+      <main className="px-5 py-4 sm:px-8">{children}</main>
     </div>
   );
 }

@@ -8,6 +8,13 @@
       "when": 1788690614785,
       "tag": "0000_new_cerise",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788704952319,
+      "tag": "0001_profile_card",
+      "breakpoints": true
     }
   ]
 }

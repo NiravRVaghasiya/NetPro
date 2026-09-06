@@ -18,7 +18,40 @@ cp apps/web/.env.example apps/web/.env.local
 npm run dev -w apps/web
 ```
 
-Visit http://localhost:3000.
+Visit http://localhost:3000. The public card is unavailable until you explicitly
+publish one. Private pages redirect to owner sign-in.
+
+## Configure owner sign-in
+
+NetPro v1 is a **single-owner** instance, not a multi-tenant service. Imported
+contacts and integration keys are shared within that instance. Before signing
+in, configure these values in `apps/web/.env.local` (or the production server
+and Docker `.env`):
+
+- `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`: credentials for your GitHub
+  OAuth app, created in GitHub **Settings → Developer settings → OAuth Apps**.
+- `NETPRO_OWNER_GITHUB_ID`: your numeric GitHub account ID, **not** your username
+  or OAuth client ID. For example, retrieve it with
+  `gh api users/YOUR_USERNAME --jq .id` (or view that user's public GitHub API
+  response). No other GitHub account can sign in.
+- `NEXTAUTH_SECRET`: replace the example value with a random secret generated
+  by `openssl rand -base64 32`. Keep it on the server and out of Git.
+- `NEXTAUTH_URL`: the externally reachable app origin. For local development,
+  use `http://localhost:3000`. Register
+  `http://localhost:3000/api/auth/callback/github` as the OAuth app callback;
+  replace the origin with your HTTPS domain for a hosted instance.
+
+Auth.js v5's `AUTH_SECRET` / `AUTH_URL` names are also supported. Behind a trusted
+reverse proxy, configure its forwarded host/protocol correctly; set
+`AUTH_TRUST_HOST=true` only when that proxy/host is trusted. Card writes enforce
+same-origin requests using those headers.
+
+Restart after environment changes. Missing or invalid owner configuration
+**disables sign-in**, rather than allowing open registration. When upgrading
+from Phases 1–4, existing sessions are invalidated and the owner must sign in
+again. Changing the configured owner also revokes the old owner's sessions.
+This controls access to the entire instance; it does not partition or erase
+its stored data. Publicly published cards remain public until unpublished.
 
 ## Run the CLI
 
@@ -134,6 +167,64 @@ tone, and add context. Configure the server with `AI_PROVIDER`,
 OpenAI-compatible endpoint, and `OPENAI_MODEL`/`ANTHROPIC_MODEL` overrides; the
 **Settings** page shows which integrations are configured. Batch campaigns and
 actual email delivery (SMTP) are planned for a later release.
+
+## Create your profile card
+
+After signing in, open **Profile card** in the navigation (`/settings/card`):
+
+1. Enter your own public name, headline, biography, role/company/location, and
+   optional email, phone, and up to six HTTP(S) links. Nothing is prefilled from
+   your imported contacts or GitHub account.
+2. Use the **Private preview** to review the card. **Save draft** persists edits
+   without publishing them or changing an existing live card.
+3. Check the publication confirmation and click **Publish card** (or **Publish
+   changes**). The current form is saved and published together.
+4. Share `/card`. Visitors do not need an account; **Save contact** downloads
+   `/card/vcard` as a vCard 3.0 file.
+5. **Unpublish** immediately makes both public URLs return 404. Your saved draft
+   is retained; edits you have not saved also stay in the current editor.
+
+Every filled field on a published card is public, including email/phone and
+contact downloads. Private draft changes stay private until you publish again.
+Cards request `noindex, nofollow` and do not track viewers or load third-party
+images, but `noindex` is **not** access control. Unpublishing cannot revoke copies
+that someone has already downloaded, cached independently, or screenshotted.
+
+### Portable HTML and vCard (CLI)
+
+Download **profile JSON** from the editor, or copy the fictional example in
+[`docs/examples/profile.json`](examples/profile.json) and replace its details:
+
+```bash
+# Run from the repo root after building the CLI
+node apps/cli/dist/index.js card --generate \
+  --input docs/examples/profile.json --output card.html
+
+# Export a vCard instead
+node apps/cli/dist/index.js card --input docs/examples/profile.json \
+  --format vcard --output contact.vcf
+
+# Omit --output to write the generated file contents to stdout
+node apps/cli/dist/index.js card --input docs/examples/profile.json
+```
+
+The HTML is a self-contained page with no JavaScript or remote assets and
+includes a downloadable contact file. You can open it locally or host it
+where you choose. CLI generation is entirely offline: it does **not** connect
+to the database, start a server, publish `/card`, or send email. The `--generate`
+flag is optional. Only `html` (default) and `vcard` formats are supported.
+
+The JSON contract accepts `fullName` (required), `headline`, `bio`, `company`,
+`role`, `location`, `email`, `phone`, and `links: [{"label": "...", "url": "https://..."}]`.
+Other fields are rejected so a private contact record cannot accidentally be
+exported wholesale. Optional fields may be omitted; blank strings stay blank.
+Input is limited to 32 KiB, six links, a 2,000-character bio, and bounded
+single-line fields. URLs must be absolute HTTP(S), without embedded credentials.
+
+Both SQLite and Postgres receive the additive `profile_cards` migration on the
+next CLI database open or web server startup. The web editor uses the web
+app’s configured database; the offline `card` command never reads or changes
+that database.
 
 ## Verify everything
 

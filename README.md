@@ -2,7 +2,7 @@
 
 > Your professional network, owned by you. Open source LinkedIn Premium alternative.
 
-**v1.0 Phases 1–4 are implemented** on top of the v0.1-alpha scaffold:
+**v1.0 Phases 1–5 are implemented** on top of the v0.1-alpha scaffold:
 
 - **Phase 1 — Import, Enrichment & Export:** LinkedIn CSV import with
   dedup/merge, three-provider contact enrichment (Hunter.io, People Data Labs,
@@ -28,11 +28,26 @@
   the web composer (`/outreach`, `POST /api/outreach`). NetPro **drafts** —
   you review and send; nothing is emailed automatically, and the web app
   reads keys only from server env vars (`/settings` shows integration status).
+- **Phase 5 — Profile Card:** an owner-only editor (`/settings/card`) with a
+  live preview, private drafts, explicit publication, and unpublishing. The
+  public `/card` page and `/card/vcard` download read only a separately
+  published snapshot — never imported contacts or unsaved/private edits.
+  `netpro card --generate --input profile.json` produces a standalone HTML
+  card offline; `--format vcard` exports a contact file. Shared validation,
+  rendering, and SQLite/Postgres persistence live in `packages/core/card`.
+  No visitor tracking, remote avatars, or new runtime dependencies.
+
+> **Upgrade / owner setup:** set `NETPRO_OWNER_GITHUB_ID` to your numeric GitHub
+> account ID before signing in. Only that account can access the private
+> workspace; missing configuration denies sign-in. Existing sessions must sign
+> in again. The previously missing Auth.js callback route is now mounted.
+> See [owner authentication setup](docs/getting-started.md#configure-owner-sign-in).
 
 The full monorepo (CLI + web, dual-dialect Drizzle database, GitHub OAuth via
-Auth.js) builds, lints, typechecks, and tests cleanly. Remaining v1.0 features
-— profile card, one-click Vercel deploy — are still stubs; each becomes its
-own future spec built on this foundation. Batch campaigns/drip sequences,
+Auth.js) builds, lints, typechecks, and tests successfully. **Next: Phase 6 —
+deployment and release readiness**, including one-click Vercel deployment
+with managed Postgres and production hardening. This is not yet a production
+v1.0 release. Batch campaigns/drip sequences,
 real email delivery (SMTP), per-user encrypted web key storage, and the
 `$EDITOR` draft-review loop are deliberately deferred to later phases and
 documented in the [Phase 4 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase4-ai-outreach-design.md).
@@ -54,14 +69,16 @@ See the [Phase 1 plan](docs/superpowers/plans/2026-08-31-v1.0-phase1-import-enri
 and its [design spec](docs/superpowers/specs/2026-08-31-v1.0-phase1-import-enrichment-export-design.md)
 for what Phase 1 covers and why, the
 [Phase 3 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase3-network-analytics-design.md)
-for the analytics decisions.
+for the analytics decisions, and the
+[Phase 5 design and repository assessment](docs/superpowers/specs/2026-09-06-v1.0-phase5-profile-card-design.md)
+for publication/privacy decisions and the remaining release work.
 
 ## Structure
 
 - `apps/web` — Next.js app (App Router), Auth.js v5 with GitHub OAuth
-- `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|outreach|analyze|track|export`)
+- `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|outreach|analyze|track|export|card`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
-- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, and the AI outreach drafting engine (CRM modules remain placeholders)
+- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, and profile-card validation/publishing/exports (CRM modules remain placeholders)
 - `packages/ui` — shared React components
 - `packages/config` — shared ESLint and Tailwind configs
 

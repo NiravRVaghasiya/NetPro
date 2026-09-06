@@ -1,0 +1,14 @@
+{
+  "fullName": "Alex Morgan",
+  "headline": "Example profile · Product engineer, curious by default.",
+  "bio": "I build thoughtful software and enjoy the conversations that make it better.\n\nAlways happy to trade notes on open source, useful tools, and making things a little simpler.",
+  "company": "Independent",
+  "role": "Product engineer",
+  "location": "London, UK",
+  "email": "alex@example.com",
+  "phone": "",
+  "links": [
+    { "label": "Selected work", "url": "https://example.com/work" },
+    { "label": "Notes & ideas", "url": "https://example.com/notes" }
+  ]
+}

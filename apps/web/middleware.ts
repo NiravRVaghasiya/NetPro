@@ -1,10 +1,13 @@
-// apps/web/middleware.ts
-import { NextResponse } from "next/server";
+// Keep the JWT-only auth config here, not lib/auth (which imports native SQLite).
+import {
+  NextResponse,
+  type NextRequest,
+  type NextFetchEvent,
+} from "next/server";
 import NextAuth from "next-auth";
 import { authConfig } from "@/lib/auth.config";
 
 const { auth } = NextAuth(authConfig);
-
 const PROTECTED_ROUTES = [
   "/dashboard",
   "/search",
@@ -13,40 +16,49 @@ const PROTECTED_ROUTES = [
   "/settings",
   "/import",
 ];
-// Data API routes return 401 JSON (not a redirect) per the Security & Auth
-// Architecture blueprint's §1.4 "API Route Protection" pattern.
-const API_ROUTES = [
-  "/api/import",
-  "/api/export",
-  "/api/enrich",
-  "/api/search",
-  "/api/analytics",
-  "/api/outreach",
-];
 const PUBLIC_ROUTES = ["/login", "/card", "/api/auth", "/api/health"];
 
-export default auth((req) => {
+function within(path: string, route: string): boolean {
+  return path === route || path.startsWith(`${route}/`);
+}
+
+// Type the event to select Auth.js's middleware overload, not its route-handler overload.
+const authenticate = auth((req, _event: NextFetchEvent) => {
   const { pathname } = req.nextUrl;
-
-  if (PUBLIC_ROUTES.some((route) => pathname.startsWith(route))) {
-    return NextResponse.next();
-  }
-
-  if (API_ROUTES.some((route) => pathname.startsWith(route))) {
+  // All other APIs are private by default, including future data routes.
+  if (within(pathname, "/api")) {
     if (!req.auth?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        {
+          status: 401,
+          headers: { "Cache-Control": "private, no-store" },
+        },
+      );
     }
     return NextResponse.next();
   }
-
-  if (PROTECTED_ROUTES.some((route) => pathname.startsWith(route))) {
-    if (!req.auth?.user) {
-      return NextResponse.redirect(new URL("/login", req.url));
-    }
+  if (
+    PROTECTED_ROUTES.some((route) => within(pathname, route)) &&
+    !req.auth?.user
+  ) {
+    return NextResponse.redirect(new URL("/login", req.url));
   }
-
   return NextResponse.next();
 });
+
+export default function middleware(
+  request: NextRequest,
+  event: NextFetchEvent,
+) {
+  // Public-card visitors need no session processing or Auth.js cookies.
+  // In particular, don't wrap this early return in auth(), which sets cookies
+  // even for anonymous visitors. Auth route handlers manage their own cookies.
+  if (PUBLIC_ROUTES.some((route) => within(request.nextUrl.pathname, route))) {
+    return NextResponse.next();
+  }
+  return authenticate(request, event);
+}
 
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
