@@ -1,4 +1,4 @@
-import { AiProviderError } from './types';
+import { AiProviderError } from "./types";
 
 export interface ParsedDraft {
   subject: string;
@@ -25,23 +25,23 @@ export function parseDraftResponse(raw: string): ParsedDraft {
   if (fromPlain) return fromPlain;
 
   throw new AiProviderError(
-    'invalid_response',
-    'AI provider returned a response that could not be parsed into a subject and body',
+    "invalid_response",
+    "AI provider returned a response that could not be parsed into a subject and body",
   );
 }
 
 function cleanFields(value: unknown): ParsedDraft | null {
-  if (typeof value !== 'object' || value === null) return null;
+  if (typeof value !== "object" || value === null) return null;
   const v = value as Record<string, unknown>;
-  const subject = typeof v.subject === 'string' ? v.subject.trim() : '';
-  const body = typeof v.body === 'string' ? v.body.trim() : '';
+  const subject = typeof v.subject === "string" ? v.subject.trim() : "";
+  const body = typeof v.body === "string" ? v.body.trim() : "";
   if (!subject || !body) return null;
   return { subject, body };
 }
 
 function tryParseJson(text: string): ParsedDraft | null {
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
   if (start === -1 || end <= start) return null;
   try {
     return cleanFields(JSON.parse(text.slice(start, end + 1)));

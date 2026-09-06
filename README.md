@@ -2,7 +2,7 @@
 
 > Your professional network, owned by you. Open source LinkedIn Premium alternative.
 
-**v1.0 Phases 1–3 are implemented** on top of the v0.1-alpha scaffold:
+**v1.0 Phases 1–4 are implemented** on top of the v0.1-alpha scaffold:
 
 - **Phase 1 — Import, Enrichment & Export:** LinkedIn CSV import with
   dedup/merge, three-provider contact enrichment (Hunter.io, People Data Labs,
@@ -19,11 +19,23 @@
   `netpro analyze` and the web dashboard (`/dashboard`, `GET /api/analytics`).
   Imports now persist LinkedIn's "Connected On" date, so growth reflects when
   relationships actually formed.
+- **Phase 4 — AI Outreach (Drafting):** BYO-key AI message drafting for a
+  contact (by email/id/name) or an ad-hoc recipient — choose a tone
+  (professional/warm/casual/friendly), add context and your ask, and get a
+  ready-to-send subject + body. The engine lives in `packages/core/ai`
+  (OpenAI-compatible and Anthropic providers over plain `fetch`, no SDK
+  dependencies, no network in tests), surfaced through `netpro outreach` and
+  the web composer (`/outreach`, `POST /api/outreach`). NetPro **drafts** —
+  you review and send; nothing is emailed automatically, and the web app
+  reads keys only from server env vars (`/settings` shows integration status).
 
 The full monorepo (CLI + web, dual-dialect Drizzle database, GitHub OAuth via
 Auth.js) builds, lints, typechecks, and tests cleanly. Remaining v1.0 features
-— AI outreach, profile card, one-click Vercel deploy — are still stubs; each
-becomes its own future spec built on this foundation.
+— profile card, one-click Vercel deploy — are still stubs; each becomes its
+own future spec built on this foundation. Batch campaigns/drip sequences,
+real email delivery (SMTP), per-user encrypted web key storage, and the
+`$EDITOR` draft-review loop are deliberately deferred to later phases and
+documented in the [Phase 4 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase4-ai-outreach-design.md).
 
 > **Analytics scope note:** clustering is attribute-based (normalized company)
 > for now — the blueprint's graph-native analytics (Louvain communities,
@@ -49,7 +61,7 @@ for the analytics decisions.
 - `apps/web` — Next.js app (App Router), Auth.js v5 with GitHub OAuth
 - `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|outreach|analyze|track|export`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
-- `packages/core` — shared business logic: import, enrichment, export, faceted search, and the network analytics engine (AI/CRM modules remain placeholders)
+- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, and the AI outreach drafting engine (CRM modules remain placeholders)
 - `packages/ui` — shared React components
 - `packages/config` — shared ESLint and Tailwind configs
 

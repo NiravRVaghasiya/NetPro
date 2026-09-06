@@ -64,25 +64,37 @@ export default function SettingsPage() {
     <div style={{ maxWidth: 720 }}>
       <h1>Settings</h1>
       <p style={{ color: "#555" }}>
-        Integrations are configured with server-side environment variables (BYO API keys — NetPro
-        never stores them). Restart the server after changing them.
+        Integrations are configured with server-side environment variables (BYO
+        API keys — NetPro never stores them). Restart the server after changing
+        them.
       </p>
 
       <table style={{ borderCollapse: "collapse", width: "100%" }}>
         <thead>
           <tr>
-            <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Integration</th>
-            <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Status</th>
-            <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>Environment variables</th>
+            <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>
+              Integration
+            </th>
+            <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>
+              Status
+            </th>
+            <th style={{ textAlign: "left", padding: "0.5rem 0.75rem" }}>
+              Environment variables
+            </th>
           </tr>
         </thead>
         <tbody>
           {integrations.map((it) => (
-            <tr key={it.name} style={{ borderTop: "1px solid hsl(var(--border))" }}>
+            <tr
+              key={it.name}
+              style={{ borderTop: "1px solid hsl(var(--border))" }}
+            >
               <td style={{ padding: "0.5rem 0.75rem" }}>
                 <strong>{it.name}</strong>
                 <br />
-                <span style={{ color: "#777", fontSize: "0.85rem" }}>{it.hint}</span>
+                <span style={{ color: "#777", fontSize: "0.85rem" }}>
+                  {it.hint}
+                </span>
               </td>
               <td style={{ padding: "0.5rem 0.75rem" }}>
                 {it.configured ? (
@@ -91,7 +103,13 @@ export default function SettingsPage() {
                   <span style={{ color: "#b45309" }}>○ not set</span>
                 )}
               </td>
-              <td style={{ padding: "0.5rem 0.75rem", fontFamily: "monospace", fontSize: "0.85rem" }}>
+              <td
+                style={{
+                  padding: "0.5rem 0.75rem",
+                  fontFamily: "monospace",
+                  fontSize: "0.85rem",
+                }}
+              >
                 {it.envVars.map((v) => (
                   <div key={v}>{v}</div>
                 ))}

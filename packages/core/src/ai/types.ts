@@ -3,10 +3,10 @@
 // drafts messages — NetPro never sends email — so this module is database
 // free and network access is always injectable, keeping tests offline.
 
-export type AiProviderId = 'openai' | 'anthropic';
+export type AiProviderId = "openai" | "anthropic";
 
 export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: "system" | "user" | "assistant";
   content: string;
 }
 
@@ -23,7 +23,10 @@ export interface AiProvider {
   label: string;
   defaultModel: string;
   /** Send a chat completion and return the assistant's text reply. */
-  complete(messages: ChatMessage[], options?: AiCompletionOptions): Promise<string>;
+  complete(
+    messages: ChatMessage[],
+    options?: AiCompletionOptions,
+  ): Promise<string>;
 }
 
 export interface ProviderConfig {
@@ -35,14 +38,15 @@ export interface ProviderConfig {
 }
 
 /** Error codes the outreach engine can surface to CLI/web callers. */
-export type AiErrorCode = 'not_configured' | 'upstream_error' | 'invalid_response' | 'invalid_input';
+export type AiErrorCode =
+  "not_configured" | "upstream_error" | "invalid_response" | "invalid_input";
 
 export class AiProviderError extends Error {
   readonly code: AiErrorCode;
 
   constructor(code: AiErrorCode, message: string) {
     super(message);
-    this.name = 'AiProviderError';
+    this.name = "AiProviderError";
     this.code = code;
   }
 }

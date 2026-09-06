@@ -6,9 +6,9 @@
 // exact email → exact id → unique case-insensitive full-name match. An
 // ambiguous name errors and lists the candidates so the wrong person is
 // never emailed by accident.
-import { isNull, or, eq, and, sql } from 'drizzle-orm';
-import type { SqliteConn, PgConn } from '@netpro/db';
-import type { RecipientInput } from './prompt';
+import { isNull, or, eq, and, sql } from "drizzle-orm";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import type { RecipientInput } from "./prompt";
 
 export interface ContactRef {
   id: string;
@@ -31,7 +31,7 @@ async function findCandidates(
   const trimmed = selector.trim();
   // Drizzle's typed builders need dialect-narrowed tables (same pattern as
   // analytics/metrics.ts); the queries themselves are plain ANSI SQL.
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     const t = conn.schema.contacts;
     return conn.db
       .select({
@@ -109,13 +109,15 @@ export async function resolveContactRef(
   if (byId) return byId;
 
   const needle = trimmed.toLowerCase();
-  const byName = candidates.filter((c) => c.fullName.trim().toLowerCase() === needle);
+  const byName = candidates.filter(
+    (c) => c.fullName.trim().toLowerCase() === needle,
+  );
   if (byName.length === 1) return byName[0]!;
 
   if (byName.length > 1) {
     throw new Error(
       `Ambiguous contact "${trimmed}" — ${byName.length} contacts share that name: ` +
-        `${byName.map(describe).join('; ')}. Pick one by email or id (see "netpro search").`,
+        `${byName.map(describe).join("; ")}. Pick one by email or id (see "netpro search").`,
     );
   }
 
@@ -130,7 +132,7 @@ export async function getContactById(
   conn: SqliteConn | PgConn,
   id: string,
 ): Promise<ContactRef | null> {
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     const t = conn.schema.contacts;
     const rows = await conn.db
       .select({

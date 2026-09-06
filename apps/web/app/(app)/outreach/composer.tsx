@@ -27,7 +27,12 @@ export default function OutreachComposer() {
   const [selected, setSelected] = useState<ContactHit | null>(null);
   const [searching, setSearching] = useState(false);
 
-  const [adhoc, setAdhoc] = useState({ name: "", email: "", company: "", role: "" });
+  const [adhoc, setAdhoc] = useState({
+    name: "",
+    email: "",
+    company: "",
+    role: "",
+  });
   const [mode, setMode] = useState<"contact" | "adhoc">("contact");
   const [tone, setTone] = useState<(typeof TONES)[number]>("professional");
   const [context, setContext] = useState("");
@@ -47,9 +52,14 @@ export default function OutreachComposer() {
     }
     setSearching(true);
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(value)}&limit=8`);
+      const res = await fetch(
+        `/api/search?q=${encodeURIComponent(value)}&limit=8`,
+      );
       if (!res.ok) return;
-      const data = (await res.json()) as { results?: ContactHit[]; contacts?: ContactHit[] };
+      const data = (await res.json()) as {
+        results?: ContactHit[];
+        contacts?: ContactHit[];
+      };
       setHits((data.results ?? data.contacts ?? []).slice(0, 8));
     } finally {
       setSearching(false);
@@ -124,8 +134,9 @@ export default function OutreachComposer() {
   return (
     <div style={{ display: "grid", gap: "1.5rem", maxWidth: 720 }}>
       <p style={{ color: "#555" }}>
-        NetPro drafts the message — <strong>you</strong> review and send it. Pick a contact or
-        describe the recipient, add context, and generate a personalized draft.
+        NetPro drafts the message — <strong>you</strong> review and send it.
+        Pick a contact or describe the recipient, add context, and generate a
+        personalized draft.
       </p>
 
       {notConfigured && (
@@ -138,14 +149,17 @@ export default function OutreachComposer() {
           }}
           role="alert"
         >
-          <strong>AI provider not configured.</strong> Set <code>OPENAI_API_KEY</code> (or{" "}
-          <code>ANTHROPIC_API_KEY</code> + <code>AI_PROVIDER=anthropic</code>) on the server, then
-          reload. See <a href="/settings">settings</a>.
+          <strong>AI provider not configured.</strong> Set{" "}
+          <code>OPENAI_API_KEY</code> (or <code>ANTHROPIC_API_KEY</code> +{" "}
+          <code>AI_PROVIDER=anthropic</code>) on the server, then reload. See{" "}
+          <a href="/settings">settings</a>.
         </div>
       )}
 
       <div>
-        <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem" }}>
+        <div
+          style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem" }}
+        >
           <button
             type="button"
             onClick={() => setMode("contact")}
@@ -204,7 +218,15 @@ export default function OutreachComposer() {
                 />
                 {searching && <span style={{ color: "#777" }}>Searching…</span>}
                 {hits.length > 0 && (
-                  <ul style={{ listStyle: "none", margin: 0, padding: 0, border: "1px solid hsl(var(--border))", borderRadius: 8 }}>
+                  <ul
+                    style={{
+                      listStyle: "none",
+                      margin: 0,
+                      padding: 0,
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: 8,
+                    }}
+                  >
                     {hits.map((h) => (
                       <li key={h.id}>
                         <button
@@ -236,7 +258,13 @@ export default function OutreachComposer() {
             )}
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "0.75rem",
+            }}
+          >
             <input
               placeholder="Name"
               value={adhoc.name}
@@ -269,7 +297,10 @@ export default function OutreachComposer() {
       <div style={{ display: "grid", gap: "0.75rem" }}>
         <label>
           Tone{" "}
-          <select value={tone} onChange={(e) => setTone(e.target.value as (typeof TONES)[number])}>
+          <select
+            value={tone}
+            onChange={(e) => setTone(e.target.value as (typeof TONES)[number])}
+          >
             {TONES.map((t) => (
               <option key={t} value={t}>
                 {t}
@@ -296,11 +327,21 @@ export default function OutreachComposer() {
       </div>
 
       <div>
-        <button type="button" onClick={() => void generate()} disabled={loading || !canGenerate}>
+        <button
+          type="button"
+          onClick={() => void generate()}
+          disabled={loading || !canGenerate}
+        >
           {loading ? "Generating…" : "Generate draft"}
         </button>
         {!canGenerate && (
-          <span style={{ marginLeft: "0.75rem", color: "#777", fontSize: "0.85rem" }}>
+          <span
+            style={{
+              marginLeft: "0.75rem",
+              color: "#777",
+              fontSize: "0.85rem",
+            }}
+          >
             pick a contact or fill in a name/email
           </span>
         )}
@@ -323,25 +364,46 @@ export default function OutreachComposer() {
           }}
         >
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
               <strong>Subject</strong>
-              <button type="button" onClick={() => copy(draft.subject, "subject")}>
+              <button
+                type="button"
+                onClick={() => copy(draft.subject, "subject")}
+              >
                 {copied === "subject" ? "Copied!" : "Copy"}
               </button>
             </div>
             <p style={{ margin: "0.25rem 0 0" }}>{draft.subject}</p>
           </div>
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
               <strong>Body</strong>
-              <button type="button" onClick={() => copy(`${draft.subject}\n\n${draft.body}`, "all")}>
+              <button
+                type="button"
+                onClick={() => copy(`${draft.subject}\n\n${draft.body}`, "all")}
+              >
                 {copied === "all" ? "Copied!" : "Copy all"}
               </button>
             </div>
-            <p style={{ whiteSpace: "pre-wrap", margin: "0.25rem 0 0" }}>{draft.body}</p>
+            <p style={{ whiteSpace: "pre-wrap", margin: "0.25rem 0 0" }}>
+              {draft.body}
+            </p>
           </div>
           <p style={{ color: "#777", fontSize: "0.8rem", margin: 0 }}>
-            Drafted by {draft.provider}/{draft.model} · tone: {draft.tone} · review before sending
+            Drafted by {draft.provider}/{draft.model} · tone: {draft.tone} ·
+            review before sending
           </p>
         </div>
       )}

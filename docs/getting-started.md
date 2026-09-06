@@ -110,6 +110,31 @@ companies/industries, clusters, and your reconnect list.
 > populates the `edges` table; per-contact relationship scoring arrives with
 > interaction logging (CRM).
 
+## Draft AI outreach
+
+NetPro drafts personalized outreach from your contact data — **you** review and
+send it (nothing is ever emailed automatically). Bring your own API key:
+
+```bash
+# CLI: store the key encrypted in ~/.netpro, or set OPENAI_API_KEY in the env
+netpro config set ai.openai.key sk-...          # or: ai.anthropic.key
+netpro outreach --to jane@stripe.com \
+  --context "met at React Conf after the WASM talk" \
+  --purpose "a 15-minute call about OSS collab" --tone warm
+
+# Someone not in your network yet:
+netpro outreach --name "Pat Lee" --email pat@newco.com --company NewCo --role CTO
+netpro outreach --to "Jane Doe" --json           # scriptable JSON output
+```
+
+The web app drafts from the **Outreach** page (`/outreach`, backed by
+`POST /api/outreach`) — pick a contact or fill in a new recipient, choose a
+tone, and add context. Configure the server with `AI_PROVIDER`,
+`OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`), optionally `OPENAI_BASE_URL` for an
+OpenAI-compatible endpoint, and `OPENAI_MODEL`/`ANTHROPIC_MODEL` overrides; the
+**Settings** page shows which integrations are configured. Batch campaigns and
+actual email delivery (SMTP) are planned for a later release.
+
 ## Verify everything
 
 ```bash

@@ -13,7 +13,13 @@ import {
   type RecipientInput,
 } from "@netpro/core/src/ai";
 
-const LIMITS = { context: 2000, purpose: 500, name: 200, company: 200, role: 200 };
+const LIMITS = {
+  context: 2000,
+  purpose: 500,
+  name: 200,
+  company: 200,
+  role: 200,
+};
 
 interface OutreachRequestBody {
   contactId?: unknown;
@@ -48,7 +54,9 @@ function credentialsFromEnv(explicitProvider?: string) {
   const provider = explicitProvider ?? process.env.AI_PROVIDER;
   const model =
     process.env.AI_MODEL ??
-    (provider === "anthropic" ? process.env.ANTHROPIC_MODEL : process.env.OPENAI_MODEL);
+    (provider === "anthropic"
+      ? process.env.ANTHROPIC_MODEL
+      : process.env.OPENAI_MODEL);
   return {
     provider,
     openaiKey: process.env.OPENAI_API_KEY ?? null,
@@ -63,12 +71,21 @@ export async function POST(request: Request) {
   try {
     body = (await request.json()) as OutreachRequestBody;
   } catch {
-    return NextResponse.json({ error: "Request body must be JSON" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Request body must be JSON" },
+      { status: 400 },
+    );
   }
 
   try {
-    const tone = body.tone === undefined || body.tone === null ? "professional" : body.tone;
-    if (typeof tone !== "string" || !TONE_VALUES.includes(tone as OutreachTone)) {
+    const tone =
+      body.tone === undefined || body.tone === null
+        ? "professional"
+        : body.tone;
+    if (
+      typeof tone !== "string" ||
+      !TONE_VALUES.includes(tone as OutreachTone)
+    ) {
       return NextResponse.json(
         { error: `Invalid tone — expected one of: ${TONE_VALUES.join(", ")}` },
         { status: 400 },
@@ -102,7 +119,11 @@ export async function POST(request: Request) {
       recipient = {
         name: str(body.recipient.name, LIMITS.name, "recipient.name"),
         email: str(body.recipient.email, 320, "recipient.email"),
-        company: str(body.recipient.company, LIMITS.company, "recipient.company"),
+        company: str(
+          body.recipient.company,
+          LIMITS.company,
+          "recipient.company",
+        ),
         role: str(body.recipient.role, LIMITS.role, "recipient.role"),
       };
     } else {
@@ -144,6 +165,9 @@ export async function POST(request: Request) {
         { status: 502 },
       );
     }
-    return NextResponse.json({ error: (error as Error).message }, { status: 400 });
+    return NextResponse.json(
+      { error: (error as Error).message },
+      { status: 400 },
+    );
   }
 }

@@ -1,7 +1,7 @@
-import type { AiProvider, AiProviderId, ProviderConfig } from './types';
-import { AiProviderError } from './types';
-import { createOpenAiProvider } from './providers/openai';
-import { createAnthropicProvider } from './providers/anthropic';
+import type { AiProvider, AiProviderId, ProviderConfig } from "./types";
+import { AiProviderError } from "./types";
+import { createOpenAiProvider } from "./providers/openai";
+import { createAnthropicProvider } from "./providers/anthropic";
 
 /**
  * Resolved credentials for the AI providers. The CLI fills this from its
@@ -25,7 +25,7 @@ export function createAiProvider(
   config: ProviderConfig,
   fetchImpl?: typeof fetch,
 ): AiProvider {
-  return id === 'openai'
+  return id === "openai"
     ? createOpenAiProvider(config, fetchImpl)
     : createAnthropicProvider(config, fetchImpl);
 }
@@ -38,45 +38,56 @@ export function createAiProvider(
  * provider, OpenAI is preferred when its key is present, then Anthropic.
  * Throws `AiProviderError('not_configured')` when nothing usable is found.
  */
-export function resolveAiProvider(credentials: AiCredentials, fetchImpl?: typeof fetch): AiProvider {
+export function resolveAiProvider(
+  credentials: AiCredentials,
+  fetchImpl?: typeof fetch,
+): AiProvider {
   const provider = credentials.provider?.trim().toLowerCase() ?? null;
   const openaiKey = credentials.openaiKey?.trim() || null;
   const anthropicKey = credentials.anthropicKey?.trim() || null;
   const model = credentials.model?.trim() || undefined;
   const baseUrl = credentials.openaiBaseUrl?.trim() || undefined;
 
-  if (provider && provider !== 'openai' && provider !== 'anthropic') {
+  if (provider && provider !== "openai" && provider !== "anthropic") {
     throw new AiProviderError(
-      'not_configured',
+      "not_configured",
       `Unknown AI provider "${credentials.provider}". Expected "openai" or "anthropic".`,
     );
   }
 
-  if (provider === 'openai') {
-    if (!openaiKey) throw missingKeyError('openai');
-    return createOpenAiProvider({ apiKey: openaiKey, baseUrl, model }, fetchImpl);
+  if (provider === "openai") {
+    if (!openaiKey) throw missingKeyError("openai");
+    return createOpenAiProvider(
+      { apiKey: openaiKey, baseUrl, model },
+      fetchImpl,
+    );
   }
-  if (provider === 'anthropic') {
-    if (!anthropicKey) throw missingKeyError('anthropic');
+  if (provider === "anthropic") {
+    if (!anthropicKey) throw missingKeyError("anthropic");
     return createAnthropicProvider({ apiKey: anthropicKey, model }, fetchImpl);
   }
 
   // No explicit preference: prefer OpenAI, fall back to Anthropic.
-  if (openaiKey) return createOpenAiProvider({ apiKey: openaiKey, baseUrl, model }, fetchImpl);
-  if (anthropicKey) return createAnthropicProvider({ apiKey: anthropicKey, model }, fetchImpl);
+  if (openaiKey)
+    return createOpenAiProvider(
+      { apiKey: openaiKey, baseUrl, model },
+      fetchImpl,
+    );
+  if (anthropicKey)
+    return createAnthropicProvider({ apiKey: anthropicKey, model }, fetchImpl);
 
   throw new AiProviderError(
-    'not_configured',
-    'No AI provider key configured. Set one with ' +
+    "not_configured",
+    "No AI provider key configured. Set one with " +
       '"netpro config set ai.openai.key sk-..." (or ai.anthropic.key), ' +
-      'or set OPENAI_API_KEY / ANTHROPIC_API_KEY in the environment.',
+      "or set OPENAI_API_KEY / ANTHROPIC_API_KEY in the environment.",
   );
 }
 
 function missingKeyError(provider: AiProviderId): AiProviderError {
   return new AiProviderError(
-    'not_configured',
-    provider === 'openai'
+    "not_configured",
+    provider === "openai"
       ? 'AI provider set to "openai" but no OpenAI key found. Set one with ' +
           '"netpro config set ai.openai.key sk-..." or OPENAI_API_KEY in the environment.'
       : 'AI provider set to "anthropic" but no Anthropic key found. Set one with ' +

@@ -26,7 +26,15 @@ vi.mock("@/lib/db", () => {
       `INSERT INTO contacts (id, full_name, email, company, role, created_at, updated_at, source)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'test')`,
     )
-    .run("c1", "Jane Doe", "jane@stripe.com", "Stripe", "Senior Engineer", now, now);
+    .run(
+      "c1",
+      "Jane Doe",
+      "jane@stripe.com",
+      "Stripe",
+      "Senior Engineer",
+      now,
+      now,
+    );
   return { conn: { dialect: "sqlite", db, schema } };
 });
 
@@ -34,14 +42,24 @@ vi.mock("@/lib/db", () => {
 // return a fixed valid completion.
 vi.stubGlobal(
   "fetch",
-  vi.fn(async () =>
-    ({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{ message: { content: JSON.stringify({ subject: "Hi Jane", body: "Saw your work at Stripe." }) } }],
-      }),
-    }) as Response,
+  vi.fn(
+    async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  subject: "Hi Jane",
+                  body: "Saw your work at Stripe.",
+                }),
+              },
+            },
+          ],
+        }),
+      }) as Response,
   ),
 );
 
@@ -66,7 +84,11 @@ describe("POST /api/outreach", () => {
   });
 
   it("drafts for a stored contact and returns the draft shape", async () => {
-    const res = await post({ contactId: "c1", tone: "warm", context: "React Conf" });
+    const res = await post({
+      contactId: "c1",
+      tone: "warm",
+      context: "React Conf",
+    });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       subject: string;
@@ -83,7 +105,9 @@ describe("POST /api/outreach", () => {
   });
 
   it("drafts for an ad-hoc recipient", async () => {
-    const res = await post({ recipient: { name: "Pat", email: "pat@x.com", company: "NewCo" } });
+    const res = await post({
+      recipient: { name: "Pat", email: "pat@x.com", company: "NewCo" },
+    });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { subject: string };
     expect(body.subject).toBe("Hi Jane");
@@ -119,7 +143,10 @@ describe("POST /api/outreach", () => {
   it("400s on invalid input (bad email shape, oversize context)", async () => {
     const badEmail = await post({ recipient: { email: "not-an-email" } });
     expect(badEmail.status).toBe(400);
-    const tooLong = await post({ recipient: { name: "Pat" }, context: "x".repeat(2001) });
+    const tooLong = await post({
+      recipient: { name: "Pat" },
+      context: "x".repeat(2001),
+    });
     expect(tooLong.status).toBe(400);
   });
 
@@ -135,8 +162,13 @@ describe("POST /api/outreach", () => {
 
   it("returns ai_upstream_error (502) when the provider call fails", async () => {
     const fetchMock = vi.mocked(fetch);
-    fetchMock.mockImplementationOnce(async () =>
-      ({ ok: false, status: 429, json: async () => ({ error: { message: "rate limited" } }) }) as Response,
+    fetchMock.mockImplementationOnce(
+      async () =>
+        ({
+          ok: false,
+          status: 429,
+          json: async () => ({ error: { message: "rate limited" } }),
+        }) as Response,
     );
     const res = await post({ contactId: "c1" });
     expect(res.status).toBe(502);

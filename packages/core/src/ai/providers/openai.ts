@@ -1,8 +1,13 @@
-import type { AiCompletionOptions, AiProvider, ChatMessage, ProviderConfig } from '../types';
-import { AiProviderError } from '../types';
+import type {
+  AiCompletionOptions,
+  AiProvider,
+  ChatMessage,
+  ProviderConfig,
+} from "../types";
+import { AiProviderError } from "../types";
 
-export const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini';
-export const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1';
+export const OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
+export const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
 type FetchImpl = typeof fetch;
 
@@ -12,20 +17,29 @@ type FetchImpl = typeof fetch;
  * Uses global `fetch` — no SDK dependency, mirroring the enrichment
  * providers. `fetchImpl` is injectable for offline tests.
  */
-export function createOpenAiProvider(config: ProviderConfig, fetchImpl: FetchImpl = fetch): AiProvider {
-  const baseUrl = (config.baseUrl ?? OPENAI_DEFAULT_BASE_URL).replace(/\/+$/, '');
+export function createOpenAiProvider(
+  config: ProviderConfig,
+  fetchImpl: FetchImpl = fetch,
+): AiProvider {
+  const baseUrl = (config.baseUrl ?? OPENAI_DEFAULT_BASE_URL).replace(
+    /\/+$/,
+    "",
+  );
   const defaultModel = config.model ?? OPENAI_DEFAULT_MODEL;
 
   return {
-    id: 'openai',
-    label: 'OpenAI',
+    id: "openai",
+    label: "OpenAI",
     defaultModel,
 
-    async complete(messages: ChatMessage[], options?: AiCompletionOptions): Promise<string> {
+    async complete(
+      messages: ChatMessage[],
+      options?: AiCompletionOptions,
+    ): Promise<string> {
       const response = await fetchImpl(`${baseUrl}/chat/completions`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
           Authorization: `Bearer ${config.apiKey}`,
         },
         body: JSON.stringify({
@@ -39,7 +53,7 @@ export function createOpenAiProvider(config: ProviderConfig, fetchImpl: FetchImp
 
       if (!response.ok) {
         throw new AiProviderError(
-          'upstream_error',
+          "upstream_error",
           `OpenAI request failed: ${response.status}${await extractError(response)}`,
         );
       }
@@ -48,8 +62,11 @@ export function createOpenAiProvider(config: ProviderConfig, fetchImpl: FetchImp
         choices?: Array<{ message?: { content?: string } }>;
       };
       const content = json.choices?.[0]?.message?.content;
-      if (typeof content !== 'string' || content.trim().length === 0) {
-        throw new AiProviderError('invalid_response', 'OpenAI returned an empty completion');
+      if (typeof content !== "string" || content.trim().length === 0) {
+        throw new AiProviderError(
+          "invalid_response",
+          "OpenAI returned an empty completion",
+        );
       }
       return content;
     },
@@ -59,8 +76,8 @@ export function createOpenAiProvider(config: ProviderConfig, fetchImpl: FetchImp
 async function extractError(response: Response): Promise<string> {
   try {
     const json = (await response.json()) as { error?: { message?: string } };
-    return json.error?.message ? ` ${json.error.message}` : '';
+    return json.error?.message ? ` ${json.error.message}` : "";
   } catch {
-    return '';
+    return "";
   }
 }

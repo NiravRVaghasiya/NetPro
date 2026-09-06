@@ -1,6 +1,6 @@
-import { execFileSync } from 'node:child_process';
-import type { Command } from 'commander';
-import type { SqliteConn, PgConn } from '@netpro/db';
+import { execFileSync } from "node:child_process";
+import type { Command } from "commander";
+import type { SqliteConn, PgConn } from "@netpro/db";
 import {
   composeOutreachMessage,
   resolveAiProvider,
@@ -12,8 +12,8 @@ import {
   type OutreachDraft,
   type OutreachTone,
   type RecipientInput,
-} from '@netpro/core/src/ai';
-import { Keychain } from '../config/keychain';
+} from "@netpro/core/src/ai";
+import { Keychain } from "../config/keychain";
 
 export interface OutreachCommandOptions {
   // Recipient from the database:
@@ -37,7 +37,7 @@ export interface OutreachExecutionInput {
   /** Selector for a contact in the database, or undefined for ad-hoc. */
   selector?: string;
   adHoc?: RecipientInput;
-  compose: Omit<ComposeOutreachInput, 'recipient'>;
+  compose: Omit<ComposeOutreachInput, "recipient">;
 }
 
 /**
@@ -45,10 +45,14 @@ export interface OutreachExecutionInput {
  * resolution happens later, against the database). `--to` is mutually
  * exclusive with the ad-hoc recipient flags.
  */
-export function toOutreachInput(opts: OutreachCommandOptions): OutreachExecutionInput {
-  const tone = (opts.tone ?? 'professional') as OutreachTone;
+export function toOutreachInput(
+  opts: OutreachCommandOptions,
+): OutreachExecutionInput {
+  const tone = (opts.tone ?? "professional") as OutreachTone;
   if (!TONE_VALUES.includes(tone)) {
-    throw new Error(`Unknown --tone "${opts.tone}". Expected one of: ${TONE_VALUES.join(', ')}.`);
+    throw new Error(
+      `Unknown --tone "${opts.tone}". Expected one of: ${TONE_VALUES.join(", ")}.`,
+    );
   }
 
   const adHocFlags = [opts.email, opts.name, opts.company, opts.role].filter(
@@ -60,7 +64,9 @@ export function toOutreachInput(opts: OutreachCommandOptions): OutreachExecution
 
   if (opts.to) {
     if (adHocFlags.length > 0) {
-      throw new Error('--to picks a contact from your database and cannot be combined with --email/--name/--company/--role.');
+      throw new Error(
+        "--to picks a contact from your database and cannot be combined with --email/--name/--company/--role.",
+      );
     }
     selector = opts.to.trim();
   } else if (adHocFlags.length > 0) {
@@ -71,7 +77,9 @@ export function toOutreachInput(opts: OutreachCommandOptions): OutreachExecution
       role: opts.role?.trim() || undefined,
     };
   } else {
-    throw new Error('Provide a recipient: --to <email|id|name> for one of your contacts, or ad-hoc --name/--email/--company/--role.');
+    throw new Error(
+      "Provide a recipient: --to <email|id|name> for one of your contacts, or ad-hoc --name/--email/--company/--role.",
+    );
   }
 
   return {
@@ -82,7 +90,7 @@ export function toOutreachInput(opts: OutreachCommandOptions): OutreachExecution
       tone,
       context: opts.context?.trim() || undefined,
       purpose: opts.purpose?.trim() || undefined,
-      provider: opts.provider as ComposeOutreachInput['provider'],
+      provider: opts.provider as ComposeOutreachInput["provider"],
       model: opts.model?.trim() || undefined,
     },
   };
@@ -91,7 +99,9 @@ export function toOutreachInput(opts: OutreachCommandOptions): OutreachExecution
 /** Best-effort git user name, used as the sender when nothing is configured. */
 function gitUserName(): string | undefined {
   try {
-    const out = execFileSync('git', ['config', 'user.name'], { encoding: 'utf-8' }).trim();
+    const out = execFileSync("git", ["config", "user.name"], {
+      encoding: "utf-8",
+    }).trim();
     return out || undefined;
   } catch {
     return undefined;
@@ -101,13 +111,14 @@ function gitUserName(): string | undefined {
 /** Read AI credentials from the encrypted keychain with env fallbacks. */
 async function readCredentials(providerFlag?: string) {
   const [keychainProvider, openaiKey, anthropicKey] = await Promise.all([
-    Keychain.get('ai.provider'),
-    Keychain.get('ai.openai.key'),
-    Keychain.get('ai.anthropic.key'),
+    Keychain.get("ai.provider"),
+    Keychain.get("ai.openai.key"),
+    Keychain.get("ai.anthropic.key"),
   ]);
-  const senderKeychain = await Keychain.get('user.name');
+  const senderKeychain = await Keychain.get("user.name");
 
-  const provider = providerFlag?.trim() || process.env.AI_PROVIDER || keychainProvider;
+  const provider =
+    providerFlag?.trim() || process.env.AI_PROVIDER || keychainProvider;
   return {
     credentials: {
       provider,
@@ -116,7 +127,9 @@ async function readCredentials(providerFlag?: string) {
       openaiBaseUrl: process.env.OPENAI_BASE_URL || null,
       model:
         process.env.AI_MODEL ||
-        (provider === 'anthropic' ? process.env.ANTHROPIC_MODEL : process.env.OPENAI_MODEL) ||
+        (provider === "anthropic"
+          ? process.env.ANTHROPIC_MODEL
+          : process.env.OPENAI_MODEL) ||
         null,
     },
     sender: senderKeychain?.trim() || gitUserName(),
@@ -147,7 +160,9 @@ export async function executeOutreach(
     model: input.compose.model ?? credentials.model ?? undefined,
   });
 
-  const draft: OutreachDraft = await composeOutreachMessage(composeInput, { provider });
+  const draft: OutreachDraft = await composeOutreachMessage(composeInput, {
+    provider,
+  });
 
   if (opts.json) {
     return JSON.stringify(draft, null, 2);
@@ -157,22 +172,39 @@ export async function executeOutreach(
 
 export function registerOutreachCommand(program: Command): void {
   program
-    .command('outreach')
-    .description('Draft an AI-composed outreach message (NetPro drafts — you send)')
-    .option('--to <email|id|name>', 'recipient from your contacts (exact email/id or unique full name)')
-    .option('--email <email>', 'ad-hoc recipient email (for someone not in your contacts)')
-    .option('--name <name>', 'ad-hoc recipient name')
-    .option('--company <company>', 'ad-hoc recipient company')
-    .option('--role <role>', 'ad-hoc recipient role')
-    .option('--context <text>', 'context for why you are reaching out')
-    .option('--purpose <text>', 'the ask, e.g. "a 15-minute call about OSS collab"')
-    .option('--tone <tone>', `tone: ${TONE_VALUES.join(' | ')}`, 'professional')
-    .option('--sender <name>', 'your name for the sign-off (default: config user.name → git)')
-    .option('--provider <provider>', 'openai | anthropic (default: keychain ai.provider / AI_PROVIDER)')
-    .option('--model <model-id>', 'override the provider default model')
-    .option('--json', 'emit the draft as JSON')
+    .command("outreach")
+    .description(
+      "Draft an AI-composed outreach message (NetPro drafts — you send)",
+    )
+    .option(
+      "--to <email|id|name>",
+      "recipient from your contacts (exact email/id or unique full name)",
+    )
+    .option(
+      "--email <email>",
+      "ad-hoc recipient email (for someone not in your contacts)",
+    )
+    .option("--name <name>", "ad-hoc recipient name")
+    .option("--company <company>", "ad-hoc recipient company")
+    .option("--role <role>", "ad-hoc recipient role")
+    .option("--context <text>", "context for why you are reaching out")
+    .option(
+      "--purpose <text>",
+      'the ask, e.g. "a 15-minute call about OSS collab"',
+    )
+    .option("--tone <tone>", `tone: ${TONE_VALUES.join(" | ")}`, "professional")
+    .option(
+      "--sender <name>",
+      "your name for the sign-off (default: config user.name → git)",
+    )
+    .option(
+      "--provider <provider>",
+      "openai | anthropic (default: keychain ai.provider / AI_PROVIDER)",
+    )
+    .option("--model <model-id>", "override the provider default model")
+    .option("--json", "emit the draft as JSON")
     .action(async (options: OutreachCommandOptions) => {
-      const { openDb } = await import('../db');
+      const { openDb } = await import("../db");
       try {
         const output = await executeOutreach(options, await openDb());
         console.log(output);

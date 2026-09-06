@@ -1,12 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import * as schema from '@netpro/db/src/schema.sqlite';
-import type { SqliteConn } from '@netpro/db';
-import { resolveContactRef, contactToRecipientInput } from './resolve-contact';
+import { describe, it, expect, beforeEach } from "vitest";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import * as schema from "@netpro/db/src/schema.sqlite";
+import type { SqliteConn } from "@netpro/db";
+import { resolveContactRef, contactToRecipientInput } from "./resolve-contact";
 
 function createTestConn(): SqliteConn {
-  const sqlite = new Database(':memory:');
+  const sqlite = new Database(":memory:");
   const db = drizzle(sqlite, { schema });
   sqlite.exec(`
     CREATE TABLE contacts (
@@ -20,7 +20,7 @@ function createTestConn(): SqliteConn {
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
     );
   `);
-  return { dialect: 'sqlite', db, schema };
+  return { dialect: "sqlite", db, schema };
 }
 
 interface Seed {
@@ -33,10 +33,32 @@ interface Seed {
 }
 
 const SEED: Seed[] = [
-  { id: 'uuid-1', fullName: 'Jane Doe', email: 'jane@stripe.com', company: 'Stripe', role: 'Engineer' },
-  { id: 'uuid-2', fullName: 'John Smith', email: 'john@vercel.com', company: 'Vercel', role: 'Designer' },
-  { id: 'uuid-3', fullName: 'Jane Doe', email: 'jane.doe@example.com', company: 'Acme' },
-  { id: 'uuid-4', fullName: 'Ghost User', email: 'ghost@nowhere.com', deletedAt: '2026-01-01T00:00:00Z' },
+  {
+    id: "uuid-1",
+    fullName: "Jane Doe",
+    email: "jane@stripe.com",
+    company: "Stripe",
+    role: "Engineer",
+  },
+  {
+    id: "uuid-2",
+    fullName: "John Smith",
+    email: "john@vercel.com",
+    company: "Vercel",
+    role: "Designer",
+  },
+  {
+    id: "uuid-3",
+    fullName: "Jane Doe",
+    email: "jane.doe@example.com",
+    company: "Acme",
+  },
+  {
+    id: "uuid-4",
+    fullName: "Ghost User",
+    email: "ghost@nowhere.com",
+    deletedAt: "2026-01-01T00:00:00Z",
+  },
 ];
 
 async function seed(conn: SqliteConn): Promise<void> {
@@ -48,7 +70,7 @@ async function seed(conn: SqliteConn): Promise<void> {
       email: s.email ?? null,
       company: s.company ?? null,
       role: s.role ?? null,
-      source: 'test',
+      source: "test",
       createdAt: now,
       updatedAt: now,
       deletedAt: s.deletedAt ?? null,
@@ -56,52 +78,60 @@ async function seed(conn: SqliteConn): Promise<void> {
   }
 }
 
-describe('resolveContactRef', () => {
+describe("resolveContactRef", () => {
   let conn: SqliteConn;
   beforeEach(async () => {
     conn = createTestConn();
     await seed(conn);
   });
 
-  it('resolves by exact email', async () => {
-    const ref = await resolveContactRef(conn, 'john@vercel.com');
-    expect(ref.id).toBe('uuid-2');
-    expect(ref.fullName).toBe('John Smith');
+  it("resolves by exact email", async () => {
+    const ref = await resolveContactRef(conn, "john@vercel.com");
+    expect(ref.id).toBe("uuid-2");
+    expect(ref.fullName).toBe("John Smith");
   });
 
-  it('resolves by id', async () => {
-    const ref = await resolveContactRef(conn, 'uuid-2');
-    expect(ref.email).toBe('john@vercel.com');
+  it("resolves by id", async () => {
+    const ref = await resolveContactRef(conn, "uuid-2");
+    expect(ref.email).toBe("john@vercel.com");
   });
 
-  it('resolves by unique full name (case-insensitive, trimmed)', async () => {
-    const ref = await resolveContactRef(conn, '  john smith ');
-    expect(ref.id).toBe('uuid-2');
+  it("resolves by unique full name (case-insensitive, trimmed)", async () => {
+    const ref = await resolveContactRef(conn, "  john smith ");
+    expect(ref.id).toBe("uuid-2");
   });
 
-  it('errors and lists candidates when the name is ambiguous', async () => {
-    await expect(resolveContactRef(conn, 'Jane Doe')).rejects.toThrow(/Ambiguous contact/);
-    await expect(resolveContactRef(conn, 'Jane Doe')).rejects.toThrow(/jane@stripe\.com/);
-    await expect(resolveContactRef(conn, 'Jane Doe')).rejects.toThrow(/jane\.doe@example\.com/);
+  it("errors and lists candidates when the name is ambiguous", async () => {
+    await expect(resolveContactRef(conn, "Jane Doe")).rejects.toThrow(
+      /Ambiguous contact/,
+    );
+    await expect(resolveContactRef(conn, "Jane Doe")).rejects.toThrow(
+      /jane@stripe\.com/,
+    );
+    await expect(resolveContactRef(conn, "Jane Doe")).rejects.toThrow(
+      /jane\.doe@example\.com/,
+    );
   });
 
-  it('errors with a hint when nothing matches', async () => {
-    await expect(resolveContactRef(conn, 'nobody@nowhere.com')).rejects.toThrow(
+  it("errors with a hint when nothing matches", async () => {
+    await expect(resolveContactRef(conn, "nobody@nowhere.com")).rejects.toThrow(
       /No contact matches "nobody@nowhere\.com"/,
     );
   });
 
-  it('excludes soft-deleted contacts', async () => {
-    await expect(resolveContactRef(conn, 'ghost@nowhere.com')).rejects.toThrow(/No contact matches/);
+  it("excludes soft-deleted contacts", async () => {
+    await expect(resolveContactRef(conn, "ghost@nowhere.com")).rejects.toThrow(
+      /No contact matches/,
+    );
   });
 
-  it('maps a contact to recipient input for the engine', () => {
+  it("maps a contact to recipient input for the engine", () => {
     const input = contactToRecipientInput({
-      id: 'uuid-2',
-      fullName: 'John Smith',
-      email: 'john@vercel.com',
-      company: 'Vercel',
-      role: 'Designer',
+      id: "uuid-2",
+      fullName: "John Smith",
+      email: "john@vercel.com",
+      company: "Vercel",
+      role: "Designer",
       headline: null,
       location: null,
       industry: null,
@@ -110,10 +140,10 @@ describe('resolveContactRef', () => {
       notes: null,
     });
     expect(input).toEqual({
-      name: 'John Smith',
-      email: 'john@vercel.com',
-      company: 'Vercel',
-      role: 'Designer',
+      name: "John Smith",
+      email: "john@vercel.com",
+      company: "Vercel",
+      role: "Designer",
       headline: undefined,
       location: undefined,
       industry: undefined,

@@ -1,9 +1,14 @@
-import type { AiCompletionOptions, AiProvider, ChatMessage, ProviderConfig } from '../types';
-import { AiProviderError } from '../types';
+import type {
+  AiCompletionOptions,
+  AiProvider,
+  ChatMessage,
+  ProviderConfig,
+} from "../types";
+import { AiProviderError } from "../types";
 
-export const ANTHROPIC_DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
-export const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
-export const ANTHROPIC_API_VERSION = '2023-06-01';
+export const ANTHROPIC_DEFAULT_MODEL = "claude-haiku-4-5-20251001";
+export const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+export const ANTHROPIC_API_VERSION = "2023-06-01";
 
 type FetchImpl = typeof fetch;
 
@@ -12,29 +17,35 @@ type FetchImpl = typeof fetch;
  * a top-level `system` field rather than as a message, so system messages are
  * split out here. Raw `fetch`, injectable for tests, no SDK dependency.
  */
-export function createAnthropicProvider(config: ProviderConfig, fetchImpl: FetchImpl = fetch): AiProvider {
+export function createAnthropicProvider(
+  config: ProviderConfig,
+  fetchImpl: FetchImpl = fetch,
+): AiProvider {
   const defaultModel = config.model ?? ANTHROPIC_DEFAULT_MODEL;
 
   return {
-    id: 'anthropic',
-    label: 'Anthropic',
+    id: "anthropic",
+    label: "Anthropic",
     defaultModel,
 
-    async complete(messages: ChatMessage[], options?: AiCompletionOptions): Promise<string> {
+    async complete(
+      messages: ChatMessage[],
+      options?: AiCompletionOptions,
+    ): Promise<string> {
       const system = messages
-        .filter((m) => m.role === 'system')
+        .filter((m) => m.role === "system")
         .map((m) => m.content)
-        .join('\n\n');
+        .join("\n\n");
       const convo = messages
-        .filter((m) => m.role !== 'system')
+        .filter((m) => m.role !== "system")
         .map((m) => ({ role: m.role, content: m.content }));
 
       const response = await fetchImpl(config.baseUrl ?? ANTHROPIC_API_URL, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': config.apiKey,
-          'anthropic-version': ANTHROPIC_API_VERSION,
+          "Content-Type": "application/json",
+          "x-api-key": config.apiKey,
+          "anthropic-version": ANTHROPIC_API_VERSION,
         },
         body: JSON.stringify({
           model: options?.model ?? defaultModel,
@@ -48,7 +59,7 @@ export function createAnthropicProvider(config: ProviderConfig, fetchImpl: Fetch
 
       if (!response.ok) {
         throw new AiProviderError(
-          'upstream_error',
+          "upstream_error",
           `Anthropic request failed: ${response.status}${await extractError(response)}`,
         );
       }
@@ -57,12 +68,15 @@ export function createAnthropicProvider(config: ProviderConfig, fetchImpl: Fetch
         content?: Array<{ type?: string; text?: string }>;
       };
       const text = json.content
-        ?.filter((block) => block.type === 'text')
-        .map((block) => block.text ?? '')
-        .join('')
+        ?.filter((block) => block.type === "text")
+        .map((block) => block.text ?? "")
+        .join("")
         .trim();
       if (!text) {
-        throw new AiProviderError('invalid_response', 'Anthropic returned an empty completion');
+        throw new AiProviderError(
+          "invalid_response",
+          "Anthropic returned an empty completion",
+        );
       }
       return text;
     },
@@ -72,8 +86,8 @@ export function createAnthropicProvider(config: ProviderConfig, fetchImpl: Fetch
 async function extractError(response: Response): Promise<string> {
   try {
     const json = (await response.json()) as { error?: { message?: string } };
-    return json.error?.message ? ` ${json.error.message}` : '';
+    return json.error?.message ? ` ${json.error.message}` : "";
   } catch {
-    return '';
+    return "";
   }
 }
