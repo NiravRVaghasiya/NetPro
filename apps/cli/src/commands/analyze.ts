@@ -2,7 +2,6 @@ import type { Command } from "commander";
 import type { SqliteConn, PgConn } from "@netpro/db";
 import {
   getNetworkOverview,
-  type AnalyticsOptions,
   type NetworkOverview,
   type ScoreBreakdown,
   type TopValue,
@@ -33,7 +32,7 @@ function parseNumber(
 /** Build the core analytics options from CLI flags, validating as we go. */
 export function toAnalyzeOptions(
   opts: AnalyzeCommandOptions,
-): AnalyticsOptions {
+): { dormantDays: number; limit: number } {
   return {
     dormantDays: parseNumber(opts.days, "days") ?? 90,
     limit: parseNumber(opts.limit, "limit") ?? 10,

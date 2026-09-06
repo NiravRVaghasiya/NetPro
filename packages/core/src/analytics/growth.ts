@@ -45,6 +45,9 @@ export async function getGrowthSummary(
   const cutoff30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const cutoff60 = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString();
 
+  // `buckets` is built by the loop above and is never empty (growthMonths >= 1).
+  const oldestBucket = buckets[0]!;
+
   for (const row of rows) {
     const created = row.createdAt;
     // Bucket by UTC month key; anything older than the window feeds the
@@ -52,11 +55,11 @@ export async function getGrowthSummary(
     const mk = monthKey(new Date(`${created.slice(0, 10)}T00:00:00.000Z`));
     const idx = bucketIndex.get(mk);
     if (idx === undefined) {
-      if (mk < buckets[0]) before += 1;
+      if (mk < oldestBucket) before += 1;
       // A month key newer than `now`'s month (clock skew / bad data) has no
       // bucket and no baseline — ignore it rather than corrupting either.
     } else {
-      counts[idx] += 1;
+      counts[idx] = (counts[idx] ?? 0) + 1;
     }
     if (created >= cutoff30) {
       last30 += 1;
@@ -68,8 +71,11 @@ export async function getGrowthSummary(
   const series: GrowthPoint[] = [];
   let cumulative = before;
   for (let i = 0; i < buckets.length; i += 1) {
-    cumulative += counts[i];
-    series.push({ month: buckets[i], count: counts[i], cumulative });
+    // Indexes are bounded by buckets.length by construction.
+    const month = buckets[i]!;
+    const count = counts[i] ?? 0;
+    cumulative += count;
+    series.push({ month, count, cumulative });
   }
 
   return {

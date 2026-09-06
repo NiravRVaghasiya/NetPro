@@ -131,7 +131,7 @@ describe("executeAnalyze", () => {
     expect(out).toMatch(/Diversity: [\d.]+ effective industry/);
     expect(out).toMatch(/Growth \(last 30 days\): \+\d+/);
     expect(out).toMatch(/2026-\d{2} │/); // growth chart rows
-    expect(out).toMatch(/Top companies:\n\s+stripe  2/);
+    expect(out).toMatch(/Top companies:\n\s+stripe {2}2/);
     expect(out).toMatch(/Clusters \(contacts grouped by company\):/);
     expect(out).toMatch(/Stripe — 2 contacts/);
     expect(out).toMatch(/Dormant ties \(no known interaction in 90\+ days/);

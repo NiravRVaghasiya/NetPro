@@ -291,15 +291,15 @@ describe("analytics / clusters", () => {
     ]);
     const clusters = await detectClusters(conn, OPTS);
     expect(clusters).toHaveLength(2);
-    expect(clusters[0].key).toBe("stripe");
-    expect(clusters[0].label).toBe("Stripe");
-    expect(clusters[0].size).toBe(3);
-    expect(clusters[0].share).toBeCloseTo(0.5);
-    expect(clusters[0].topRoles).toEqual([
+    expect(clusters[0]!.key).toBe("stripe");
+    expect(clusters[0]!.label).toBe("Stripe");
+    expect(clusters[0]!.size).toBe(3);
+    expect(clusters[0]!.share).toBeCloseTo(0.5);
+    expect(clusters[0]!.topRoles).toEqual([
       { value: "engineer", count: 2, share: expect.closeTo(2 / 3) },
       { value: "designer", count: 1, share: expect.closeTo(1 / 3) },
     ]);
-    expect(clusters[1]).toMatchObject({ key: "vercel", size: 1 });
+    expect(clusters[1]!).toMatchObject({ key: "vercel", size: 1 });
   });
 
   it("orders clusters by size desc and respects the limit", async () => {
@@ -326,9 +326,9 @@ describe("analytics / dormant", () => {
     ]);
     const dormant = await getDormantContacts(conn, OPTS);
     expect(dormant.map((d) => d.id)).toEqual(["older", "hi-score", "lo-score"]);
-    expect(dormant[0].daysSince).toBe(200);
-    expect(dormant[1].daysSince).toBe(100);
-    expect(dormant[0].lastInteraction).toBe(iso(200));
+    expect(dormant[0]!.daysSince).toBe(200);
+    expect(dormant[1]!.daysSince).toBe(100);
+    expect(dormant[0]!.lastInteraction).toBe(iso(200));
   });
 
   it("uses the connection date for never-interacted contacts and reports null lastInteraction", async () => {
@@ -339,9 +339,9 @@ describe("analytics / dormant", () => {
     ]);
     const dormant = await getDormantContacts(conn, OPTS);
     expect(dormant).toHaveLength(1);
-    expect(dormant[0].id).toBe("old-never");
-    expect(dormant[0].lastInteraction).toBeNull();
-    expect(dormant[0].daysSince).toBe(150);
+    expect(dormant[0]!.id).toBe("old-never");
+    expect(dormant[0]!.lastInteraction).toBeNull();
+    expect(dormant[0]!.daysSince).toBe(150);
   });
 });
 
@@ -366,8 +366,8 @@ describe("analytics / overview", () => {
       { value: "stripe", count: 2, share: expect.closeTo(2 / 3) },
       { value: "vercel", count: 1, share: expect.closeTo(1 / 3) },
     ]);
-    expect(o.topIndustries[0]).toMatchObject({ value: "fintech", count: 2 });
-    expect(o.clusters[0]).toMatchObject({ key: "stripe", size: 2 });
+    expect(o.topIndustries[0]!).toMatchObject({ value: "fintech", count: 2 });
+    expect(o.clusters[0]!).toMatchObject({ key: "stripe", size: 2 });
     expect(o.dormant.map((d) => d.id)).toEqual(["c"]);
     expect(o.generatedAt).toBe(NOW.toISOString());
   });

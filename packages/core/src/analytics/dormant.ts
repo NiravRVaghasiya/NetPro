@@ -9,6 +9,8 @@
 // exactly the population LinkedIn Premium's "keep in touch" surface exists
 // for. Filtering, ordering, and limiting happen in SQL; the fragment is plain
 // ANSI (ISO-8601 TEXT comparisons) so SQLite and Postgres behave identically.
+// Drizzle's typed builders need dialect-narrowed columns, so — same as the
+// search executor — the WHERE/ORDER fragments are rebuilt per branch.
 import { sql } from "drizzle-orm";
 import type { SqliteConn, PgConn } from "@netpro/db";
 import {
@@ -19,14 +21,29 @@ import {
   type DormantContact,
 } from "./types";
 
-interface DormantRow {
-  id: string;
-  fullName: string;
-  company: string | null;
-  role: string | null;
-  relationshipScore: number | null;
-  lastInteraction: string | null;
-  createdAt: string;
+/** Map a DB row to the DormantContact shape (dialect-agnostic). */
+function toDormant(
+  now: Date,
+  row: {
+    id: string;
+    fullName: string;
+    company: string | null;
+    role: string | null;
+    relationshipScore: number | null;
+    lastInteraction: string | null;
+    createdAt: string;
+  },
+): DormantContact {
+  const touch = row.lastInteraction ?? row.createdAt;
+  return {
+    id: row.id,
+    fullName: row.fullName,
+    company: row.company,
+    role: row.role,
+    relationshipScore: row.relationshipScore,
+    lastInteraction: row.lastInteraction,
+    daysSince: daysBetween(now, touch),
+  };
 }
 
 /**
@@ -41,43 +58,49 @@ export async function getDormantContacts(
 ): Promise<DormantContact[]> {
   const { dormantDays, limit, now } = resolveAnalyticsOptions(options);
   const cutoff = daysAgoIso(now, dormantDays);
-  const c = conn.schema.contacts;
 
-  const selection = {
-    id: c.id,
-    fullName: c.fullName,
-    company: c.company,
-    role: c.role,
-    relationshipScore: c.relationshipScore,
-    lastInteraction: c.lastInteraction,
-    createdAt: c.createdAt,
-  };
-  const where = sql`${c.deletedAt} IS NULL AND coalesce(${c.lastInteraction}, ${c.createdAt}) < ${cutoff}`;
-  const order = sql`coalesce(${c.lastInteraction}, ${c.createdAt}) asc, ${c.relationshipScore} desc`;
-
-  let rows: DormantRow[];
   if (conn.dialect === "sqlite") {
-    rows = await conn.db
-      .select(selection)
+    const c = conn.schema.contacts;
+    const rows = await conn.db
+      .select({
+        id: c.id,
+        fullName: c.fullName,
+        company: c.company,
+        role: c.role,
+        relationshipScore: c.relationshipScore,
+        lastInteraction: c.lastInteraction,
+        createdAt: c.createdAt,
+      })
       .from(c)
-      .where(where)
-      .orderBy(order)
+      .where(
+        sql`${c.deletedAt} IS NULL AND coalesce(${c.lastInteraction}, ${c.createdAt}) < ${cutoff}`,
+      )
+      .orderBy(
+        sql`coalesce(${c.lastInteraction}, ${c.createdAt}) asc, ${c.relationshipScore} desc`,
+      )
       .limit(limit)
       .all();
-  } else {
-    rows = await conn.db.select(selection).from(c).where(where).orderBy(order).limit(limit);
+    return rows.map((row) => toDormant(now, row));
   }
 
-  return rows.map((row) => {
-    const touch = row.lastInteraction ?? row.createdAt;
-    return {
-      id: row.id,
-      fullName: row.fullName,
-      company: row.company,
-      role: row.role,
-      relationshipScore: row.relationshipScore,
-      lastInteraction: row.lastInteraction,
-      daysSince: daysBetween(now, touch),
-    };
-  });
+  const c = conn.schema.contacts;
+  const rows = await conn.db
+    .select({
+      id: c.id,
+      fullName: c.fullName,
+      company: c.company,
+      role: c.role,
+      relationshipScore: c.relationshipScore,
+      lastInteraction: c.lastInteraction,
+      createdAt: c.createdAt,
+    })
+    .from(c)
+    .where(
+      sql`${c.deletedAt} IS NULL AND coalesce(${c.lastInteraction}, ${c.createdAt}) < ${cutoff}`,
+    )
+    .orderBy(
+      sql`coalesce(${c.lastInteraction}, ${c.createdAt}) asc, ${c.relationshipScore} desc`,
+    )
+    .limit(limit);
+  return rows.map((row) => toDormant(now, row));
 }

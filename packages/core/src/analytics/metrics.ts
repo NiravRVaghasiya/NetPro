@@ -35,30 +35,42 @@ export interface ProjectedContact {
 
 /**
  * Load the analytics projection: every non-deleted contact, seven columns.
- * Soft-deleted rows are always excluded (same rule as search).
+ * Soft-deleted rows are always excluded (same rule as search). Drizzle's
+ * typed builders need dialect-narrowed columns, so the identical select is
+ * written per branch — the queries themselves are ANSI-portable.
  */
 export async function projectContacts(
   conn: SqliteConn | PgConn,
 ): Promise<ProjectedContact[]> {
-  const c = conn.schema.contacts;
-  const selection = {
-    id: c.id,
-    company: c.company,
-    industry: c.industry,
-    role: c.role,
-    relationshipScore: c.relationshipScore,
-    lastInteraction: c.lastInteraction,
-    createdAt: c.createdAt,
-  };
-
   if (conn.dialect === "sqlite") {
+    const c = conn.schema.contacts;
     return conn.db
-      .select(selection)
+      .select({
+        id: c.id,
+        company: c.company,
+        industry: c.industry,
+        role: c.role,
+        relationshipScore: c.relationshipScore,
+        lastInteraction: c.lastInteraction,
+        createdAt: c.createdAt,
+      })
       .from(c)
       .where(isNull(c.deletedAt));
   }
 
-  return conn.db.select(selection).from(c).where(isNull(c.deletedAt));
+  const c = conn.schema.contacts;
+  return conn.db
+    .select({
+      id: c.id,
+      company: c.company,
+      industry: c.industry,
+      role: c.role,
+      relationshipScore: c.relationshipScore,
+      lastInteraction: c.lastInteraction,
+      createdAt: c.createdAt,
+    })
+    .from(c)
+    .where(isNull(c.deletedAt));
 }
 
 /** A contact's last known touchpoint: its interaction date, else when the relationship was acquired. */

@@ -15,7 +15,7 @@ const PROTECTED_ROUTES = [
 ];
 // Data API routes return 401 JSON (not a redirect) per the Security & Auth
 // Architecture blueprint's §1.4 "API Route Protection" pattern.
-const API_ROUTES = ["/api/import", "/api/export", "/api/enrich", "/api/search"];
+const API_ROUTES = ["/api/import", "/api/export", "/api/enrich", "/api/search", "/api/analytics"];
 const PUBLIC_ROUTES = ["/login", "/card", "/api/auth", "/api/health"];
 
 export default auth((req) => {

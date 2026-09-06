@@ -136,7 +136,7 @@ export function parseLinkedInDate(raw: string | undefined): string | undefined {
   // matching on the first three letters covers both case-insensitively.
   const dmy = /^(\d{1,2})\s+([A-Za-z]{3,})\.?,?\s+(\d{4})$/.exec(value);
   if (dmy) {
-    const month = MONTHS[dmy[2].slice(0, 3).toLowerCase()];
+    const month = MONTHS[dmy[2]!.slice(0, 3).toLowerCase()];
     const d = utcDate(Number(dmy[3]), month ?? -1, Number(dmy[1]));
     return d ? d.toISOString() : undefined;
   }
@@ -144,7 +144,7 @@ export function parseLinkedInDate(raw: string | undefined): string | undefined {
   // Long-form: MMMM D, YYYY (e.g. "January 5, 2024")
   const mdy = /^([A-Za-z]{3,})\.?\s+(\d{1,2}),\s*(\d{4})$/.exec(value);
   if (mdy) {
-    const month = MONTHS[mdy[1].slice(0, 3).toLowerCase()];
+    const month = MONTHS[mdy[1]!.slice(0, 3).toLowerCase()];
     const d = utcDate(Number(mdy[3]), month ?? -1, Number(mdy[2]));
     return d ? d.toISOString() : undefined;
   }

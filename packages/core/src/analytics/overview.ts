@@ -30,7 +30,7 @@ export async function getNetworkOverview(
   conn: SqliteConn | PgConn,
   options: AnalyticsOptions = {},
 ): Promise<NetworkOverview> {
-  const { limit, now } = resolveAnalyticsOptions(options);
+  const { now } = resolveAnalyticsOptions(options);
 
   const [metrics, growth, clusters, dormant, rows] = await Promise.all([
     computeNetworkMetrics(conn, options),
