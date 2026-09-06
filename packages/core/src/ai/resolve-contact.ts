@@ -125,6 +125,51 @@ export async function resolveContactRef(
   );
 }
 
+/** Fetch a single non-deleted contact by id, or null when not found. */
+export async function getContactById(
+  conn: SqliteConn | PgConn,
+  id: string,
+): Promise<ContactRef | null> {
+  if (conn.dialect === 'sqlite') {
+    const t = conn.schema.contacts;
+    const rows = await conn.db
+      .select({
+        id: t.id,
+        fullName: t.fullName,
+        email: t.email,
+        company: t.company,
+        role: t.role,
+        headline: t.headline,
+        location: t.location,
+        industry: t.industry,
+        linkedinUrl: t.linkedinUrl,
+        githubUrl: t.githubUrl,
+        notes: t.notes,
+      })
+      .from(t)
+      .where(and(isNull(t.deletedAt), eq(t.id, id.trim())));
+    return (rows[0] ?? null) as ContactRef | null;
+  }
+  const t = conn.schema.contacts;
+  const rows = await conn.db
+    .select({
+      id: t.id,
+      fullName: t.fullName,
+      email: t.email,
+      company: t.company,
+      role: t.role,
+      headline: t.headline,
+      location: t.location,
+      industry: t.industry,
+      linkedinUrl: t.linkedinUrl,
+      githubUrl: t.githubUrl,
+      notes: t.notes,
+    })
+    .from(t)
+    .where(and(isNull(t.deletedAt), eq(t.id, id.trim())));
+  return (rows[0] ?? null) as ContactRef | null;
+}
+
 /** Map a stored contact to the recipient facts used by the outreach engine. */
 export function contactToRecipientInput(ref: ContactRef): RecipientInput {
   return {
