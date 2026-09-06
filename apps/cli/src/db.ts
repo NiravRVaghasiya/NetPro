@@ -56,9 +56,6 @@ export async function openDb(): Promise<SqliteConn | PgConn> {
     return conn;
   }
 
-  await migratePg(conn.db, {
-    migrationsFolder: migrationsFolder('postgresql'),
-    schema: conn.schema,
-  });
+  await migratePg(conn.db, { migrationsFolder: migrationsFolder('postgresql') });
   return conn;
 }

@@ -62,6 +62,6 @@ export async function register() {
   if (conn.dialect === 'sqlite') {
     migrateSqlite(conn.db, { migrationsFolder });
   } else {
-    await migratePg(conn.db, { migrationsFolder, schema: conn.schema });
+    await migratePg(conn.db, { migrationsFolder });
   }
 }
