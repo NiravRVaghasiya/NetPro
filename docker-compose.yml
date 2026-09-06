@@ -5,16 +5,51 @@ services:
       - "3000:3000"
     environment:
       - DB_DIALECT=postgresql
-      - DATABASE_URL=postgresql://netpro:${POSTGRES_PASSWORD}@db:5432/netpro
+      # The compose network is private and this Postgres has no TLS, so
+      # sslmode=disable is explicit rather than left to driver defaults.
+      - DATABASE_URL=postgresql://netpro:${POSTGRES_PASSWORD}@db:5432/netpro?sslmode=disable
       - NEXTAUTH_URL=${APP_URL:-http://localhost:3000}
+      # Auth.js v5 derives host trust from AUTH_URL/AUTH_TRUST_HOST — NOT from
+      # NEXTAUTH_URL. Without one of these, every authenticated request fails
+      # in production with "UntrustedHost". NetPro also infers trust from a
+      # configured NEXTAUTH_URL (apps/web/lib/trust-host.ts); this is belt and
+      # braces, and documents the requirement for anyone reading the compose file.
+      - AUTH_URL=${APP_URL:-http://localhost:3000}
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
       - NETPRO_OWNER_GITHUB_ID=${NETPRO_OWNER_GITHUB_ID}
+      # Enrichment / AI are bring-your-own-key and optional; unset means the
+      # provider is skipped, not an error.
+      - HUNTER_API_KEY=${HUNTER_API_KEY:-}
+      - PDL_API_KEY=${PDL_API_KEY:-}
+      - CLEARBIT_API_KEY=${CLEARBIT_API_KEY:-}
+      - AI_PROVIDER=${AI_PROVIDER:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
+      # Migrations run to completion in their own container before the app
+      # starts, so the web service never performs DDL on a request path.
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
+
+  # One-shot migration job. Uses the same image and the same `netpro migrate`
+  # command an operator runs by hand, so the deploy path cannot drift from the
+  # documented one. `docker compose up` re-runs it on each start; it is
+  # idempotent and exits 0 when there is nothing to do.
+  migrate:
+    build: .
+    command: ["node", "/app/apps/cli/dist/index.js", "migrate"]
+    environment:
+      - DB_DIALECT=postgresql
+      - DATABASE_URL=postgresql://netpro:${POSTGRES_PASSWORD}@db:5432/netpro?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
 
   db:
     image: postgres:16-alpine
@@ -24,14 +59,21 @@ services:
       - POSTGRES_DB=netpro
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    # NOT published to the host by default. The web service reaches Postgres
+    # over the private compose network, so binding 5432 on the host only
+    # widens the attack surface — on a cloud VM without a firewall that
+    # exposes the database to the internet. Uncomment for local inspection.
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+    expose:
+      - "5432"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U netpro"]
+      test: ["CMD-SHELL", "pg_isready -U netpro -d netpro"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
 volumes:
   postgres_data:

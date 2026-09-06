@@ -33,7 +33,12 @@ coverage/
 # Database
 *.db
 *.db-journal
+# SQLite WAL mode (enabled in packages/db) writes these sidecar files.
+*.db-shm
+*.db-wal
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # IDE
 .vscode/*

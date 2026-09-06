@@ -1,7 +1,7 @@
 // apps/web/lib/auth.config.ts
 //
-// EDGE-SAFE: this file is consumed by middleware.ts, which Next.js compiles
-// for the Edge Runtime. Do NOT import ./db, ./auth, @netpro/db, or
+// EDGE-SAFE: this file is consumed by proxy.ts (renamed from middleware.ts in
+// Phase 6 for the Next.js 16 convention), the request boundary. Do NOT import ./db, ./auth, @netpro/db, or
 // @auth/drizzle-adapter here (or anything that transitively imports them) —
 // any of those pull in better-sqlite3, a native addon the Edge Runtime can't
 // bundle, and the build will fail with a "Module not found" error tracing
@@ -9,8 +9,16 @@
 // Task 10 Step 6.
 import type { NextAuthConfig } from "next-auth";
 import { isOwnerGitHubId } from "./owner";
+import { resolveTrustHost } from "./trust-host";
+
+const trustHost = resolveTrustHost();
 
 export const authConfig = {
+  // Auth.js v5 does NOT infer host trust from NEXTAUTH_URL — only from
+  // AUTH_URL/AUTH_TRUST_HOST/VERCEL/CF_PAGES/non-production NODE_ENV. Without
+  // this, a self-hosted production deploy configured exactly as NetPro's docs
+  // describe fails every request with UntrustedHost. See ./trust-host.ts.
+  ...(trustHost === undefined ? {} : { trustHost }),
   pages: {
     signIn: "/login",
     error: "/login",

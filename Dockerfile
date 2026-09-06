@@ -51,7 +51,10 @@ RUN apk add --no-cache libc6-compat
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build -w apps/web
+# Build the CLI too: the compose stack runs `netpro migrate` as a one-shot
+# migration job before the web service starts, so the deploy path uses the
+# exact same command an operator runs by hand.
+RUN npm run build -w apps/web && npm run build -w apps/cli
 
 # ── Stage 3: Production runner ──
 FROM node:20-alpine AS runner
@@ -67,6 +70,17 @@ RUN addgroup --system --gid 1001 netpro && adduser --system --uid 1001 netpro
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
+# The bundled CLI plus the native drivers it needs at runtime. tsup marks
+# better-sqlite3 and pg as external (they cannot be bundled), so they must be
+# present in node_modules for `netpro migrate` to run in this image.
+COPY --from=builder /app/apps/cli/dist ./apps/cli/dist
+COPY --from=builder /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
+COPY --from=builder /app/node_modules/bindings ./node_modules/bindings
+COPY --from=builder /app/node_modules/file-uri-to-path ./node_modules/file-uri-to-path
+COPY --from=builder /app/node_modules/pg ./node_modules/pg
+# Next.js's standalone output already places the workspace packages (and the
+# committed migration SQL) at /app/packages/db, which is one of the resolver's
+# candidate paths, so no extra copy of the migrations is needed here.
 
 USER netpro
 EXPOSE 3000
