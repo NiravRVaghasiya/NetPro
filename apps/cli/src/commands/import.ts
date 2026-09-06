@@ -29,9 +29,9 @@ export function registerImportCommand(program: Command): void {
     .description('Import connections from LinkedIn, GitHub, or a manual source')
     .option('--linkedin <path>', 'Path to a LinkedIn connections CSV export')
     .action(async (options: ImportCommandOptions) => {
-      const { createDb } = await import('@netpro/db');
+      const { openDb } = await import('../db');
       try {
-        const output = await executeImport(options, createDb());
+        const output = await executeImport(options, await openDb());
         console.log(output);
       } catch (e) {
         console.error(`netpro import: ${(e as Error).message}`);

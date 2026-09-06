@@ -74,9 +74,9 @@ export function registerEnrichCommand(program: Command): void {
     .option('--source <source>', 'hunter | pdl | clearbit | all', 'all')
     .option('--force', 'bypass the cache and re-fetch from providers')
     .action(async (options: EnrichCommandOptions) => {
-      const { createDb } = await import('@netpro/db');
+      const { openDb } = await import('../db');
       try {
-        const output = await executeEnrich(options, createDb());
+        const output = await executeEnrich(options, await openDb());
         console.log(output);
       } catch (e) {
         console.error(`netpro enrich: ${(e as Error).message}`);

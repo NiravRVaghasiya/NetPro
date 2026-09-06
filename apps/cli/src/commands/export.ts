@@ -45,9 +45,9 @@ export function registerExportCommand(program: Command): void {
     .option('--format <format>', 'csv (only format supported in this phase)', 'csv')
     .option('--output <path>', 'Write to a file instead of stdout')
     .action(async (options: ExportCommandOptions) => {
-      const { createDb } = await import('@netpro/db');
+      const { openDb } = await import('../db');
       try {
-        const { output } = await executeExport(options, createDb());
+        const { output } = await executeExport(options, await openDb());
         console.log(output);
       } catch (e) {
         console.error(`netpro export: ${(e as Error).message}`);
