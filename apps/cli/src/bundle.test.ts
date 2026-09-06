@@ -91,4 +91,24 @@ describe('CLI bundle runtime dependencies', () => {
       expect(dockerfile).toMatch(new RegExp(`COPY[^\\n]*node_modules/${dep}\\s`));
     }
   });
+
+  it('resolves a commander new enough to provide .argument()', async () => {
+    // npm nests commander@14 under apps/cli/node_modules because tsup's own
+    // sucrase dependency takes the root slot with commander@4. The Docker
+    // builder originally copied only the root node_modules, so tsup bundled
+    // v4 and the image died with "config.command(...).argument is not a
+    // function" — .argument() landed in commander@9.
+    //
+    // Assert the capability rather than the version string: commander@14's
+    // `exports` map deliberately hides package.json, and the behaviour is
+    // what actually matters here.
+    const { Command } = await import('commander');
+    expect(typeof new Command('x').command('sub').argument).toBe('function');
+  });
+
+  it('builds the CLI with the whole workspace install available', () => {
+    // Guards the copy that makes the above resolution possible in the image.
+    const dockerfile = readFileSync(resolve(here, '../../../Dockerfile'), 'utf8');
+    expect(dockerfile).toMatch(/COPY --from=deps \/app\/apps \.\/apps/);
+  });
 });

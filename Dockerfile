@@ -48,13 +48,32 @@ WORKDIR /app
 # compatibility shims they may probe for. Harmless to include even though it
 # was not, by itself, the fix for the segfault described above.
 RUN apk add --no-cache libc6-compat
+# Copy the *whole* installed layout, not just the root node_modules. npm
+# workspaces nest a dependency under apps/<pkg>/node_modules whenever the
+# hoisted root copy would conflict, and commander is exactly that case:
+# tsup's own sucrase dependency pins commander@4, which wins the root slot,
+# so the CLI's commander@14 is installed at apps/cli/node_modules/commander.
+#
+# Copying only ./node_modules silently left the builder with commander@4.
+# tsup resolved that, bundled it, and the image failed at runtime with
+# "TypeError: config.command(...).argument is not a function" — .argument()
+# was added in commander@9. Copying the workspace directories keeps whatever
+# npm ci actually resolved, with no per-package list to keep in sync.
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps ./apps
+COPY --from=deps /app/packages ./packages
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 # Build the CLI too: the compose stack runs `netpro migrate` as a one-shot
 # migration job before the web service starts, so the deploy path uses the
 # exact same command an operator runs by hand.
 RUN npm run build -w apps/web && npm run build -w apps/cli
+# Fail the build, not the container, if the bundled CLI is broken. Both bugs
+# fixed here (a missing external, then a bundled commander@4) produced an
+# image that built cleanly and only died when `netpro migrate` ran. `--help`
+# exercises module resolution and the full command tree without a database.
+RUN node apps/cli/dist/index.js --help > /dev/null \
+  && node apps/cli/dist/index.js config --help > /dev/null
 
 # ── Stage 3: Production runner ──
 FROM node:20-alpine AS runner
