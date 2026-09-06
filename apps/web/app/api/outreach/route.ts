@@ -45,12 +45,16 @@ function str(value: unknown, max: number, field: string): string | undefined {
 
 /** Read AI credentials from the server environment (host-configured BYO key). */
 function credentialsFromEnv(explicitProvider?: string) {
+  const provider = explicitProvider ?? process.env.AI_PROVIDER;
+  const model =
+    process.env.AI_MODEL ??
+    (provider === "anthropic" ? process.env.ANTHROPIC_MODEL : process.env.OPENAI_MODEL);
   return {
-    provider: explicitProvider ?? process.env.AI_PROVIDER,
+    provider,
     openaiKey: process.env.OPENAI_API_KEY ?? null,
     anthropicKey: process.env.ANTHROPIC_API_KEY ?? null,
     openaiBaseUrl: process.env.OPENAI_BASE_URL ?? null,
-    model: undefined as string | undefined,
+    model: model || undefined,
   };
 }
 

@@ -107,12 +107,17 @@ async function readCredentials(providerFlag?: string) {
   ]);
   const senderKeychain = await Keychain.get('user.name');
 
+  const provider = providerFlag?.trim() || process.env.AI_PROVIDER || keychainProvider;
   return {
     credentials: {
-      provider: providerFlag?.trim() || process.env.AI_PROVIDER || keychainProvider,
+      provider,
       openaiKey: process.env.OPENAI_API_KEY || openaiKey,
       anthropicKey: process.env.ANTHROPIC_API_KEY || anthropicKey,
       openaiBaseUrl: process.env.OPENAI_BASE_URL || null,
+      model:
+        process.env.AI_MODEL ||
+        (provider === 'anthropic' ? process.env.ANTHROPIC_MODEL : process.env.OPENAI_MODEL) ||
+        null,
     },
     sender: senderKeychain?.trim() || gitUserName(),
   };
@@ -139,6 +144,7 @@ export async function executeOutreach(
     ...input.compose,
     recipient,
     senderName: input.compose.senderName ?? sender,
+    model: input.compose.model ?? credentials.model ?? undefined,
   });
 
   const draft: OutreachDraft = await composeOutreachMessage(composeInput, { provider });
