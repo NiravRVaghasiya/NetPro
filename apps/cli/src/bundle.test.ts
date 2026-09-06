@@ -55,12 +55,13 @@ function externalImports(source: string): string[] {
   for (const pattern of patterns) {
     for (const match of code.matchAll(pattern)) {
       const specifier = match[1];
+      if (!specifier) continue;
       if (specifier.startsWith('.') || specifier.startsWith('/')) continue;
       if (builtins.has(specifier)) continue;
       // Compare on package name so subpaths map to their owning package.
       const parts = specifier.split('/');
       const pkg = specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
-      specifiers.add(pkg);
+      if (pkg) specifiers.add(pkg);
     }
   }
 
