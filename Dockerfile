@@ -70,11 +70,20 @@ RUN addgroup --system --gid 1001 netpro && adduser --system --uid 1001 netpro
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
-# The bundled CLI plus the native drivers it needs at runtime. tsup marks
-# better-sqlite3 and pg as external (they cannot be bundled), so they must be
-# present in node_modules for `netpro migrate` to run in this image.
+# The bundled CLI plus the native drivers it needs at runtime. tsup inlines
+# every pure-JS dependency (commander, drizzle-orm, @netpro/*) into
+# dist/index.js and marks only better-sqlite3 and pg as external, because
+# those two cannot be bundled: better-sqlite3 is a native addon, and pg is
+# CommonJS that resolves its backends dynamically. Only they need to exist in
+# node_modules for `netpro migrate` to run in this image.
+#
+# Keep this list in sync with `external` in apps/cli/tsup.config.ts. An earlier
+# revision left commander and drizzle-orm unbundled but never copied them here,
+# so the image built fine and then died at runtime with ERR_MODULE_NOT_FOUND.
+# apps/cli/src/bundle.test.ts now asserts both ends of that contract.
 COPY --from=builder /app/apps/cli/dist ./apps/cli/dist
 COPY --from=builder /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
+# bindings and file-uri-to-path are better-sqlite3's own runtime requires.
 COPY --from=builder /app/node_modules/bindings ./node_modules/bindings
 COPY --from=builder /app/node_modules/file-uri-to-path ./node_modules/file-uri-to-path
 COPY --from=builder /app/node_modules/pg ./node_modules/pg
