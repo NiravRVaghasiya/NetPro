@@ -7,6 +7,19 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
 
 ## [Unreleased]
 
+### Added — v2.0 Phase 5: Skills gap analyzer
+
+- Additive `0005` migration adds a portable `contacts.skills` JSON/text column
+  for derived skill verdicts without changing imported source data.
+- New offline-first `@netpro/core/skills` module extracts only skills from a
+  bounded, explainable taxonomy and computes present, partial, missing, and
+  match-score results for a target role or description.
+- Network aggregation reports which contacts can fill each required skill;
+  no AI key or network request is required.
+- Added `netpro skills --role ... --description ...` and
+  `netpro skills --contact ...`, plus owner-only `GET /api/skills/gap` and
+  the `/skills` page.
+
 ### Added — v2.0 Phase 4: Hybrid search
 
 - Additive migration `0004` (both dialects) turns `search_index` into a real

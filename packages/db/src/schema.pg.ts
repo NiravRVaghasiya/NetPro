@@ -34,6 +34,8 @@ export const contacts = pgTable('contacts', {
   tags: text('tags'),
   customFields: text('custom_fields'),
   notes: text('notes'),
+  /** Derived, explainable skills from Phase 5; JSON array of taxonomy names. */
+  skills: text('skills'),
 
   relationshipScore: real('relationship_score').default(0),
   lastInteraction: text('last_interaction'),

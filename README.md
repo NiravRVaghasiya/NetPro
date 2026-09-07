@@ -138,8 +138,13 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   `search` block in the owner-only health payload. **Configuring nothing
   changes nothing**: no index → substring search, no key → no semantic arm,
   provider down → keyword results with a stated reason rather than an error.
-- Still ahead in v2.0: the skills gap analyzer, the event matcher, and the
-  release cut. The blueprint also lists real SMTP delivery
+- **Phase 5 — Skills gap analyzer (in progress):** an offline-first bounded
+  taxonomy extracts skills from contact fields and compares a target role or
+  description against the network. `netpro skills`, `/skills`, and
+  `GET /api/skills/gap` report present, partial, missing, and network coverage
+  results. Derived skills have an additive `contacts.skills` column; AI
+  extraction and editing/persistence UX remain follow-up work.
+- Still ahead in v2.0: the event matcher and the release cut. The blueprint also lists real SMTP delivery
 for campaigns as optional follow-up work (NetPro drafts today; a human sends).
 Per-user encrypted web key storage and the `$EDITOR` draft-review loop remain
 deferred and are documented in the
