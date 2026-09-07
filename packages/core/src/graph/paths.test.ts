@@ -3,6 +3,7 @@
 // (pending vs confirmed, confidence, soft-deletes) is enforced at the SQL
 // filter, not in JS.
 import { afterAll, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
 import { createTestSqliteConn } from '@netpro/db/src/testing';
 import { findIntroPaths, shortestPaths } from './paths';
 import { GraphError } from './types';
@@ -106,6 +107,18 @@ describe('findIntroPaths (DB)', () => {
     expect(path.path[1]!.via!.minConfidence).toBe(1);
     expect(path.path[0]!.via).toBeNull();
     expect(path.path[2]!.fullName).toBe('Cara');
+    // v2.0 Phase 3 — every node carries recency so surfaces can show
+    // "score / last touch" per hop.
+    expect(path.path[1]!.lastInteraction).toBeNull();
+    await fixture.conn.db
+      .update(fixture.conn.schema.contacts)
+      .set({ lastInteraction: '2026-09-01T00:00:00.000Z', relationshipScore: 0.75 })
+      .where(eq(fixture.conn.schema.contacts.id, 'b'));
+    const again = await findIntroPaths(fixture.conn, 'a', 'c');
+    expect(again.paths[0]!.path[1]).toMatchObject({
+      lastInteraction: '2026-09-01T00:00:00.000Z',
+      relationshipScore: 0.75,
+    });
   });
 
   it('excludes pending edges by default and includes them via status=all', async () => {

@@ -6,6 +6,7 @@ import { registerEnrichCommand } from './commands/enrich';
 import { registerSearchCommand } from './commands/search';
 import { registerOutreachCommand } from './commands/outreach';
 import { registerAnalyzeCommand } from './commands/analyze';
+import { registerPathCommand } from './commands/path';
 import { registerTrackCommand } from './commands/track';
 import { registerEdgeCommand } from './commands/edge';
 import { registerCampaignCommand } from './commands/campaign';
@@ -28,6 +29,7 @@ export function createProgram(): Command {
   registerSearchCommand(program);
   registerOutreachCommand(program);
   registerAnalyzeCommand(program);
+  registerPathCommand(program);
   registerTrackCommand(program);
   registerEdgeCommand(program);
   registerCampaignCommand(program);

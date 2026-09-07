@@ -46,6 +46,18 @@ describe("proxy route boundaries", () => {
     expect(run(path).status).toBe(401);
   });
 
+  it.each(["/graph", "/graph/some-contact-id"])("redirects %s to login when signed out (v2.0 Phase 3)", (path) => {
+    expect(run(path).status).toBe(307);
+    expect(run(path).headers.get("location")).toBe("https://netpro.example/login");
+    expect(run(path, true).status).toBe(200);
+  });
+
+  it("protects the graph APIs with 401 and permits the owner", () => {
+    expect(run("/api/graph/paths?target=x").status).toBe(401);
+    expect(run("/api/graph/overview").status).toBe(401);
+    expect(run("/api/graph/paths?target=x", true).status).toBe(200);
+  });
+
   it("redirects the private editor to login and permits authenticated requests", () => {
     expect(run("/settings/card").status).toBe(307);
     expect(run("/settings/card").headers.get("location")).toBe(

@@ -7,7 +7,7 @@
 [![Release: v1.5.0](https://img.shields.io/badge/Release-v1.5.0-2ea44f)](https://github.com/NiravRVaghasiya/NetPro/releases)
 [![Changelog](https://img.shields.io/badge/Changelog-CHANGELOG.md-8A2BE2)](CHANGELOG.md)
 
-**v1.0 (Phases 1–6), v1.5 (Phases 7–8), and v2.0 Phases 1–2 are
+**v1.0 (Phases 1–6), v1.5 (Phases 7–8), and v2.0 Phases 1–3 are
 implemented** on top of the v0.1-alpha scaffold:
 
 - **Phase 1 — Import, Enrichment & Export:** LinkedIn CSV import with
@@ -96,7 +96,7 @@ implemented** on top of the v0.1-alpha scaffold:
 > See [owner authentication setup](docs/getting-started.md#configure-owner-sign-in).
 
 The full monorepo (CLI + web, dual-dialect Drizzle database, GitHub OAuth via
-Auth.js) builds, lints, typechecks, and tests successfully — **698 tests**,
+Auth.js) builds, lints, typechecks, and tests successfully — **767 tests**,
 plus a live PostgreSQL integration suite that runs in CI against a real
 database. **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
 reminders, and batch campaigns are implemented, and per-contact relationship
@@ -114,23 +114,35 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   `graph` payload of `GET /api/analytics`, and a “Network graph” strip on
   `/dashboard`. Over-budget graphs degrade with documented notices, never
   silent zeroes.
-- Still ahead in v2.0: the pathfinder surface (`/graph`, `netpro path`,
-  draft-the-intro), hybrid search (FTS5 + pgvector + RRF), the skills gap
+- **Phase 3 — Pathfinder surface (shipped):** `netpro path <target>` resolves
+  selectors (or defaults to your strongest tie), ranks the k-shortest chains
+  by relationship strength (0.6 × weakest-tie + 0.4 × mean hop strength), and
+  names the first ask — with `--draft` handing that ask to the Phase 4 AI
+  composer (draft-only, as ever). The web app got `/graph` (target picker +
+  ranked chain cards + one-click "Draft intro request" that pre-fills the
+  outreach composer), `/graph/<contactId>` (centrality, community, adjacency
+  incl. pending rows), and the owner-only APIs `GET /api/graph/paths` +
+  `GET /api/graph/overview`. Chains are ranked; **you** pick the intermediary
+  — the plan's auto-pick stays deferred.
+- Still ahead in v2.0: hybrid search (FTS5 + pgvector + RRF), the skills gap
   analyzer, the event matcher, and the release cut. The blueprint also lists real SMTP delivery
 for campaigns as optional follow-up work (NetPro drafts today; a human sends).
 Per-user encrypted web key storage and the `$EDITOR` draft-review loop remain
 deferred and are documented in the
 [Phase 4 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase4-ai-outreach-design.md).
 
-> **Analytics scope note:** as of v2.0 Phase 2 the clustering story is
-> **two-section**: attribute clusters (normalized company) remain for
-> “who's where”, while the **Network graph** section is graph-native — Louvain
-> communities, centrality, components, average path length, and warm-intro
-> candidates over the confirmed `edges`. Inferred (pending) edges are excluded
-> until the owner confirms them. Phase 1's producers (`netpro edge`, CSV
-> mutuals as *pending* candidates, “also met at…” attendance) feed the graph;
-> per-contact **relationship scoring ships with the CRM (Phase 7)** and is
-> recomputed on every logged interaction.
+> **Analytics scope note:** the clustering story is **two-section** and, since
+> v2.0 Phase 3, graph-native end to end: attribute clusters (normalized
+> company) remain for “who's where”, while the **Network graph** section —
+> Louvain communities, centrality, components, average path length, warm-intro
+> candidates, and now the ranked pathfinder itself (`/graph`, `netpro path`,
+> `GET /api/graph/*`) — runs over the confirmed `edges`. Inferred (pending)
+> edges are excluded until the owner confirms them (every surface offers a
+> `--status all` / "confirmed + pending" preview). Phase 1's producers
+> (`netpro edge`, CSV mutuals as *pending* candidates, “also met at…”
+> attendance) feed the graph; per-contact **relationship scoring ships with
+> the CRM (Phase 7)**, is recomputed on every logged interaction, and since
+> Phase 3 is what ranks intro chains — recency + score appear on every hop.
 
 > **Search implementation note:** this is the v1 _portable_ search —
 > case-insensitive substring matching and facets in ANSI SQL that runs
@@ -153,9 +165,9 @@ for the draft-only campaign decisions.
 ## Structure
 
 - `apps/web` — Next.js app (App Router), Auth.js v5 with GitHub OAuth
-- `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|outreach|analyze|track|edge|campaign|export|card|migrate`)
+- `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|outreach|analyze|path|track|edge|campaign|export|card|migrate`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
-- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, and the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths)
+- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths), and the Phase 3 pathfinder surface (ranking, first-ask, per-contact graph position)
 - `packages/ui` — shared React components
 - `packages/config` — shared ESLint and Tailwind configs
 

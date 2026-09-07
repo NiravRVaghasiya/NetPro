@@ -32,6 +32,22 @@ export interface CommunitiesInfo {
   edges: number;
 }
 
+/** Dominant normalized company in a member set, else `Community N` (shared with position.ts). */
+export function communityLabel(graph: LoadedGraph, members: readonly string[], communityId: number): string {
+  const labelCounts = new Map<string, number>();
+  for (const id of members) {
+    const company = graph.nodes.get(id)?.company?.trim();
+    if (company) {
+      const key = company.toLowerCase();
+      labelCounts.set(key, (labelCounts.get(key) ?? 0) + 1);
+    }
+  }
+  return (
+    Array.from(labelCounts.entries()).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]?.[0] ??
+    `Community ${communityId + 1}`
+  );
+}
+
 /** Pure half — exported for tests and getNetworkGraph (one load). */
 export function communitiesOf(
   graph: LoadedGraph,
@@ -42,17 +58,7 @@ export function communitiesOf(
   const n = graph.nodes.size;
   const top: CommunityInfo[] = louvainResult.communities
     .map((members, communityId) => {
-      const labelCounts = new Map<string, number>();
-      for (const id of members) {
-        const company = graph.nodes.get(id)?.company?.trim();
-        if (company) {
-          const key = company.toLowerCase();
-          labelCounts.set(key, (labelCounts.get(key) ?? 0) + 1);
-        }
-      }
-      const label =
-        Array.from(labelCounts.entries()).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]?.[0] ??
-        `Community ${communityId + 1}`;
+      const label = communityLabel(graph, members, communityId);
       const preview = members.slice(0, memberCap).map((contactId) => ({
         contactId,
         fullName: graph.nodes.get(contactId)?.fullName ?? contactId,
