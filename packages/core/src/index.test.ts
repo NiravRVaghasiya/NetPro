@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as core from "./index";
 
 describe("@netpro/core module boundaries", () => {
-  it("exposes all nine feature modules", () => {
+  it("exposes all ten feature modules", () => {
     expect(typeof core.search.searchContacts).toBe("function");
     expect(typeof core.enrichment.EnrichmentPipeline).toBe("function");
     // Real since v1.0 Phase 3 (network analytics).
@@ -29,6 +29,13 @@ describe("@netpro/core module boundaries", () => {
     expect(typeof core.graph.listEdges).toBe("function");
     expect(typeof core.graph.recordEventAttendance).toBe("function");
     expect(core.graph.EDGE_RELATIONS).toContain("mutual_network");
+    // Real since v2.0 Phase 6 (event matcher).
+    expect(typeof core.events.importEvents).toBe("function");
+    expect(typeof core.events.matchAttendees).toBe("function");
+    expect(typeof core.events.recommendEvents).toBe("function");
+    expect(typeof core.events.getEvent).toBe("function");
+    expect(core.events.MODULE_NAME).toBe("events");
+    expect(core.events.DISABLED_EVENT_PROVIDER.enabled).toBe(false);
     expect(typeof core.importPipeline.runImport).toBe("function");
     expect(typeof core.exportPipeline.exportContactsCSV).toBe("function");
   });

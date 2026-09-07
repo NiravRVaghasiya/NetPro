@@ -404,5 +404,20 @@ describeIfPg('PostgreSQL integration', () => {
       expect(row?.embedding_dim).toBe(3);
       expect(JSON.parse(row!.embedding)).toEqual([0.125, -0.25, 0.5]);
     });
+
+    it('needs no pgvector — the semantic arm is portable JSON by design', async () => {
+      // v2.0 stores embeddings as JSON text rather than a `vector` column, so
+      // a managed Postgres without the extension (most of them) still runs
+      // hybrid search. A native column + ANN index is a later optimization,
+      // which means the *absence* of the extension is the supported path and
+      // has to stay that way. This asserts it against the whole server, not
+      // just the one table.
+      const { rows } = await searchConn.db.execute<{ extname: string }>(
+        sql`SELECT extname FROM pg_extension`
+      );
+      const names = rows.map((r) => r.extname);
+      expect(names).toContain('plpgsql');
+      expect(names).not.toContain('vector');
+    });
   });
 });

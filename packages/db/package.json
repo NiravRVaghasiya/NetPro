@@ -1,6 +1,6 @@
 {
   "name": "@netpro/db",
-  "version": "1.5.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -14,7 +14,7 @@
     "db:generate:postgres": "DB_DIALECT=postgresql drizzle-kit generate"
   },
   "dependencies": {
-    "@netpro/config": "^1.5.0",
+    "@netpro/config": "^2.0.0",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.23.0"

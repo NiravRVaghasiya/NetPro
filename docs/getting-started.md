@@ -288,6 +288,56 @@ current text no longer supports is drawn dashed with a `?`). The same data is
 available over the owner-only JSON APIs `GET /api/skills/gap?role=&description=&skills=[&contact=]`
 and `POST /api/skills/extract` (`{ mode?, contact?, dryRun? }`).
 
+## Events and who was there (v2.0 Phase 6)
+
+Import a conference roster and NetPro matches it against your contacts, so a
+contact list becomes "who I could see at this event" instead of a spreadsheet
+you never open again.
+
+```bash
+netpro events import events.csv               # name, location, starts_at, attendees
+netpro events list                            # every event + how many of yours went
+netpro events list --query conf --upcoming
+netpro events show "React Conf"               # id or exact name
+netpro events add "React Conf" --location Berlin --starts 2026-09-14
+netpro events link "React Conf" "Ada Lovelace" --role speaker
+netpro events unlink "React Conf" "Ada Lovelace"
+netpro events recommend                       # where to go next, with reasons
+netpro events rm "React Conf"
+```
+
+Columns are matched by name, so `Event Name`, `starts_at` and `Attendee
+Emails` all work; dates must be `YYYY-MM-DD` (an ambiguous `03/04/2026` is
+rejected rather than guessed) and the attendee cell can be emails or names
+separated by `,` `;` or `|`.
+
+Matching runs in three tiers and always tells you which one fired: **exact
+email** (1.0) and **exact name** (0.9) are linked; **last name + first
+initial** (0.6) is reported for your approval and only linked with `--review`.
+More than one plausible contact is `ambiguous` — you get the candidates and
+pick, NetPro never guesses. Lines that match nobody are parked on the event,
+so you can `netpro events match <event> --apply` after importing new contacts,
+or link them by hand in the UI.
+
+Two rules worth knowing:
+
+- **An attendee list is evidence of attendance, not of a meeting.** The
+  `met_at_event` edges an import creates are **pending** — confirm the ones
+  you believe on `/edges`. A manual `netpro events link` is `confirmed`,
+  because that is you speaking rather than an export file.
+- Pairwise linking is capped at 250 edges per event per run; when a large
+  event hits the cap the summary says so instead of quietly writing a
+  fraction.
+
+The web app has **Events** in the navigation (`/events`): the list with
+network overlap, **Where to go next** (ranked 0.6 × people you know, 0.2 ×
+industry fit, 0.2 × timing, each score explained), a CSV import panel that
+previews before it writes, and `/events/<id>` for the attendee list, the
+unmatched rows, and a re-check button. Each contact page now lists the events
+you crossed paths at. The data is also available over the owner-only JSON
+APIs `GET/POST /api/events`, `GET/DELETE /api/events/[id]`,
+`POST /api/events/[id]/match` and `POST/DELETE /api/events/[id]/attendees`.
+
 ## Draft AI outreach
 
 NetPro drafts personalized outreach from your contact data — **you** review and

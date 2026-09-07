@@ -1,6 +1,6 @@
 {
   "name": "@netpro/cli",
-  "version": "1.5.0",
+  "version": "2.0.0",
   "private": true,
   "description": "NetPro CLI \u2014 professional networking from your terminal",
   "type": "module",
@@ -24,9 +24,9 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
-    "@netpro/config": "^1.5.0",
-    "@netpro/core": "^1.5.0",
-    "@netpro/db": "^1.5.0",
+    "@netpro/config": "^2.0.0",
+    "@netpro/core": "^2.0.0",
+    "@netpro/db": "^2.0.0",
     "commander": "^14.0.3"
   }
 }

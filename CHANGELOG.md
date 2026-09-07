@@ -5,7 +5,55 @@ All notable changes to NetPro are documented here. The format is based on
 the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint.md)
 (`vX.Y` milestones, published as `X.Y.0` npm/GitHub versions).
 
-## [Unreleased]
+## [2.0.0] - 2026-09-08
+
+### Added — v2.0 Phase 6: Event matcher
+
+- No migration: Phase 1's `events` / `event_attendees` tables finally have a
+  producer. New `@netpro/core/events` module — CSV import, attendee matching,
+  overlap, and recommendations.
+- Import: alias-tolerant headers (`Event Name`, `starts_at`, `Attendee
+  Emails`, `names`…), attendees split on `, ; |` and newline, and dates
+  normalized to UTC ISO. Unparseable or ambiguous dates (`14/03/2026`,
+  `2026-02-31`) are **rejected per row** rather than guessed. Imports are
+  idempotent — events dedupe on normalized name, attendance on
+  `(event, contact)` — and support `--dry-run` / `{ dryRun: true }`.
+- Matching is three explainable tiers: exact email (1.0), exact name (0.9 —
+  accent-, case- and punctuation-insensitive), last name + first initial
+  (0.6, reported as `review` and never linked unless asked). Anything with
+  more than one plausible contact is `ambiguous` and is returned with its
+  candidates; a line whose email and name disagree is ambiguous too. No code
+  path picks between two people.
+- **Imported `met_at_event` edges are `pending`** (`source = event_import`):
+  an attendee list is evidence of attendance, not of a meeting. Manual links
+  (`netpro events link`, the web form) are `confirmed`. Pairwise linking is
+  capped at 250 edges per event per run and reports `edgeCapReached` when it
+  stops. Attendance for an event that has not started is recorded as
+  `planned` (`attended = false`).
+- Attendee lines that match nobody are parked per event in `activity_log`
+  (`action = events.unmatched`, replaced each run) — no new table — so they
+  can be re-checked after importing new contacts or linked by hand.
+- `recommendEvents` ranks events `0.6 × peers` (how many of your contacts
+  went; 5 saturates it) `+ 0.2 × industry` (share of your network in the
+  attendees' industries) `+ 0.2 × timing`, returns the reason for every
+  component, and drops empty past events. Timing is UTC-day granular so a
+  page cannot print "in 7d" and "starts in 6 days" for one event.
+- CLI (17th command): `netpro events list|show|add|import|match|link|unlink|
+  recommend|rm`, each with `--json`; event selectors take an id or an exact
+  name and refuse to guess between same-named events.
+- Web: `/events` (list, filters, **Where to go next** recommendations with
+  reasons, add form, CSV import panel that previews first and names ambiguous
+  rows), `/events/[id]` (attendee overlap strongest-tie first, industries and
+  companies, the unmatched bucket with per-row linking, a re-match panel, and
+  delete), an **Events** section on `/contacts/[id]`, an **Events** nav link,
+  `/events` in the proxy's protected routes, and the owner-only APIs
+  `GET/POST /api/events`, `GET/DELETE /api/events/[id]`,
+  `POST /api/events/[id]/match` and `POST/DELETE /api/events/[id]/attendees`.
+  `EventError` now maps to HTTP the way `CrmError` and `GraphError` do
+  (400 / 404 / 409; ambiguity is 400 everywhere).
+- Live event *discovery* (Luma/Eventbrite) is **not** shipped: it lands as a
+  `EventDiscoveryProvider` interface with a disabled default, so a provider
+  can be added later without touching the core, the CLI or the web.
 
 ### Added — v2.0 Phase 5: Skills gap analyzer
 
@@ -154,6 +202,43 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
 - CLI: `netpro edge add|list|rm|import|merge|confirm|reject`.
 - Web: `/edges`, `/api/edges`, contact-detail “Also met at…” panel.
 
+### Changed
+
+- Package versions moved from `1.5.0` to `2.0.0` across every workspace
+  package to mark the milestone release. The CLI already reported `2.0.0`;
+  the packages now agree with it. (Keeping `0.x` until an npm publish was the
+  alternative — the v1.5 precedent of publishing the product milestone as the
+  package version wins, so `netpro --version`, the tags and the packages all
+  tell the same story.)
+- `docs/deployment.md` gained operating notes for the v2.0 surfaces: the
+  skills taxonomy and its opt-in AI pass, event CSV import (what lands
+  `pending` and why), and graph sizing. `docs/getting-started.md` gained the
+  events cookbook.
+- CI's PostgreSQL job now also runs the v2.0 performance pass (5k contacts /
+  20k edges) and asserts that the semantic arm needs no `pgvector` extension.
+
+### Deferred — v2.0 deliberately does not ship
+
+- **Live event discovery.** No Luma/Eventbrite scraping and no provider API
+  calls: `EventDiscoveryProvider` ships as an interface with a disabled
+  default, so a provider can be added later without touching the core, the CLI
+  or the web.
+- **A native pgvector column.** Embeddings are stored as portable JSON text
+  and merged in the fusion step, so a managed Postgres without the extension
+  is a fully supported deployment. A `vector` column + ANN index remains a
+  later optimization, not a missing feature.
+- **AI skills extraction by default.** The offline heuristic taxonomy is the
+  product — explainable, with evidence per skill. `--mode ai` is opt-in per
+  run, restricted to the same taxonomy, and degrades to the heuristic result.
+- **Automatic graph caching or incremental recomputation.** The graph is
+  rebuilt per request; ~50k edges is the documented comfort ceiling, and
+  betweenness / exact average path length keep their own smaller node budgets.
+- **Real SMTP delivery for campaigns** (unchanged from v1.5): NetPro drafts, a
+  human sends. No stored mail credentials, no open/click/bounce tracking.
+- **Per-user encrypted web key storage and the `$EDITOR` draft-review loop** —
+  still deferred per the
+  [Phase 4 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase4-ai-outreach-design.md).
+
 ## [1.5.0] - 2026-09-07
 
 ### Added — Phase 7: CRM tracking & follow-up reminders
@@ -233,3 +318,4 @@ complete|archive|mark-sent|mark-replied|mark-skipped`.
 [0.1.0-alpha]: https://github.com/NiravRVaghasiya/NetPro/releases/tag/v0.1.0-alpha
 [1.0.0]: https://github.com/NiravRVaghasiya/NetPro/releases/tag/v1.0.0
 [1.5.0]: https://github.com/NiravRVaghasiya/NetPro/releases/tag/v1.5.0
+[2.0.0]: https://github.com/NiravRVaghasiya/NetPro/releases/tag/v2.0.0

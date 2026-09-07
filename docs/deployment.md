@@ -260,6 +260,67 @@ there and `--semantic` degrades to keyword with a note, not an error. Same if
 the embeddings API is down mid-request — you get keyword results and a reason,
 never a failed search.
 
+### Skills (v2.0 Phase 5)
+
+Skills are **derived, not typed in**. `netpro skills extract` (or
+`POST /api/skills/extract`) matches each contact's headline, role, tags, custom
+fields and notes against an embedded taxonomy — roughly 100 skills plus an
+alias table, whole-token matching — and stores the result on the contact with
+the field and snippet that produced every hit. Offline, no key, no network, no
+cost. Re-runs are idempotent and only write rows that actually changed.
+
+The AI pass is opt-in **per run**: `netpro skills extract --mode ai`, or
+`{ "mode": "ai" }` on `POST /api/skills/extract`. It reads the same BYO key as
+outreach — `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` in the server environment
+(never sent to the browser), or the CLI keychain
+(`netpro config set ai.openai.key sk-…`). It may only choose skills **from the
+same taxonomy** — a model cannot invent one — and when the call fails or no key
+is configured the run falls back to the heuristic result and says which it did.
+
+Gaps, coverage and per-skill evidence live on `/skills`, in
+`netpro skills [contact] | gap | status`, and in `GET /api/skills/gap`.
+
+### Events (v2.0 Phase 6)
+
+Import an attendee list with `netpro events import --file attendees.csv`
+(`--dry-run` first) or from the `/events` page. Headers are alias-tolerant
+(`Event Name` / `name`, `starts_at` / `date`, `attendees` / `Attendee Emails` /
+`names`), attendee cells split on `,`, `;`, `|` and newlines, and dates accept
+ISO, US and `Month D` forms — a date that is ambiguous or impossible
+(`2026-02-31`) is rejected per row rather than guessed.
+
+- Imports are **idempotent**: events dedupe on the normalized name and
+  attendance on `(event, contact)`, so re-importing an updated list is safe.
+- The `met_at_event` edges an import writes are **pending**. An attendee list is
+  evidence of attendance, not of a meeting; confirm, merge or reject those
+  candidates on `/edges`. Pairwise linking is capped at 250 edges per event per
+  run and the run report says so when it stops.
+- Attendee lines that match nobody are **parked on the event**, not dropped.
+  After importing the missing contacts, re-run
+  `netpro events match "<event>" --apply` (or use the re-match panel on
+  `/events/[id]`) to link them.
+- No migration was required: these are Phase 1's `events` / `event_attendees`
+  tables finally getting a producer.
+
+### Graph (v2.0 Phases 2–3)
+
+The graph is computed **in the web process, per request**: confirmed edges are
+loaded, communities (Louvain), centrality, components and warm-intro candidates
+are built in TypeScript, and the page is rendered server-side. It is not cached
+and not incremental — that is a deliberate simplicity/size trade.
+
+- Sizing: comfortable to ~50k edges, the documented cap; past it the surface
+  degrades with a notice instead of hanging. Betweenness (O(V·E)) and exact
+  average path length have their own smaller node budgets and are skipped with
+  a stated reason, so a large network never turns into a slow request.
+- Measured rather than assumed (Phase 7): **5k contacts / 20k edges against a
+  real PostgreSQL server** gave ~330 ms for the dashboard overview, ~210 ms for
+  `GET /api/graph/overview`, ~10 ms per pathfinder plan, and ~30 ms for a
+  keyword or hybrid search. Numbers are in the
+  [Phase 7 progress doc](superpowers/plans/2026-09-08-v2.0-phase7-release-progress.md);
+  re-measure against your own database with
+  `NETPRO_TEST_DATABASE_URL=… npm run test -w @netpro/core -- src/postgres.perf.test.ts`.
+
 ### Security headers
 
 Every response carries a Content-Security-Policy, `X-Content-Type-Options`,
@@ -281,6 +342,8 @@ additionally marked no-store so no shared cache or CDN retains private data.
 - [ ] OAuth callback URL registered as `<origin>/api/auth/callback/github`
 - [ ] `/api/health` returns `healthy`
 - [ ] `/api/card` returns 401 when signed out
+- [ ] `/api/events` returns 401 when signed out (every `/api` route is owner-only)
+- [ ] The web process can hold your graph in memory (comfortable to ~50k edges; see [Graph](#graph-v20-phases-23))
 - [ ] Postgres is not reachable from the public internet
 - [ ] Migrations run as a deploy step, with `NETPRO_AUTO_MIGRATE=false`
 - [ ] You have a database backup/restore plan — NetPro does not make backups

@@ -15,6 +15,7 @@ import { registerCardCommand } from './commands/card';
 import { registerExportCommand } from './commands/export';
 import { registerMigrateCommand } from './commands/migrate';
 import { registerSkillsCommand } from './commands/skills';
+import { registerEventsCommand } from './commands/events';
 
 export function createProgram(): Command {
   const program = new Command();
@@ -40,6 +41,7 @@ export function createProgram(): Command {
   registerCardCommand(program);
   registerMigrateCommand(program);
   registerSkillsCommand(program);
+  registerEventsCommand(program);
 
   return program;
 }
