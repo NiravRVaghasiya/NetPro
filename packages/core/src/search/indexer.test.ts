@@ -93,10 +93,11 @@ describe("buildSearchDocument", () => {
       country: "DE",
       notes: "Met at PyCon",
       tags: '["mentor","fintech"]',
+      skills: ["python", "kubernetes"],
     });
     expect(doc.searchText).toBe(
       "jane doe jane@stripe.com payments infrastructure stripe senior engineer " +
-        "senior engineering fintech berlin de mentor fintech met at pycon",
+        "senior engineering fintech berlin de mentor fintech python kubernetes met at pycon",
     );
     expect(doc.companyNorm).toBe("stripe");
     expect(doc.roleNorm).toBe("senior engineer");

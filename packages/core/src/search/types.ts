@@ -37,10 +37,11 @@ export function isSearchMode(value: unknown): value is SearchMode {
  * seniority vocabulary produced by import normalization
  * (`intern|junior|mid|senior|lead|director|vp|c_level`).
  *
- * NOTE: `--skills`/`--open-to-connect` from the blueprint's CLI reference are
- * not represented here — contacts carry no skills column and there is no
- * open-to-connect signal in this phase. They become filterable once later
- * phases populate that data.
+ * `skills` (v2.0 Phase 5) matches the derived `contacts.skills` verdict:
+ * every listed taxonomy skill must be present (AND). Names are canonicalised
+ * (`k8s` → `kubernetes`); unknown names match nothing, deliberately — a typo
+ * must not silently widen a filter. `--open-to-connect` from the blueprint's
+ * CLI reference still has no signal and stays unrepresented.
  */
 export interface SearchContactsOptions {
   /** Free-text query; matches name, email, headline, company, role, location. */
@@ -57,6 +58,8 @@ export interface SearchContactsOptions {
   minScore?: number;
   /** Only contacts with a recorded interaction within the last N days. */
   lastActiveWithinDays?: number;
+  /** Required derived skills (taxonomy names or aliases); all must be present. */
+  skills?: string[];
   sort?: SearchSort;
   limit?: number;
   offset?: number;

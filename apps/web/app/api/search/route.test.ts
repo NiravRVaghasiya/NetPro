@@ -24,6 +24,7 @@ vi.mock("@/lib/db", () => {
       industry: "Fintech",
       relationshipScore: 0.8,
       notes: null,
+      skills: ["python", "kubernetes"],
     },
     {
       id: "c2",
@@ -96,6 +97,15 @@ describe("GET /api/search", () => {
       new Request("http://localhost/api/search?sort=bogus"),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("filters by derived skills (v2.0 Phase 5) — aliases canonicalised, unknown names match nothing", async () => {
+    const hit = await (await GET(new Request("http://localhost/api/search?skills=k8s,Python"))).json();
+    expect(hit.contacts.map((c: { id: string }) => c.id)).toEqual(["c1"]);
+    const none = await (await GET(new Request("http://localhost/api/search?skills=python,nope"))).json();
+    expect(none.total).toBe(0);
+    const blank = await (await GET(new Request("http://localhost/api/search?skills=%20"))).json();
+    expect(blank.total).toBe(3);
   });
 
   it("respects limit and offset for pagination", async () => {

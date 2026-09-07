@@ -36,7 +36,7 @@ async function render(id: string): Promise<string> {
 
 beforeEach(() => {
   fixture.sqlite.exec(
-    'DELETE FROM follow_ups; DELETE FROM interactions; DELETE FROM contacts;'
+    'DELETE FROM follow_ups; DELETE FROM interactions; DELETE FROM enrichments; DELETE FROM contacts;'
   );
   fixture.conn.db
     .insert(fixture.conn.schema.contacts)
@@ -50,6 +50,7 @@ beforeEach(() => {
       email: 'jane@stripe.com',
       linkedinUrl: 'https://linkedin.com/in/jane',
       notes: 'Met at React Conf.',
+      skills: ['react', 'rust'],
       source: 'test',
       relationshipScore: 0.62,
       interactionCount: 1,
@@ -107,6 +108,26 @@ describe('/contacts/[id] detail page', () => {
     expect(html).toContain('log-panel');
     expect(html).toContain('followup-panel');
     expect(html).toContain('actions-f1');
+  });
+
+  it('shows skill tags with evidence and flags stored skills the text no longer supports (v2.0 Phase 5)', async () => {
+    const html = await render('c1');
+    // `react` comes from the notes ("React Conf") and is stored; `rust` is stored only.
+    expect(html).toContain('href="/skills?skills=react"');
+    expect(html).toContain('href="/skills?skills=rust"');
+    expect(html).toContain('rust ?');
+    expect(html).toContain('notes: “Met at React Conf.”');
+    expect(html).toContain('rust stored but not supported by the current text');
+    expect(html).toContain('Why these skills?');
+  });
+
+  it('explains when nothing is recognised yet', async () => {
+    fixture.conn.db
+      .insert(fixture.conn.schema.contacts)
+      .values({ id: 'c2', fullName: 'Blank Slate', source: 'test', createdAt: NOW.toISOString(), updatedAt: NOW.toISOString() })
+      .run();
+    const html = await render('c2');
+    expect(html).toContain('No taxonomy skills recognised');
   });
 
   it('404s for unknown contacts', async () => {

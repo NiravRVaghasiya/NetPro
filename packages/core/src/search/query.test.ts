@@ -36,6 +36,7 @@ interface Seed {
   relationshipScore?: number;
   lastInteraction?: string | null;
   deletedAt?: string | null;
+  skills?: string[] | null;
 }
 
 const NOW = new Date("2026-09-06T12:00:00.000Z").toISOString();
@@ -55,6 +56,7 @@ const SEED: Seed[] = [
     headline: "Payments infrastructure",
     relationshipScore: 0.8,
     lastInteraction: tenDaysAgo,
+    skills: ["python", "kubernetes", "aws"],
   },
   {
     id: "c2",
@@ -92,6 +94,7 @@ const SEED: Seed[] = [
     location: "London",
     relationshipScore: 0.9,
     lastInteraction: tenDaysAgo,
+    skills: ["python", "engineering management"],
   },
   {
     id: "c5",
@@ -117,6 +120,7 @@ const SEED: Seed[] = [
     relationshipScore: 0.7,
     lastInteraction: tenDaysAgo,
     deletedAt: NOW,
+    skills: ["python"],
   },
 ];
 
@@ -137,6 +141,7 @@ function seed(conn: SqliteConn): void {
         relationshipScore: s.relationshipScore ?? 0,
         lastInteraction: s.lastInteraction ?? null,
         deletedAt: s.deletedAt ?? null,
+        skills: s.skills ?? null,
         source: "linkedin_csv",
         createdAt: NOW,
         updatedAt: NOW,
@@ -302,5 +307,35 @@ describe("searchContacts", () => {
     const res = await searchContacts(conn, { company: "stripe" });
     const companyValues = res.facets.company.map((b) => b.value);
     expect(companyValues).toEqual(["stripe"]);
+  });
+
+  describe("skills filter (v2.0 Phase 5)", () => {
+    it("requires every listed skill, canonicalises aliases, and ignores soft-deleted rows", async () => {
+      const python = await searchContacts(conn, { skills: ["Python"] });
+      expect(python.contacts.map((c) => c.id).sort()).toEqual(["c1", "c4"]);
+
+      const both = await searchContacts(conn, { skills: ["python", "k8s"] });
+      expect(both.contacts.map((c) => c.id)).toEqual(["c1"]);
+      expect(both.total).toBe(1);
+    });
+
+    it("composes with other filters and free text", async () => {
+      const res = await searchContacts(conn, { query: "stripe", skills: ["aws"], company: "stripe" });
+      expect(res.contacts.map((c) => c.id)).toEqual(["c1"]);
+      const none = await searchContacts(conn, { skills: ["aws"], location: "london" });
+      expect(none.total).toBe(0);
+    });
+
+    it("matches nothing for a name outside the taxonomy rather than widening the result", async () => {
+      const res = await searchContacts(conn, { skills: ["python", "not-a-skill"] });
+      expect(res.total).toBe(0);
+      expect(res.contacts).toEqual([]);
+    });
+
+    it("does not match a skill name that merely appears as a substring of another value", async () => {
+      // "go" is a taxonomy skill; nobody has it, and `"golang"`/`"engineering management"` must not match.
+      const res = await searchContacts(conn, { skills: ["go"] });
+      expect(res.total).toBe(0);
+    });
   });
 });

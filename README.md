@@ -138,12 +138,20 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   `search` block in the owner-only health payload. **Configuring nothing
   changes nothing**: no index → substring search, no key → no semantic arm,
   provider down → keyword results with a stated reason rather than an error.
-- **Phase 5 — Skills gap analyzer (in progress):** an offline-first bounded
-  taxonomy extracts skills from contact fields and compares a target role or
-  description against the network. `netpro skills`, `/skills`, and
-  `GET /api/skills/gap` report present, partial, missing, and network coverage
-  results. Derived skills have an additive `contacts.skills` column; AI
-  extraction and editing/persistence UX remain follow-up work.
+- **Phase 5 — Skills gap analyzer (shipped):** additive migration `0005`
+  adds `contacts.skills`; `packages/core/skills` derives skills from
+  headline, role, tags, custom fields and notes against an embedded,
+  explainable taxonomy (~100 skills, alias table, whole-token matching, every
+  hit carries its field + snippet as evidence) and compares a target role /
+  job description / skill list against one contact or the whole network —
+  present, partial (via named adjacent-skill rules), missing, a match score,
+  per-skill coverage and the skills nobody has. Verdicts live on the contact,
+  evidence in `enrichments`; re-runs are idempotent and only write changes.
+  Surfaced as `netpro skills [contact] | gap | extract | status`,
+  `netpro search --skills`, the `/skills` page + skill tags on contact
+  pages, and the owner-only `GET /api/skills/gap` / `POST /api/skills/extract`.
+  **Offline by default**: the AI pass is opt-in per run, may only pick from
+  the taxonomy, and degrades to the heuristic result when the model fails.
 - Still ahead in v2.0: the event matcher and the release cut. The blueprint also lists real SMTP delivery
 for campaigns as optional follow-up work (NetPro drafts today; a human sends).
 Per-user encrypted web key storage and the `$EDITOR` draft-review loop remain

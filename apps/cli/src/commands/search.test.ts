@@ -97,6 +97,12 @@ describe("toSearchOptions", () => {
     expect(() => toSearchOptions({ sort: "bogus" })).toThrow(/Unknown --sort/);
   });
 
+  it("splits --skills into a trimmed list and drops an empty flag", () => {
+    expect(toSearchOptions({ skills: " python, k8s ;aws,, " }).skills).toEqual(["python", "k8s", "aws"]);
+    expect(toSearchOptions({ skills: " , " }).skills).toBeUndefined();
+    expect(toSearchOptions({}).skills).toBeUndefined();
+  });
+
   it("rejects an out-of-range min-score", () => {
     expect(() => toSearchOptions({ minScore: "2" })).toThrow(/between 0 and 1/);
   });

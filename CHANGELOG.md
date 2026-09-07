@@ -9,16 +9,48 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
 
 ### Added — v2.0 Phase 5: Skills gap analyzer
 
-- Additive `0005` migration adds a portable `contacts.skills` JSON/text column
-  for derived skill verdicts without changing imported source data.
-- New offline-first `@netpro/core/skills` module extracts only skills from a
-  bounded, explainable taxonomy and computes present, partial, missing, and
-  match-score results for a target role or description.
-- Network aggregation reports which contacts can fill each required skill;
-  no AI key or network request is required.
-- Added `netpro skills --role ... --description ...` and
-  `netpro skills --contact ...`, plus owner-only `GET /api/skills/gap` and
-  the `/skills` page.
+- Additive migration `0005` (both dialects) adds a nullable
+  `contacts.skills` text column holding the derived verdict as a JSON array
+  of canonical taxonomy names. Imported source fields are never modified.
+- New `@netpro/core/skills` module: an embedded taxonomy (~100 skills in 12
+  categories with an alias table — `k8s` → `kubernetes`, `data engineer` →
+  `data engineering`), whole-token extraction from headline, role,
+  department, industry, tags, custom fields and notes with per-skill
+  **evidence** (`field`, matched alias, snippet) and confidence, an optional
+  AI pass that may only choose from the taxonomy, `parseTarget` /
+  `gapAnalysis` (`present`, `partial` + `partialVia`, `missing`,
+  `matchScore = (present + ½·partial) / required`), `analyzeNetworkGaps`
+  (per-skill coverage, gaps nobody covers, ranked candidates) and
+  `networkSkillCounts`. Ambiguous bare words (`go`, `excel`, `spark`, `swift`,
+  `growth`, `operations`, `strategy`) only match in prose through an
+  unambiguous alias, but count as explicit tags or `--skills` values.
+- Persistence: `extractSkillsBatch` stores the verdict on the contact and the
+  full extraction in `enrichments` (`provider = skills_heuristic | skills_ai`,
+  `data_type = skills`, one row per contact per extractor, replaced on
+  re-run), bumps `updated_at` and writes a `skills.extracted` activity-log
+  row **only when the verdict changes**, and refreshes the keyword search
+  index for changed contacts (best-effort, never an embedding call).
+- Search: `contacts.skills` is part of the indexed document, and a new
+  `skills` filter (`netpro search --skills python,k8s`, `GET /api/search?skills=`)
+  requires every listed skill; a name outside the taxonomy matches nothing
+  rather than silently widening the result.
+- CLI (16th command): `netpro skills <contact>` (stored + current skills with
+  evidence), `netpro skills gap --role --description --skills [--contact]
+  [--limit] [--json]`, `netpro skills extract [--mode heuristic|ai] [--contact]
+  [--limit] [--dry-run] [--provider]`, `netpro skills status`. `--mode ai`
+  reuses the outreach credentials (keychain / env) and fails before touching
+  the database when no key is configured.
+- Web: `/skills` (target form, coverage table with contact + warm-intro links,
+  gaps, ranked matches, a "Derive skills" panel, and a network skill map when
+  no target is given), skill tags with evidence on `/contacts/[id]` (stored
+  skills the current text no longer supports are marked), a **Skills** nav
+  link, `/skills` in the proxy's protected routes, and the owner-only APIs
+  `GET /api/skills/gap?role=&description=&skills=&contact=&limit=` (unknown
+  contact → 404, ambiguous → 400 via the shared resolver) and
+  `GET|POST /api/skills/extract` (`{ mode?, contact?, dryRun?, limit? }`; AI
+  keys come from the server environment only).
+- Decision (plan open question #3): **AI extraction is default-off.** The
+  heuristic pass is the product; the model is a bounded, opt-in bonus.
 
 ### Added — v2.0 Phase 4: Hybrid search
 
