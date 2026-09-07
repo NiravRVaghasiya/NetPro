@@ -165,12 +165,24 @@ describeIfPg('hybrid search against live PostgreSQL', () => {
   });
 
   it('stems and prefix-matches — the substring engine can do neither', async () => {
-    // English stemming: "payment" finds "payments".
-    const stem = await searchContacts(conn, { query: 'payment', mode: 'keyword' });
+    // English stemming: "engineering" and the stored "Senior Engineer" both
+    // reduce to the lexeme `engin`, so the keyword arm connects them.
+    //
+    // The discriminator has to be a query that is NOT a substring of the
+    // document, which is subtler than it looks: "payment" would prove nothing
+    // here, because it is a literal substring of "Payments infrastructure" and
+    // the portable arm finds it too. (It did, and this test caught it.)
+    const stem = await searchContacts(conn, { query: 'engineering', mode: 'keyword' });
     expect(stem.contacts.map((c) => c.id)).toContain('p1');
     expect(stem.engine.arms.keyword.hits).toBeGreaterThan(0);
-    // And the portable arm alone finds nothing for it.
-    expect((await searchContacts(conn, { query: 'payment' })).contacts).toEqual([]);
+    // Nothing stored contains the string "engineering", so substring search
+    // genuinely cannot reach it.
+    expect((await searchContacts(conn, { query: 'engineering' })).contacts).toEqual([]);
+
+    // Prefix matching goes through the GIN index (`stri:*`), not a LIKE scan.
+    const prefix = await searchContacts(conn, { query: 'stri', mode: 'keyword' });
+    expect(prefix.engine.arms.keyword.hits).toBeGreaterThan(0);
+    expect(prefix.contacts.map((c) => c.id)).toContain('p1');
   });
 
   it('matches indexed notes, which the portable engine does not read', async () => {
