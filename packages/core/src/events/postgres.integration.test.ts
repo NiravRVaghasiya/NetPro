@@ -12,6 +12,19 @@
 //
 // SKIPPED unless NETPRO_TEST_DATABASE_URL points at a disposable server, so
 // `npm test` stays hermetic and offline. CI's postgres job supplies it.
+//
+// ONE DATABASE, TESTS IN ORDER. Unlike the SQLite suite (where every test
+// gets a fresh in-memory database), all eight tests here share one database
+// and build on each other the way the search suite does — the import in the
+// first test is what the later assertions read back. So any new test has to
+// be written against the state the tests above it left behind, not against an
+// empty graph: in particular the a–b pair is already a *pending* edge by the
+// time the "links and unlinks" test runs, which is why it links `c`.
+//
+// (An earlier version of that test linked `b` and asserted a fresh edge was
+// created. It passed alone and failed in the file — the merge path is
+// correct, the expectation was not. Both paths are now pinned down: merge in
+// `repository.test.ts`, creation here.)
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client, Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -185,17 +198,21 @@ describeIfPg('event matcher against live PostgreSQL', () => {
     const first = await linkAttendee(conn, { eventId: event.id, contactId: 'a', via: 'manual' }, { now });
     expect(first.created).toBe(true);
 
-    const second = await linkAttendee(conn, { eventId: event.id, contactId: 'b', via: 'manual' }, { now });
+    // `c`, not `b`: the import above already wrote a pending a–b edge, so a
+    // manual link there would merge an existing row instead of minting one.
+    // a–c has never met, so this is the "create" path.
+    const second = await linkAttendee(conn, { eventId: event.id, contactId: 'c', via: 'manual' }, { now });
     expect(second.edgesCreated).toBe(1);
     const confirmed = await listEdges(conn, { relation: 'met_at_event', status: 'confirmed' });
     expect(confirmed.length).toBeGreaterThanOrEqual(1);
+    expect(confirmed[0]).toMatchObject({ status: 'confirmed', confidence: 1, source: 'event_import' });
 
     const detail = await getEvent(conn, event.id);
-    expect(detail!.attendees.map((a) => a.contactId)).toEqual(['a', 'b']);
-    expect(detail!.industries).toEqual(['fintech']);
+    expect(detail!.attendees.map((a) => a.contactId)).toEqual(['a', 'c']);
+    expect(detail!.industries).toEqual(['devtools', 'fintech']);
 
     expect((await unlinkAttendee(conn, { eventId: event.id, contactId: 'a' })).removed).toBe(true);
-    expect((await getEvent(conn, event.id))!.attendees.map((a) => a.contactId)).toEqual(['b']);
+    expect((await getEvent(conn, event.id))!.attendees.map((a) => a.contactId)).toEqual(['c']);
   });
 
   it('re-matches an event after the network grows', async () => {

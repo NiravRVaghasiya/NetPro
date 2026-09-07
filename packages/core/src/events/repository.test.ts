@@ -164,6 +164,28 @@ describe('linkAttendee', () => {
     expect(edges[0]).toMatchObject({ relation: 'met_at_event', status: 'confirmed', confidence: 1 });
   });
 
+  it('merges an imported pending edge up to confirmed instead of minting a second one', async () => {
+    // An import writes co-attendee edges as *pending* (attendance is not a
+    // meeting). Confirming the same pair by hand has to upgrade that row, not
+    // add a competing one — the graph asserts one row per pair.
+    await importEvents(
+      conn,
+      { csv: csv(['name,attendees', 'React Conf,"ada@engines.dev; bob@builders.io"']), now }
+    );
+    const pending = await listEdges(conn, { relation: 'met_at_event' });
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.status).toBe('pending');
+
+    const { event } = await upsertEvent(conn, { name: 'React Conf' }, { now });
+    const again = await linkAttendee(conn, { eventId: event.id, contactId: 'b', via: 'manual' }, { now });
+    expect(again.created).toBe(false); // the import already recorded attendance
+    expect(again.edgesCreated).toBe(0); // and the pair already had an edge
+
+    const edges = await listEdges(conn, { relation: 'met_at_event' });
+    expect(edges).toHaveLength(1);
+    expect(edges[0]).toMatchObject({ status: 'confirmed', confidence: 1 });
+  });
+
   it('marks attendance as planned when the event has not started', async () => {
     const { event } = await upsertEvent(conn, { name: 'Future Conf', startsAt: '2026-12-01' }, { now });
     await linkAttendee(conn, { eventId: event.id, contactId: 'a' }, { now });

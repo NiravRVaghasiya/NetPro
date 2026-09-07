@@ -97,7 +97,7 @@ implemented** on top of the v0.1-alpha scaffold:
 > See [owner authentication setup](docs/getting-started.md#configure-owner-sign-in).
 
 The full monorepo (CLI + web, dual-dialect Drizzle database, GitHub OAuth via
-Auth.js) builds, lints, typechecks, and tests successfully — **1190 tests**,
+Auth.js) builds, lints, typechecks, and tests successfully — **1191 tests**,
 plus 33 more in a live PostgreSQL integration suite that runs in CI against a
 real database. **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
 reminders, and batch campaigns are implemented, and per-contact relationship
