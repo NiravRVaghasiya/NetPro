@@ -21,7 +21,7 @@ export function createProgram(): Command {
   program
     .name('netpro')
     .description('NetPro — your professional network, owned by you')
-    .version('1.5.0');
+    .version('2.0.0');
 
   registerInitCommand(program);
   registerConfigCommand(program);

@@ -34,6 +34,8 @@ export const contacts = sqliteTable('contacts', {
   tags: text('tags', { mode: 'json' }),
   customFields: text('custom_fields', { mode: 'json' }),
   notes: text('notes'),
+  /** Derived, explainable skills from Phase 5; JSON array of taxonomy names. */
+  skills: text('skills', { mode: 'json' }),
 
   relationshipScore: real('relationship_score').default(0),
   lastInteraction: text('last_interaction'),
