@@ -16,6 +16,11 @@ export async function executeImport(options: ImportCommandOptions, conn: SqliteC
   const summary = await runImport(csv, conn);
 
   const lines = [`✓ Imported ${summary.imported} contacts (${summary.merged} merged)`];
+  if (summary.edgeCandidates && summary.edgeCandidates.inserted > 0) {
+    lines.push(
+      `  ${summary.edgeCandidates.inserted} pending mutual-network edge(s) queued for confirmation (netpro edge list --status pending)`
+    );
+  }
   if (summary.errors.length > 0) {
     lines.push(`  ${summary.errors.length} row(s) skipped:`);
     summary.errors.forEach((e) => lines.push(`    row ${e.row}: ${e.reason}`));

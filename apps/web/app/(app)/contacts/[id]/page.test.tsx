@@ -20,6 +20,9 @@ vi.mock('./panels', () => ({
     <span data-testid={`actions-${followUpId}`} />
   ),
 }));
+vi.mock('../../edges/panels', () => ({
+  MetAtEventPanel: () => <div data-testid="met-at-panel" />,
+}));
 
 import ContactDetailPage from './page';
 

@@ -6,6 +6,7 @@
 // every CRM route answers validation, not-found, and conflict failures the
 // same way — with no storage internals echoed to the client.
 import { CrmError } from '@netpro/core/src/crm';
+import { GraphError } from '@netpro/core/src/graph';
 
 /** Interactions cap at 5000 chars of content; 16 KiB of JSON is generous headroom. */
 export const MAX_CRM_BODY_BYTES = 16 * 1024;
@@ -101,7 +102,7 @@ export function crmErrorResponse(error: unknown): Response {
   if (error instanceof CrmRequestError) {
     return crmJson({ error: error.message }, error.status);
   }
-  if (error instanceof CrmError) {
+  if (error instanceof CrmError || error instanceof GraphError) {
     return crmJson({ error: error.message, code: error.code }, STATUS_BY_CODE[error.code]);
   }
   return crmJson({ error: 'Unable to process the request. Please try again.' }, 500);

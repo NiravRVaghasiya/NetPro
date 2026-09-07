@@ -111,6 +111,8 @@ describeIfPg('PostgreSQL integration', () => {
       'follow_ups',
       'activity_log',
       'profile_cards',
+      'events',
+      'event_attendees',
       'user',
       'account',
       'session',

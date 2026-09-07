@@ -36,7 +36,7 @@ describe('POST /api/import', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ imported: 1, merged: 0, errors: [] });
+    expect(body).toMatchObject({ imported: 1, merged: 0, errors: [] });
   });
 
   it('returns 400 when no file is provided', async () => {
