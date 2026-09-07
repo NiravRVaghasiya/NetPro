@@ -13,6 +13,8 @@ export interface ImportSummary {
   imported: number;
   merged: number;
   errors: ImportError[];
+  /** Pending mutual-network candidates surfaced for confirmation — never auto-confirmed. */
+  edgeCandidates?: { candidates: number; inserted: number; skipped: number };
 }
 
 export async function runImport(csv: string, conn: SqliteConn | PgConn): Promise<ImportSummary> {
@@ -67,7 +69,17 @@ export async function runImport(csv: string, conn: SqliteConn | PgConn): Promise
     }
   }
 
-  return { imported, merged, errors };
+  // Surface LinkedIn "Mutual connections" as pending edges for confirmation.
+  // Never auto-insert confirmed graph links from an import.
+  let edgeCandidates: ImportSummary['edgeCandidates'];
+  try {
+    const { ingestMutualCandidates } = await import('../graph/import-edges');
+    edgeCandidates = await ingestMutualCandidates(conn, csv);
+  } catch {
+    edgeCandidates = undefined;
+  }
+
+  return { imported, merged, errors, edgeCandidates };
 }
 
 // NOTE: `conn.db.select()`/`.insert()`/`.update()` don't typecheck against the raw

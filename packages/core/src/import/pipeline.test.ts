@@ -65,7 +65,7 @@ describe('runImport', () => {
 
     const summary = await runImport(csv, conn);
 
-    expect(summary).toEqual({ imported: 1, merged: 0, errors: [] });
+    expect(summary).toMatchObject({ imported: 1, merged: 0, errors: [] });
     const rows = await conn.db.select().from(conn.schema.contacts);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ fullName: 'Jane Doe', email: 'jane@example.com', company: 'Stripe', source: 'linkedin_csv' });
@@ -80,7 +80,7 @@ describe('runImport', () => {
     await runImport(csv, conn);
     const secondSummary = await runImport(csv, conn);
 
-    expect(secondSummary).toEqual({ imported: 0, merged: 1, errors: [] });
+    expect(secondSummary).toMatchObject({ imported: 0, merged: 1, errors: [] });
     const rows = await conn.db.select().from(conn.schema.contacts);
     expect(rows).toHaveLength(1);
   });
@@ -147,7 +147,7 @@ describe('runImport', () => {
     const createdAtBefore = before!.createdAt;
 
     const summary = await runImport(second, conn);
-    expect(summary).toEqual({ imported: 0, merged: 1, errors: [] });
+    expect(summary).toMatchObject({ imported: 0, merged: 1, errors: [] });
 
     const [row] = await conn.db.select().from(conn.schema.contacts);
     expect(row!.createdAt).toBe(createdAtBefore);

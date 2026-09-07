@@ -111,11 +111,11 @@ Per-user encrypted web key storage and the `$EDITOR` draft-review loop remain
 deferred and are documented in the
 [Phase 4 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase4-ai-outreach-design.md).
 
-> **Analytics scope note:** clustering is attribute-based (normalized company)
-> for now — the blueprint's graph-native analytics (Louvain communities,
-> centrality, warm-intro paths) need the `edges` table, which no producer
-> populates yet. They build on the same `analytics` module entry points in a
-> later phase. Per-contact **relationship scoring now ships with the CRM
+> **Analytics scope note:** clustering is still attribute-based (normalized
+> company) until v2.0 Phase 2. **v2.0 Phase 1 ships edge provenance** — the
+> `edges` table now has producers (`netpro edge`, CSV mutuals as *pending*
+> candidates, “also met at…” attendance) so later graph analytics have data
+> users can trust. Per-contact **relationship scoring ships with the CRM
 > (Phase 7)** and is recomputed on every logged interaction.
 
 > **Search implementation note:** this is the v1 _portable_ search —
@@ -139,9 +139,9 @@ for the draft-only campaign decisions.
 ## Structure
 
 - `apps/web` — Next.js app (App Router), Auth.js v5 with GitHub OAuth
-- `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|outreach|analyze|track|campaign|export|card|migrate`)
+- `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|outreach|analyze|track|edge|campaign|export|card|migrate`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
-- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), and the draft-only batch campaign engine
+- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, and graph edge provenance
 - `packages/ui` — shared React components
 - `packages/config` — shared ESLint and Tailwind configs
 

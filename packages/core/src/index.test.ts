@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as core from "./index";
 
 describe("@netpro/core module boundaries", () => {
-  it("exposes all eight feature modules", () => {
+  it("exposes all nine feature modules", () => {
     expect(typeof core.search.searchContacts).toBe("function");
     expect(typeof core.enrichment.EnrichmentPipeline).toBe("function");
     // Real since v1.0 Phase 3 (network analytics).
@@ -25,6 +25,10 @@ describe("@netpro/core module boundaries", () => {
     expect(typeof core.campaigns.setCampaignStatus).toBe("function");
     expect(core.campaigns.TEMPLATE_VARIABLES).toContain("firstName");
     expect(core.campaigns.CAMPAIGN_STATUSES).toContain("draft");
+    expect(typeof core.graph.addEdge).toBe("function");
+    expect(typeof core.graph.listEdges).toBe("function");
+    expect(typeof core.graph.recordEventAttendance).toBe("function");
+    expect(core.graph.EDGE_RELATIONS).toContain("mutual_network");
     expect(typeof core.importPipeline.runImport).toBe("function");
     expect(typeof core.exportPipeline.exportContactsCSV).toBe("function");
   });

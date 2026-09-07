@@ -4,6 +4,7 @@ import { conn } from '@/lib/db';
 import { getContactTimeline } from '@netpro/core/src/crm';
 import { dueLabel, relativeDayLabel, scoreLabel, utcDay } from '@/lib/format';
 import { AddFollowUpPanel, FollowUpActions, LogInteractionPanel } from './panels';
+import { MetAtEventPanel } from '../../edges/panels';
 
 /**
  * /contacts/[id] — the individual contact from the blueprint: enriched
@@ -108,6 +109,10 @@ export default async function ContactDetailPage({
         <div style={{ marginTop: '0.75rem' }}>
           <LogInteractionPanel contactId={contact.id} />
         </div>
+      </section>
+
+      <section aria-label="Also met at" style={{ marginTop: '1.5rem' }}>
+        <MetAtEventPanel contactId={contact.id} />
       </section>
 
       {contact.notes && (

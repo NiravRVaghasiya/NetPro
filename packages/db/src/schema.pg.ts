@@ -80,9 +80,40 @@ export const edges = pgTable('edges', {
   context: text('context'),
   bidirectional: boolean('bidirectional').default(true),
 
+  source: text('source').notNull().default('manual'),
+  confidence: real('confidence').default(1),
+  status: text('status').notNull().default('confirmed'),
+
   discoveredAt: text('discovered_at').notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+}, (t) => ({
+  sourceIdx: index('idx_edges_source').on(t.sourceId),
+  targetIdx: index('idx_edges_target').on(t.targetId),
+  relationIdx: index('idx_edges_relation').on(t.relation),
+  confidenceIdx: index('idx_edges_confidence').on(t.confidence),
+  statusIdx: index('idx_edges_status').on(t.status),
+}));
+
+export const events = pgTable('events', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  location: text('location'),
+  startsAt: text('starts_at'),
+  endsAt: text('ends_at'),
+  source: text('source').notNull().default('manual'),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
 });
+
+export const eventAttendees = pgTable('event_attendees', {
+  eventId: text('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
+  contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
+  role: text('role'),
+  attended: boolean('attended').default(true),
+  discoveredAt: text('discovered_at').notNull().$defaultFn(() => new Date().toISOString()),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.eventId, t.contactId] }),
+  contactIdx: index('idx_event_attendees_contact').on(t.contactId),
+}));
 
 export const enrichments = pgTable('enrichments', {
   id: text('id').primaryKey(),

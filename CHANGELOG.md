@@ -5,6 +5,20 @@ All notable changes to NetPro are documented here. The format is based on
 the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint.md)
 (`vX.Y` milestones, published as `X.Y.0` npm/GitHub versions).
 
+## [Unreleased]
+
+### Added — v2.0 Phase 1: Edge provenance
+
+- Additive migration `0003` (both dialects): `edges.source`, `edges.confidence`,
+  `edges.status`, neighborhood/filter indexes, plus `events` and
+  `event_attendees` (schema for Phase 6).
+- `packages/core/graph`: confirmed/pending/rejected CRUD, symmetric-pair
+  collapse, LinkedIn mutual-connection candidates (never auto-confirmed),
+  two-column CSV import, and “also met at…” attendance that writes
+  `met_at_event` edges.
+- CLI: `netpro edge add|list|rm|import|merge|confirm|reject`.
+- Web: `/edges`, `/api/edges`, contact-detail “Also met at…” panel.
+
 ## [1.5.0] - 2026-09-07
 
 ### Added — Phase 7: CRM tracking & follow-up reminders

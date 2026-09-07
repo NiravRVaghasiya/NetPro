@@ -143,6 +143,27 @@ companies/industries, clusters, and your reconnect list.
 > populates the `edges` table; per-contact relationship scoring arrives with
 > interaction logging (CRM).
 
+## Graph edges (v2.0 Phase 1)
+
+NetPro never silently infers that two of *your* contacts know each other.
+Manual links are confirmed; LinkedIn “Mutual connections” columns become
+**pending** candidates you confirm or reject.
+
+```bash
+netpro edge add "Jane Doe" "Pat Lee" --relation colleague
+netpro edge list
+netpro edge list --status pending
+netpro edge confirm <edgeId>
+netpro edge reject <edgeId>
+netpro edge rm <edgeId>
+netpro edge import edges.csv          # two columns: from,to
+netpro edge merge                     # collapse A→B / B→A duplicates
+```
+
+The web UI is **Edges** in the navigation (`/edges`, `GET/POST /api/edges`).
+On a contact page, **Also met at…** records event attendance and links them
+to others already marked at that event.
+
 ## Draft AI outreach
 
 NetPro drafts personalized outreach from your contact data — **you** review and

@@ -28,6 +28,7 @@ const PROTECTED_ROUTES = [
   "/search",
   "/outreach",
   "/contacts",
+  "/edges",
   "/settings",
   "/import",
 ];

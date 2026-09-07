@@ -17,6 +17,48 @@ import * as schema from "./schema.sqlite";
 
 const folder = fileURLToPath(new URL("../migrations/sqlite", import.meta.url));
 
+describe("edge provenance migration (v2.0 phase 1)", () => {
+  it("adds edge columns, indexes, and events tables on a fresh database", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: folder });
+      const cols = sqlite
+        .prepare("PRAGMA table_info(edges)")
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(cols).toEqual(
+        expect.arrayContaining(["source", "confidence", "status"]),
+      );
+      const names = sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_edges_%'",
+        )
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(names).toEqual(
+        expect.arrayContaining([
+          "idx_edges_source",
+          "idx_edges_target",
+          "idx_edges_relation",
+          "idx_edges_confidence",
+          "idx_edges_status",
+        ]),
+      );
+      const tables = sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('events','event_attendees')",
+        )
+        .all()
+        .map((r) => (r as { name: string }).name)
+        .sort();
+      expect(tables).toEqual(["event_attendees", "events"]);
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
 describe("crm indexes migration (v1.5)", () => {
   it("creates every CRM index on a fresh database", () => {
     const sqlite = new Database(":memory:");
