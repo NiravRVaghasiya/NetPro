@@ -8,10 +8,30 @@ describe('CLI root program', () => {
     expect(program.version()).toBe('0.1.0-alpha.0');
   });
 
-  it('registers all eleven top-level commands', () => {
+  it('registers all twelve top-level commands', () => {
     const program = createProgram();
     const names = program.commands.map((c) => c.name());
-    expect(names).toEqual(['init', 'config', 'import', 'enrich', 'search', 'outreach', 'analyze', 'track', 'export', 'card', 'migrate']);
+    expect(names).toEqual(['init', 'config', 'import', 'enrich', 'search', 'outreach', 'analyze', 'track', 'campaign', 'export', 'card', 'migrate']);
+  });
+
+  it('registers the campaign subcommands', () => {
+    const program = createProgram();
+    const campaign = program.commands.find((c) => c.name() === 'campaign');
+    expect(campaign).toBeDefined();
+    const subNames = (campaign as import('commander').Command).commands.map((c) => c.name());
+    expect(subNames).toEqual([
+      'list',
+      'create',
+      'add-recipients',
+      'show',
+      'activate',
+      'pause',
+      'complete',
+      'archive',
+      'mark-sent',
+      'mark-replied',
+      'mark-skipped',
+    ]);
   });
 
   it('registers config subcommands set/get/delete/list', () => {

@@ -5,7 +5,8 @@
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FNiravRVaghasiya%2FNetPro&env=DB_DIALECT,DATABASE_URL,NEXTAUTH_SECRET,GITHUB_CLIENT_ID,GITHUB_CLIENT_SECRET,NETPRO_OWNER_GITHUB_ID&envDescription=NetPro%20needs%20a%20Postgres%20URL%2C%20an%20auth%20secret%2C%20a%20GitHub%20OAuth%20app%2C%20and%20your%20numeric%20GitHub%20user%20ID&envLink=https%3A%2F%2Fgithub.com%2FNiravRVaghasiya%2FNetPro%2Fblob%2Fmaster%2Fdocs%2Fdeployment.md&project-name=netpro&repository-name=netpro)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**v1.0 Phases 1–6 are implemented** on top of the v0.1-alpha scaffold:
+**v1.0 (Phases 1–6) and v1.5 (Phases 7–8) are implemented** on top of the
+v0.1-alpha scaffold:
 
 - **Phase 1 — Import, Enrichment & Export:** LinkedIn CSV import with
   dedup/merge, three-provider contact enrichment (Hunter.io, People Data Labs,
@@ -64,6 +65,28 @@
   Also: `middleware.ts` → `proxy.ts` for Next.js 16, and the build now emits
   **zero warnings** (was six).
 
+- **Phase 7 — CRM Tracking & Follow-up Reminders:** per-contact interaction
+  history (email, meeting, call, note, LinkedIn message, intro) with a
+  documented **relationship score** — recency 40% / frequency 25% / depth 20% /
+  richness 15%, recomputed on every logged interaction — plus follow-up
+  reminders with due-today/overdue/upcoming views, completion, snooze, cancel,
+  and optional recurrence, and a unified per-contact timeline. The engine lives
+  in `packages/core/crm`, surfaced through `netpro track` and the web app
+  (`/contacts`, `/contacts/[id]`, `GET/POST /api/interactions`,
+  `/api/follow-ups`).
+
+- **Phase 8 — Batch Campaigns (Draft-Only):** personalized multi-step outreach
+  with whitelisted merge variables (`{{firstName}}`, `{{company}}`, `{{role}}`,
+  …), drip sequences with per-step delays, recipients snapshotted from an
+  explicit list or a saved search, a lifecycle (draft → active →
+  paused/completed/archived), and a per-day send limit. NetPro **drafts** each
+  personalized message; a human sends it from their own mailbox and records the
+  outcome — every confirmed send is logged as a real interaction (feeding the
+  relationship score), and a recorded reply cancels the remaining drip. The
+  engine lives in `packages/core/campaigns`, surfaced through `netpro campaign`
+  and the web app (`/outreach/campaigns`, `/outreach/campaigns/[id]`,
+  `/api/campaigns`). No SMTP, no stored secrets, nothing sent automatically.
+
 > **Upgrade / owner setup:** set `NETPRO_OWNER_GITHUB_ID` to your numeric GitHub
 > account ID before signing in. Only that account can access the private
 > workspace; missing configuration denies sign-in. Existing sessions must sign
@@ -71,20 +94,24 @@
 > See [owner authentication setup](docs/getting-started.md#configure-owner-sign-in).
 
 The full monorepo (CLI + web, dual-dialect Drizzle database, GitHub OAuth via
-Auth.js) builds, lints, typechecks, and tests successfully — **402 tests**,
+Auth.js) builds, lints, typechecks, and tests successfully — **592 tests**,
 plus a live PostgreSQL integration suite that runs in CI against a real
-database. **v1.0 is deployable.** Next: **v1.5 — CRM tracking, follow-up
-reminders, and batch campaigns**, which unlocks the deferred graph analytics,
-relationship scoring, real SMTP delivery, and hybrid search. Per-user encrypted
-web key storage and the `$EDITOR` draft-review loop remain deferred and are
-documented in the [Phase 4 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase4-ai-outreach-design.md).
+database. **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
+reminders, and batch campaigns are implemented, and per-contact relationship
+scoring now has a producer (interaction logging). Next: the deferred
+**graph analytics** (Louvain communities, centrality, warm-intro paths over the
+`edges` table), **hybrid search** (SQLite FTS5 + pgvector with RRF re-ranking),
+and — if wanted — **real SMTP delivery** for campaigns (NetPro drafts today; a
+human sends). Per-user encrypted web key storage and the `$EDITOR` draft-review
+loop remain deferred and are documented in the
+[Phase 4 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase4-ai-outreach-design.md).
 
 > **Analytics scope note:** clustering is attribute-based (normalized company)
 > for now — the blueprint's graph-native analytics (Louvain communities,
 > centrality, warm-intro paths) need the `edges` table, which no producer
 > populates yet. They build on the same `analytics` module entry points in a
-> later phase, alongside per-contact relationship scoring once interaction
-> logging (CRM) exists.
+> later phase. Per-contact **relationship scoring now ships with the CRM
+> (Phase 7)** and is recomputed on every logged interaction.
 
 > **Search implementation note:** this is the v1 _portable_ search —
 > case-insensitive substring matching and facets in ANSI SQL that runs
@@ -98,14 +125,18 @@ for what Phase 1 covers and why, the
 [Phase 3 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase3-network-analytics-design.md)
 for the analytics decisions, and the
 [Phase 5 design and repository assessment](docs/superpowers/specs/2026-09-06-v1.0-phase5-profile-card-design.md)
-for publication/privacy decisions and the remaining release work.
+for publication/privacy decisions and the remaining release work, the
+[Phase 7 design spec](docs/superpowers/specs/2026-09-06-v1.5-phase7-crm-tracking-followups-design.md)
+for the CRM/relationship-scoring decisions, and the
+[Phase 8 design spec](docs/superpowers/specs/2026-09-06-v1.5-phase8-batch-campaigns-design.md)
+for the draft-only campaign decisions.
 
 ## Structure
 
 - `apps/web` — Next.js app (App Router), Auth.js v5 with GitHub OAuth
-- `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|outreach|analyze|track|export|card|migrate`)
+- `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|outreach|analyze|track|campaign|export|card|migrate`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
-- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, and profile-card validation/publishing/exports (CRM modules remain placeholders)
+- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), and the draft-only batch campaign engine
 - `packages/ui` — shared React components
 - `packages/config` — shared ESLint and Tailwind configs
 

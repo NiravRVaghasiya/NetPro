@@ -13,6 +13,18 @@ describe("@netpro/core module boundaries", () => {
     expect(typeof core.card.renderProfileCardHtml).toBe("function");
     expect(typeof core.card.publishProfileCard).toBe("function");
     expect(core.crm.MODULE_NAME).toBe("crm");
+    // Real since v1.5 Phase 7 (CRM tracking & follow-ups).
+    expect(typeof core.crm.logInteraction).toBe("function");
+    expect(typeof core.crm.computeRelationshipScore).toBe("function");
+    expect(typeof core.crm.createFollowUp).toBe("function");
+    expect(typeof core.crm.getContactTimeline).toBe("function");
+    // Real since v1.5 Phase 8 (batch campaigns, draft-only).
+    expect(typeof core.campaigns.createCampaign).toBe("function");
+    expect(typeof core.campaigns.renderCampaign).toBe("function");
+    expect(typeof core.campaigns.markRecipientSent).toBe("function");
+    expect(typeof core.campaigns.setCampaignStatus).toBe("function");
+    expect(core.campaigns.TEMPLATE_VARIABLES).toContain("firstName");
+    expect(core.campaigns.CAMPAIGN_STATUSES).toContain("draft");
     expect(typeof core.importPipeline.runImport).toBe("function");
     expect(typeof core.exportPipeline.exportContactsCSV).toBe("function");
   });

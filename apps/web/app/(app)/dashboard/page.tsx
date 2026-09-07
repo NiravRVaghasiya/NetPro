@@ -4,6 +4,7 @@ import {
   getNetworkOverview,
   type NetworkOverview,
 } from "@netpro/core/src/analytics";
+import { listFollowUps } from "@netpro/core/src/crm";
 
 // ─── small presentational helpers (pure, no client JS) ──────────────────────
 
@@ -137,9 +138,14 @@ function GrowthChart({ overview }: { overview: NetworkOverview }) {
 // ─── page ────────────────────────────────────────────────────────────────────
 
 export default async function DashboardPage() {
-  const overview = await getNetworkOverview(conn);
+  // limit 1: only the pending counts are consumed, for the follow-up card.
+  const [overview, followUps] = await Promise.all([
+    getNetworkOverview(conn),
+    listFollowUps(conn, { view: "pending", limit: 1 }),
+  ]);
   const m = overview.metrics;
   const g = overview.growth;
+  const due = followUps.counts.overdue + followUps.counts.dueToday;
 
   if (m.totalContacts === 0) {
     return (
@@ -182,6 +188,13 @@ export default async function DashboardPage() {
           value={String(m.diversityEffective)}
           hint={`effective ${m.diversityField}s`}
         />
+        <Link href="/contacts" style={{ textDecoration: "none", color: "inherit" }}>
+          <MetricCard
+            label="Follow-ups due"
+            value={String(due)}
+            hint={`${followUps.counts.overdue} overdue · ${followUps.counts.dueToday} today`}
+          />
+        </Link>
       </div>
 
       <section style={{ marginTop: "1.5rem" }}>

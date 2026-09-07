@@ -1,47 +1,141 @@
+import Link from 'next/link';
 import { conn } from '@/lib/db';
+import {
+  CRM_CONTACTS_SORTS,
+  listCrmContacts,
+  listFollowUps,
+  type CrmContactsSort,
+} from '@netpro/core/src/crm';
+import { dueLabel, relativeDayLabel, scoreLabel } from '@/lib/format';
 
-async function getContacts() {
-  // NOTE: `conn.db.select()` doesn't typecheck against the raw
-  // `SqliteConn | PgConn` union — narrowing on `conn.dialect` is required.
-  // Same pattern as packages/core's import/enrichment pipelines.
-  if (conn.dialect === 'sqlite') {
-    return conn.db.select().from(conn.schema.contacts).limit(50);
-  }
-  return conn.db.select().from(conn.schema.contacts).limit(50);
+type SearchParams = Record<string, string | string[] | undefined>;
+
+function one(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }
 
-export default async function ContactsPage() {
-  const contacts = await getContacts();
+const SORT_LABELS: Record<CrmContactsSort, string> = {
+  recent: 'Recently active',
+  score: 'Relationship score',
+  name: 'Name (A–Z)',
+  'follow-up': 'Next follow-up',
+};
+
+const PAGE_SIZE = 25;
+
+/**
+ * /contacts — the CRM view from the blueprint: all contacts with last
+ * interaction, relationship score, and follow-up dates, plus the pending
+ * follow-ups that need attention. Reads go straight through the core module
+ * (same pattern as /search and /dashboard); mutations live on the contact
+ * detail page.
+ */
+export default async function ContactsPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  const sp = await searchParams;
+  const sortParam = one(sp.sort);
+  const sort = CRM_CONTACTS_SORTS.includes(sortParam as CrmContactsSort)
+    ? (sortParam as CrmContactsSort)
+    : 'recent';
+  const rawOffset = Number(one(sp.offset) ?? '0');
+  const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.floor(rawOffset)) : 0;
+
+  const [page, followUps] = await Promise.all([
+    listCrmContacts(conn, { limit: PAGE_SIZE, offset, sort }),
+    listFollowUps(conn, { view: 'pending', limit: 5 }),
+  ]);
+  const now = new Date();
+
+  const sortHref = (value: CrmContactsSort) =>
+    `/contacts?sort=${value}${offset > 0 ? `&offset=${offset}` : ''}`;
 
   return (
     <div>
       <h1>Contacts</h1>
-      <a href="/api/export?format=csv">Export CSV</a>
-      {contacts.length === 0 ? (
+      <p style={{ marginTop: '0.25rem' }}>
+        <strong>{page.total}</strong> contact{page.total === 1 ? '' : 's'} ·{' '}
+        <span style={{ color: followUps.counts.overdue > 0 ? '#b91c1c' : undefined }}>
+          {followUps.counts.overdue} overdue
+        </span>{' '}
+        · {followUps.counts.dueToday} due today · {followUps.counts.upcoming} upcoming{' '}
+        <Link href="/api/export?format=csv" style={{ marginLeft: '0.75rem' }}>
+          Export CSV
+        </Link>
+      </p>
+
+      {page.total === 0 ? (
         <p>
-          No contacts yet. <a href="/import">Import your connections</a> to get started.
+          No contacts yet. <Link href="/import">Import your connections</Link> to get started.
         </p>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Company</th>
-              <th>Role</th>
-              <th>Source</th>
-            </tr>
-          </thead>
-          <tbody>
-            {contacts.map((c) => (
-              <tr key={c.id}>
-                <td>{c.fullName}</td>
-                <td>{c.company}</td>
-                <td>{c.role}</td>
-                <td>{c.source}</td>
-              </tr>
+        <>
+          {followUps.followUps.length > 0 && (
+            <section aria-label="Due follow-ups" style={{ marginTop: '1rem' }}>
+              <h2 style={{ fontSize: '1rem' }}>Needs attention</h2>
+              <ul style={{ margin: '0.25rem 0', paddingLeft: '1.25rem' }}>
+                {followUps.followUps.map((f) => (
+                  <li key={f.id}>
+                    <Link href={`/contacts/${f.contactId}`}>{f.contactName}</Link> — due{' '}
+                    {relativeDayLabel(f.effectiveDueAt, now)}
+                    {f.reason ? ` · “${f.reason}”` : ''}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          <div style={{ marginBottom: '0.5rem', marginTop: '1rem' }}>
+            Sort by:{' '}
+            {CRM_CONTACTS_SORTS.map((s) => (
+              <span key={s} style={{ marginRight: '0.75rem' }}>
+                {sort === s ? <strong>{SORT_LABELS[s]}</strong> : <Link href={sortHref(s)}>{SORT_LABELS[s]}</Link>}
+              </span>
             ))}
-          </tbody>
-        </table>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Company</th>
+                <th>Role</th>
+                <th>Last touch</th>
+                <th>Interactions</th>
+                <th>Score</th>
+                <th>Next follow-up</th>
+              </tr>
+            </thead>
+            <tbody>
+              {page.contacts.map((c) => (
+                <tr key={c.id}>
+                  <td>
+                    <Link href={`/contacts/${c.id}`}>{c.fullName}</Link>
+                  </td>
+                  <td>{c.company ?? ''}</td>
+                  <td>{c.role ?? ''}</td>
+                  <td>{c.lastInteraction ? relativeDayLabel(c.lastInteraction, now) : '–'}</td>
+                  <td>{c.interactionCount}</td>
+                  <td>{scoreLabel(c.relationshipScore)}</td>
+                  <td>{dueLabel(c.nextFollowUpAt, now)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
+            {offset > 0 && (
+              <Link href={`/contacts?sort=${sort}&offset=${Math.max(0, offset - PAGE_SIZE)}`}>
+                ← Previous
+              </Link>
+            )}
+            {offset + page.contacts.length < page.total && (
+              <Link href={`/contacts?sort=${sort}&offset=${offset + PAGE_SIZE}`}>Next →</Link>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

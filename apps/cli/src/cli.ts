@@ -7,6 +7,7 @@ import { registerSearchCommand } from './commands/search';
 import { registerOutreachCommand } from './commands/outreach';
 import { registerAnalyzeCommand } from './commands/analyze';
 import { registerTrackCommand } from './commands/track';
+import { registerCampaignCommand } from './commands/campaign';
 import { registerCardCommand } from './commands/card';
 import { registerExportCommand } from './commands/export';
 import { registerMigrateCommand } from './commands/migrate';
@@ -27,6 +28,7 @@ export function createProgram(): Command {
   registerOutreachCommand(program);
   registerAnalyzeCommand(program);
   registerTrackCommand(program);
+  registerCampaignCommand(program);
   registerExportCommand(program);
   registerCardCommand(program);
   registerMigrateCommand(program);

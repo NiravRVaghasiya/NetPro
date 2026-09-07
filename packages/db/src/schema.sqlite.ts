@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, primaryKey } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, primaryKey, index } from 'drizzle-orm/sqlite-core';
 import type { AdapterAccountType } from 'next-auth/adapters';
 
 export const contacts = sqliteTable('contacts', {
@@ -42,7 +42,12 @@ export const contacts = sqliteTable('contacts', {
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
   deletedAt: text('deleted_at'),
-});
+}, (t) => ({
+  // CRM read paths: score-ordered lists (search `score` sort, dormant ties)
+  // and last-touch recency scans. Index plan from the DB & Pipeline Deep Dive.
+  relationshipScoreIdx: index('idx_contacts_relationship_score').on(t.relationshipScore),
+  lastInteractionIdx: index('idx_contacts_last_interaction').on(t.lastInteraction),
+}));
 
 export const interactions = sqliteTable('interactions', {
   id: text('id').primaryKey(),
@@ -59,7 +64,11 @@ export const interactions = sqliteTable('interactions', {
 
   occurredAt: text('occurred_at').notNull(),
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (t) => ({
+  // Per-contact history (timeline, score recompute) and campaign stats.
+  contactIdx: index('idx_interactions_contact').on(t.contactId, t.occurredAt),
+  campaignIdx: index('idx_interactions_campaign').on(t.campaignId),
+}));
 
 export const edges = sqliteTable('edges', {
   id: text('id').primaryKey(),
@@ -112,7 +121,9 @@ export const campaigns = sqliteTable('campaigns', {
 
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (t) => ({
+  statusIdx: index('idx_campaigns_status').on(t.status),
+}));
 
 export const campaignRecipients = sqliteTable('campaign_recipients', {
   id: text('id').primaryKey(),
@@ -130,7 +141,11 @@ export const campaignRecipients = sqliteTable('campaign_recipients', {
   bouncedAt: text('bounced_at'),
 
   errorMessage: text('error_message'),
-});
+}, (t) => ({
+  // Campaign detail views (per-status) and the drip schedule.
+  statusIdx: index('idx_campaign_recipients_status').on(t.campaignId, t.status),
+  scheduledIdx: index('idx_campaign_recipients_scheduled').on(t.scheduledAt),
+}));
 
 export const searchIndex = sqliteTable('search_index', {
   contactId: text('contact_id').primaryKey().references(() => contacts.id, { onDelete: 'cascade' }),
@@ -179,7 +194,11 @@ export const followUps = sqliteTable('follow_ups', {
   recurrenceRule: text('recurrence_rule'),
 
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (t) => ({
+  // Due lists and per-contact pending lookups.
+  dueIdx: index('idx_followups_due').on(t.dueAt),
+  contactIdx: index('idx_followups_contact').on(t.contactId),
+}));
 
 export const activityLog = sqliteTable('activity_log', {
   id: text('id').primaryKey(),

@@ -6,3 +6,4 @@ export * as crm from './crm';
 export * as importPipeline from './import';
 export * as exportPipeline from './export';
 export * as card from './card';
+export * as campaigns from './campaigns';
