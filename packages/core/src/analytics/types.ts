@@ -6,6 +6,8 @@
 // injectable `now` clock: growth windows, dormancy cutoffs, and month
 // buckets are all relative to "now", and injecting it keeps tests
 // deterministic without frozen timers.
+import type { GraphAnalysisOptions } from "../graph/analysis";
+import type { NetworkGraph } from "../graph/network";
 
 /** Options accepted by every analytics function. All fields optional. */
 export interface AnalyticsOptions {
@@ -17,6 +19,13 @@ export interface AnalyticsOptions {
   growthMonths?: number;
   /** Max rows for list-shaped sections: dormant ties, clusters (default 10, max 100). */
   limit?: number;
+  /**
+   * Include the v2.0 graph-analytics section (`NetworkGraph`) in the
+   * overview. Default true; the dashboard relies on it, `?graph=0` opts out.
+   */
+  includeGraph?: boolean;
+  /** Filters forwarded to the graph analytics (status/relation/confidence/depth). */
+  graph?: GraphAnalysisOptions;
   /**
    * Injected clock for deterministic behavior/tests. Defaults to `new Date()`.
    * All window math uses UTC.
@@ -168,5 +177,11 @@ export interface NetworkOverview {
   topIndustries: TopValue[];
   clusters: ClusterInfo[];
   dormant: DormantContact[];
+  /**
+   * v2.0 graph analytics (communities, centrality, components, warm-intro
+   * candidates) — present unless `includeGraph: false`. Attribute clusters
+   * above stay the fallback when no confirmed edges exist yet.
+   */
+  graph?: NetworkGraph;
   generatedAt: string;
 }

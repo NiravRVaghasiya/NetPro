@@ -7,8 +7,8 @@
 [![Release: v1.5.0](https://img.shields.io/badge/Release-v1.5.0-2ea44f)](https://github.com/NiravRVaghasiya/NetPro/releases)
 [![Changelog](https://img.shields.io/badge/Changelog-CHANGELOG.md-8A2BE2)](CHANGELOG.md)
 
-**v1.0 (Phases 1–6) and v1.5 (Phases 7–8) are implemented** on top of the
-v0.1-alpha scaffold:
+**v1.0 (Phases 1–6), v1.5 (Phases 7–8), and v2.0 Phases 1–2 are
+implemented** on top of the v0.1-alpha scaffold:
 
 - **Phase 1 — Import, Enrichment & Export:** LinkedIn CSV import with
   dedup/merge, three-provider contact enrichment (Hunter.io, People Data Labs,
@@ -96,27 +96,41 @@ v0.1-alpha scaffold:
 > See [owner authentication setup](docs/getting-started.md#configure-owner-sign-in).
 
 The full monorepo (CLI + web, dual-dialect Drizzle database, GitHub OAuth via
-Auth.js) builds, lints, typechecks, and tests successfully — **592 tests**,
+Auth.js) builds, lints, typechecks, and tests successfully — **698 tests**,
 plus a live PostgreSQL integration suite that runs in CI against a real
 database. **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
 reminders, and batch campaigns are implemented, and per-contact relationship
-scoring now has a producer (interaction logging). Next up is **v2.0 — "The
-Strategist"** (see the [v2.0 implementation
-plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)): graph
-analytics (Louvain communities, centrality, warm-intro paths over the `edges`
-table), hybrid search (SQLite FTS5 + pgvector with RRF re-ranking), a skills
-gap analyzer, and an event matcher. The blueprint also lists real SMTP delivery
+scoring now has a producer (interaction logging). **v2.0 — "The Strategist"**
+is underway (see the [v2.0 implementation
+plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
+
+- **Phase 1 — Edge provenance (shipped):** `edges` gained `source`,
+  `confidence`, `status` + indexes, plus `netpro edge`, CSV mutuals as
+  *pending* candidates, and “also met at…” attendance.
+- **Phase 2 — Graph analytics engine (shipped):** pure-TS Louvain community
+  detection, degree + Brandes betweenness centrality, and a warm-intro
+  pathfinder (BFS over `edges`, `maxDepth` 4 default) in
+  `packages/core/graph`, surfaced through `netpro analyze --graph`, the
+  `graph` payload of `GET /api/analytics`, and a “Network graph” strip on
+  `/dashboard`. Over-budget graphs degrade with documented notices, never
+  silent zeroes.
+- Still ahead in v2.0: the pathfinder surface (`/graph`, `netpro path`,
+  draft-the-intro), hybrid search (FTS5 + pgvector + RRF), the skills gap
+  analyzer, the event matcher, and the release cut. The blueprint also lists real SMTP delivery
 for campaigns as optional follow-up work (NetPro drafts today; a human sends).
 Per-user encrypted web key storage and the `$EDITOR` draft-review loop remain
 deferred and are documented in the
 [Phase 4 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase4-ai-outreach-design.md).
 
-> **Analytics scope note:** clustering is still attribute-based (normalized
-> company) until v2.0 Phase 2. **v2.0 Phase 1 ships edge provenance** — the
-> `edges` table now has producers (`netpro edge`, CSV mutuals as *pending*
-> candidates, “also met at…” attendance) so later graph analytics have data
-> users can trust. Per-contact **relationship scoring ships with the CRM
-> (Phase 7)** and is recomputed on every logged interaction.
+> **Analytics scope note:** as of v2.0 Phase 2 the clustering story is
+> **two-section**: attribute clusters (normalized company) remain for
+> “who's where”, while the **Network graph** section is graph-native — Louvain
+> communities, centrality, components, average path length, and warm-intro
+> candidates over the confirmed `edges`. Inferred (pending) edges are excluded
+> until the owner confirms them. Phase 1's producers (`netpro edge`, CSV
+> mutuals as *pending* candidates, “also met at…” attendance) feed the graph;
+> per-contact **relationship scoring ships with the CRM (Phase 7)** and is
+> recomputed on every logged interaction.
 
 > **Search implementation note:** this is the v1 _portable_ search —
 > case-insensitive substring matching and facets in ANSI SQL that runs
@@ -141,7 +155,7 @@ for the draft-only campaign decisions.
 - `apps/web` — Next.js app (App Router), Auth.js v5 with GitHub OAuth
 - `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|outreach|analyze|track|edge|campaign|export|card|migrate`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
-- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, and graph edge provenance
+- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, and the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths)
 - `packages/ui` — shared React components
 - `packages/config` — shared ESLint and Tailwind configs
 

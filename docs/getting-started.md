@@ -126,6 +126,7 @@ node apps/cli/dist/index.js analyze
 # Section views
 node apps/cli/dist/index.js analyze --network-score
 node apps/cli/dist/index.js analyze --clusters
+node apps/cli/dist/index.js analyze --graph   # v2.0: Louvain communities, centrality, warm-intro candidates
 node apps/cli/dist/index.js analyze --dormant --days 60 --limit 20
 
 # Machine-readable output (the full overview payload)
@@ -134,7 +135,10 @@ node apps/cli/dist/index.js analyze --json
 
 In the web app, the **Dashboard** page (`/dashboard`) renders the same numbers
 from `GET /api/analytics`: metric cards, a 12-month growth chart, top
-companies/industries, clusters, and your reconnect list.
+companies/industries, clusters, your reconnect list, and — since v2.0
+Phase 2 — a **Network graph** section (Louvain communities, centrality,
+components, and warm-intro candidates over your confirmed edges; `pending`
+candidates stay out until you confirm them).
 
 > Analytics reads LinkedIn's "Connected On" date — imports record it as the
 > contact's `createdAt` and initial `lastInteraction`, so growth reflects when

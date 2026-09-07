@@ -2,6 +2,7 @@ import Link from "next/link";
 import { conn } from "@/lib/db";
 import {
   getNetworkOverview,
+  type NetworkGraph,
   type NetworkOverview,
 } from "@netpro/core/src/analytics";
 import { listFollowUps } from "@netpro/core/src/crm";
@@ -63,6 +64,113 @@ function ValueBars({ values, total }: { values: NetworkOverview["topCompanies"];
         </li>
       ))}
     </ul>
+  );
+}
+
+/** v2.0 Phase 2 — graph-native analytics strip (communities/centrality/paths). */
+function NetworkGraphSection({ graph }: { graph: NetworkGraph | undefined }) {
+  if (!graph) return null;
+  if (graph.degraded) {
+    return (
+      <section style={{ marginTop: "1.5rem" }}>
+        <h2>Network graph</h2>
+        <p style={{ color: "#b45309" }}>{graph.degraded.reason}</p>
+      </section>
+    );
+  }
+  if (graph.nodes === 0) {
+    return (
+      <section style={{ marginTop: "1.5rem" }}>
+        <h2>Network graph</h2>
+        <p style={{ color: "#9ca3af" }}>
+          No confirmed edges yet. Import a LinkedIn CSV (mutuals arrive as candidates) or{" "}
+          <Link href="/edges">add links yourself</Link>
+          {graph.pendingCandidates > 0 ? (
+            <>
+              {" · "}
+              <Link href="/edges?status=pending">
+                {graph.pendingCandidates} pending candidate{graph.pendingCandidates === 1 ? "" : "s"} to review
+              </Link>
+            </>
+          ) : null}
+          .
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section style={{ marginTop: "1.5rem" }}>
+      <h2>Network graph</h2>
+      <p style={{ color: "#6b7280", margin: "0.25rem 0" }}>
+        {graph.nodes} of {graph.totalContacts} contacts linked by {graph.edges} confirmed edge
+        {graph.edges === 1 ? "" : "s"} · {graph.components.count} component
+        {graph.components.count === 1 ? "" : "s"} (largest {graph.components.largestSize})
+        {graph.avgPathLength.value !== null ? ` · avg path length ${graph.avgPathLength.value}` : ""}
+        {" · "}
+        <Link href="/edges">manage edges</Link>
+      </p>
+      <div style={{ display: "flex", gap: "2rem", flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 260px" }}>
+          <h3>Communities ({graph.communities.count}, modularity {graph.communities.modularity})</h3>
+          <ul>
+            {graph.communities.top.map((c) => (
+              <li key={c.communityId}>
+                <strong>{c.label}</strong> — {c.size} member{c.size === 1 ? "" : "s"} (
+                {Math.round(c.share * 100)}%){" "}
+                <span style={{ color: "#6b7280" }}>
+                  {c.members.map((m) => m.fullName).join(", ")}
+                  {c.truncated ? "…" : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div style={{ flex: "1 1 260px" }}>
+          <h3>Most connected</h3>
+          <ul>
+            {graph.centrality.top.map((t) => (
+              <li key={t.contactId}>
+                <Link href={`/contacts/${t.contactId}`}>{t.fullName}</Link> — {t.degree} edge
+                {t.degree === 1 ? "" : "s"}
+                {t.betweenness !== null ? (
+                  <span style={{ color: "#6b7280" }}> · betweenness {t.betweenness}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          {!graph.centrality.betweennessComputed && graph.centrality.skippedReason ? (
+            <p style={{ color: "#9ca3af", fontSize: "0.75rem" }}>{graph.centrality.skippedReason}</p>
+          ) : null}
+        </div>
+      </div>
+      {graph.warmIntros.length > 0 ? (
+        <div style={{ marginTop: "0.75rem" }}>
+          <h3>Warm-intro candidates</h3>
+          <ul>
+            {graph.warmIntros.map((w) => (
+              <li key={`${w.contactId}-${w.targetId}`}>
+                <Link href={`/contacts/${w.contactId}`}>{w.contactName}</Link> →{" "}
+                <Link href={`/contacts/${w.targetId}`}>{w.targetName}</Link>{" "}
+                <span style={{ color: "#6b7280" }}>
+                  via{" "}
+                  <Link href={`/contacts/${w.viaId}`}>{w.viaName}</Link> ({w.hops} hops)
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {graph.pendingCandidates > 0 ? (
+        <p style={{ color: "#92400e", fontSize: "0.875rem" }}>
+          <Link href="/edges?status=pending">
+            {graph.pendingCandidates} pending edge candidate
+            {graph.pendingCandidates === 1 ? "" : "s"}
+          </Link>{" "}
+          are excluded from the analysis until you confirm them.
+        </p>
+      ) : null}
+    </section>
   );
 }
 
@@ -247,6 +355,8 @@ export default async function DashboardPage() {
           </ul>
         )}
       </section>
+
+      <NetworkGraphSection graph={overview.graph} />
 
       <section style={{ marginTop: "1.5rem" }}>
         <h2>Dormant ties</h2>

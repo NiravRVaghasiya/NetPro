@@ -1,8 +1,6 @@
 import { describe, it, expect } from "vitest";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import * as schema from "@netpro/db/src/schema.sqlite";
 import type { SqliteConn } from "@netpro/db";
+import { createTestSqliteConn } from "@netpro/db/src/testing";
 import {
   computeNetworkMetrics,
   computeNetworkScore,
@@ -18,21 +16,10 @@ import { getNetworkOverview } from "./overview";
 import type { AnalyticsOptions } from "./types";
 
 function createTestConn(): SqliteConn {
-  const sqlite = new Database(":memory:");
-  const db = drizzle(sqlite, { schema });
-  sqlite.exec(`
-    CREATE TABLE contacts (
-      id TEXT PRIMARY KEY, full_name TEXT NOT NULL, first_name TEXT, last_name TEXT,
-      email TEXT, email_verified INTEGER DEFAULT 0, phone TEXT, avatar_url TEXT,
-      headline TEXT, company TEXT, company_domain TEXT, role TEXT, seniority TEXT,
-      department TEXT, industry TEXT, location TEXT, country TEXT, timezone TEXT,
-      linkedin_url TEXT, github_url TEXT, twitter_url TEXT, website_url TEXT,
-      source TEXT NOT NULL, source_id TEXT, tags TEXT, custom_fields TEXT, notes TEXT,
-      relationship_score REAL DEFAULT 0, last_interaction TEXT, interaction_count INTEGER DEFAULT 0,
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
-    );
-  `);
-  return { dialect: "sqlite", db, schema };
+  // Migrated fixture (see @netpro/db/src/testing): every table the overview
+  // reads — contacts AND edges (v2.0 graph section) — comes from the real
+  // migrations, never from duplicated DDL.
+  return createTestSqliteConn().conn;
 }
 
 interface Seed {

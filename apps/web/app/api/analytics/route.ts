@@ -9,11 +9,13 @@ function num(value: string | null): number | undefined {
 }
 
 /**
- * GET /api/analytics?days=&activeDays=&months=&limit=
- * Returns the full NetworkOverview JSON the dashboard renders.
+ * GET /api/analytics?days=&activeDays=&months=&limit=&graph=
+ * Returns the full NetworkOverview JSON the dashboard renders — including
+ * the v2.0 graph-analytics section unless `graph=0` opts out.
  */
 export async function GET(request: Request) {
   const p = new URL(request.url).searchParams;
+  const graph = p.get("graph");
 
   try {
     const overview = await getNetworkOverview(conn, {
@@ -21,6 +23,7 @@ export async function GET(request: Request) {
       activeDays: num(p.get("activeDays")),
       growthMonths: num(p.get("months")),
       limit: num(p.get("limit")),
+      includeGraph: graph === null ? true : graph !== "0",
     });
     return NextResponse.json(overview);
   } catch (error) {

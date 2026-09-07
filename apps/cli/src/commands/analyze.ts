@@ -6,6 +6,7 @@ import {
   type ScoreBreakdown,
   type TopValue,
 } from "@netpro/core/src/analytics";
+import type { NetworkGraph } from "@netpro/core/src/graph";
 
 export interface AnalyzeCommandOptions {
   // Commander stores hyphenated long flags under camelCase keys
@@ -14,6 +15,7 @@ export interface AnalyzeCommandOptions {
   dormant?: boolean;
   clusters?: boolean;
   networkScore?: boolean;
+  graph?: boolean;
   limit?: string;
   json?: boolean;
 }
@@ -40,17 +42,20 @@ export function toAnalyzeOptions(
   };
 }
 
-/** The three section flags are mutually exclusive; absent all → full report. */
-export function selectedSection(opts: AnalyzeCommandOptions): "score" | "dormant" | "clusters" | "full" {
-  const sections = [opts.networkScore, opts.dormant, opts.clusters].filter(Boolean);
+/** The four section flags are mutually exclusive; absent all → full report. */
+export function selectedSection(
+  opts: AnalyzeCommandOptions,
+): "score" | "dormant" | "clusters" | "graph" | "full" {
+  const sections = [opts.networkScore, opts.dormant, opts.clusters, opts.graph].filter(Boolean);
   if (sections.length > 1) {
     throw new Error(
-      "--network-score, --dormant, and --clusters are mutually exclusive — pick one, or omit all for the full report",
+      "--network-score, --dormant, --clusters, and --graph are mutually exclusive — pick one, or omit all for the full report",
     );
   }
   if (opts.networkScore) return "score";
   if (opts.dormant) return "dormant";
   if (opts.clusters) return "clusters";
+  if (opts.graph) return "graph";
   return "full";
 }
 
@@ -125,6 +130,62 @@ export function renderClustersSection(overview: NetworkOverview): string[] {
   return lines;
 }
 
+/** v2.0 Phase 2 — the graph-analytics strip in text form. */
+export function renderGraphSection(graph: NetworkGraph | undefined): string[] {
+  if (!graph) return [];
+  if (graph.degraded) {
+    return ["Network graph:", `  ${graph.degraded.reason}`];
+  }
+  if (graph.nodes === 0) {
+    const pending =
+      graph.pendingCandidates > 0
+        ? ` ${graph.pendingCandidates} pending candidate${graph.pendingCandidates === 1 ? "" : "s"} to review with \`netpro edge list --status pending\`.`
+        : "";
+    return [
+      "Network graph:",
+      `  No confirmed edges yet — link people with \`netpro edge add "A" "B"\`;${pending}`,
+    ];
+  }
+
+  const lines = [
+    `Network graph (${graph.nodes} of ${graph.totalContacts} contacts linked · ${graph.edges} edges):`,
+    `  Communities: ${graph.communities.count} (modularity ${graph.communities.modularity})`,
+  ];
+  for (const c of graph.communities.top.slice(0, 5)) {
+    const names = c.members.map((m) => m.fullName).join(", ");
+    lines.push(
+      `    ${c.label} — ${c.size} ${c.size === 1 ? "person" : "people"}${names ? `: ${names}${c.truncated ? "…" : ""}` : ""}`,
+    );
+  }
+
+  const apl =
+    graph.avgPathLength.value !== null
+      ? ` · avg path length ${graph.avgPathLength.value.toFixed(2)}`
+      : graph.avgPathLength.note
+        ? " · avg path length n/a (over the exact-BFS budget)"
+        : "";
+  lines.push(`  Components: ${graph.components.count} (largest ${graph.components.largestSize})${apl}`);
+
+  lines.push("  Most connected:");
+  for (const t of graph.centrality.top.slice(0, 5)) {
+    const btw = t.betweenness !== null ? ` · betweenness ${t.betweenness.toFixed(2)}` : "";
+    lines.push(`    ${t.fullName} — ${t.degree} edge${t.degree === 1 ? "" : "s"}${btw}`);
+  }
+
+  if (graph.warmIntros.length > 0) {
+    lines.push("  Warm-intro candidates (contact → target, via the strongest intermediary):");
+    for (const w of graph.warmIntros.slice(0, 5)) {
+      lines.push(`    ${w.contactName} → ${w.targetName} via ${w.viaName} (${w.hops} hops)`);
+    }
+  }
+  if (graph.pendingCandidates > 0) {
+    lines.push(
+      `  ${graph.pendingCandidates} pending edge candidate${graph.pendingCandidates === 1 ? "" : "s"} excluded from the analysis — review with \`netpro edge list --status pending\`.`,
+    );
+  }
+  return lines;
+}
+
 export async function executeAnalyze(
   options: AnalyzeCommandOptions,
   conn: SqliteConn | PgConn,
@@ -147,6 +208,9 @@ export async function executeAnalyze(
   if (section === "clusters") {
     return renderClustersSection(overview).join("\n");
   }
+  if (section === "graph") {
+    return renderGraphSection(overview.graph).join("\n");
+  }
 
   const m = overview.metrics;
   const g = overview.growth;
@@ -165,6 +229,8 @@ export async function executeAnalyze(
     "",
     ...renderClustersSection(overview),
     "",
+    ...renderGraphSection(overview.graph),
+    "",
     ...renderDormantSection(overview, analyticsOptions.dormantDays),
   ];
   return lines.filter((l) => l !== "").join("\n").replace(/\n{3,}/g, "\n\n");
@@ -173,10 +239,11 @@ export async function executeAnalyze(
 export function registerAnalyzeCommand(program: Command): void {
   program
     .command("analyze")
-    .description("Analyze your network: score, growth, diversity, clusters, dormant ties")
+    .description("Analyze your network: score, growth, diversity, clusters, dormant ties, graph")
     .option("--days <n>", "Dormancy window in days (default 90)", "90")
     .option("--dormant", "Show only the dormant-ties section")
     .option("--clusters", "Show only the clusters section")
+    .option("--graph", "Show only the graph-analytics section (v2.0)")
     .option("--network-score", "Print just the network score and its factors")
     .option("--limit <n>", "Max rows per list (default 10)", "10")
     .option("--json", "Print the full overview as JSON")
