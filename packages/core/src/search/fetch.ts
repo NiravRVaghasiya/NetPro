@@ -33,6 +33,7 @@ export function contactColumns(conn: Conn): ContactsColumns {
     relationshipScore: t.relationshipScore,
     lastInteraction: t.lastInteraction,
     deletedAt: t.deletedAt,
+    skills: t.skills,
   };
 }
 

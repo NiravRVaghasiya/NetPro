@@ -12,6 +12,7 @@
 // references passed in.
 import { and, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import type { SearchSort } from "./types";
+import { canonicalSkill } from "../skills/taxonomy";
 
 /** Structural view of the contacts columns the search touches. */
 export interface ContactsColumns {
@@ -26,6 +27,8 @@ export interface ContactsColumns {
   relationshipScore: AnyColumn;
   lastInteraction: AnyColumn;
   deletedAt: AnyColumn;
+  /** Derived skills verdict (JSON array text) — v2.0 Phase 5. */
+  skills: AnyColumn;
 }
 
 export interface PreparedTermFilters {
@@ -61,6 +64,7 @@ export function buildSearchConditions(
     seniority?: string;
     hasEmail?: boolean;
     minScore?: number;
+    skills?: string[];
   },
   filters: PreparedTermFilters,
 ): SQL | undefined {
@@ -98,6 +102,20 @@ export function buildSearchConditions(
     conds.push(
       sql`${c.lastInteraction} IS NOT NULL AND ${c.lastInteraction} >= ${filters.cutoff}`,
     );
+  }
+
+  // Skills: the verdict is a JSON array of canonical names stored as text in
+  // both dialects, so a quoted-name substring test is exact (names never
+  // contain quotes) and portable — no JSON operators, no dialect branch. An
+  // unknown name yields a condition that matches nothing rather than being
+  // dropped: a typo must narrow the result to zero, never silently widen it.
+  for (const raw of opts.skills ?? []) {
+    const skill = canonicalSkill(raw);
+    if (!skill) {
+      conds.push(sql`1 = 0`);
+      break;
+    }
+    conds.push(sql`${c.skills} IS NOT NULL AND ${c.skills} LIKE ${"%\"" + skill + "\"%"}`);
   }
 
   return and(...conds) ?? undefined;

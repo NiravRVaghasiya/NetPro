@@ -30,6 +30,18 @@ export interface SearchCommandOptions {
   // v2.0 Phase 4 — hybrid search. `--semantic` is shorthand for `--mode hybrid`.
   mode?: string;
   semantic?: boolean;
+  // v2.0 Phase 5 — derived skills filter (comma-separated, all required).
+  skills?: string;
+}
+
+/** Split a comma/semicolon list into trimmed, non-empty values (undefined when empty). */
+export function parseSkillsFlag(value: string | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
+  const list = value
+    .split(/[,;]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return list.length > 0 ? list : undefined;
 }
 
 const VALID_SORTS: SearchSort[] = ["relevance", "score", "recent", "name"];
@@ -87,6 +99,7 @@ export function toSearchOptions(
     hasEmail: opts.hasEmail,
     minScore,
     lastActiveWithinDays: parseNumber(opts.activeWithin, "active-within"),
+    skills: parseSkillsFlag(opts.skills),
     sort,
     limit: parseNumber(opts.limit, "limit"),
     offset: parseNumber(opts.offset, "offset"),
@@ -212,6 +225,10 @@ export function registerSearchCommand(program: Command): void {
     .option(
       "--active-within <days>",
       "Only contacts active within the last N days",
+    )
+    .option(
+      "--skills <list>",
+      "Only contacts whose derived skills include every listed skill (comma-separated; run `netpro skills extract` first)",
     )
     .option("--sort <order>", "relevance | score | recent | name", "relevance")
     .option(

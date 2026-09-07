@@ -22,6 +22,16 @@ function str(value: string | null): string | undefined {
   return value && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+/** `skills=python,k8s` → ["python", "k8s"]; empty/blank → undefined. */
+function list(value: string | null): string[] | undefined {
+  if (value === null) return undefined;
+  const items = value
+    .split(/[,;]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return items.length > 0 ? items : undefined;
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const p = url.searchParams;
@@ -58,6 +68,7 @@ export async function GET(request: Request) {
     hasEmail: p.get("hasEmail") === "true",
     minScore: num(p.get("minScore")),
     lastActiveWithinDays: num(p.get("activeWithin")),
+    skills: list(p.get("skills")),
     sort: sortParam,
     limit: num(p.get("limit")),
     offset: num(p.get("offset")),

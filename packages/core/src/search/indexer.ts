@@ -45,6 +45,8 @@ export interface IndexableContact {
   country?: string | null;
   notes?: string | null;
   tags?: unknown;
+  /** Derived skills verdict (v2.0 Phase 5) — JSON array or JSON string. */
+  skills?: unknown;
 }
 
 export interface SearchDocument {
@@ -106,6 +108,10 @@ export function buildSearchDocument(contact: IndexableContact): SearchDocument {
     contact.location,
     contact.country,
     ...tagWords(contact.tags),
+    // Skills go in after tags: an explicit verdict outranks a notes mention,
+    // and a contact whose only "kubernetes" signal is the derived verdict is
+    // exactly the one a keyword search should still find.
+    ...tagWords(contact.skills),
     contact.notes,
   ];
 
@@ -211,6 +217,7 @@ interface ContactRow extends Record<string, unknown> {
   country: string | null;
   notes: string | null;
   tags: unknown;
+  skills: unknown;
 }
 
 interface IndexRow extends Record<string, unknown> {
@@ -242,7 +249,7 @@ export async function reindexSearchIndex(
   const contacts = await rawAll<ContactRow>(
     conn,
     sql`SELECT id, full_name, email, headline, company, role, seniority, department,
-               industry, location, country, notes, tags
+               industry, location, country, notes, tags, skills
         FROM contacts
         WHERE deleted_at IS NULL${scope}
         ORDER BY id${limitClause}`,
@@ -293,6 +300,7 @@ export async function reindexSearchIndex(
       country: row.country,
       notes: row.notes,
       tags: row.tags,
+      skills: row.skills,
     });
 
     const prior = existing.get(row.id);

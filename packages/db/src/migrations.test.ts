@@ -292,3 +292,109 @@ describe("hybrid search migration (v2.0 phase 4)", () => {
     }
   });
 });
+
+describe("skills migration (v2.0 phase 5)", () => {
+  it("adds the nullable contacts.skills column and leaves existing rows untouched", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: folder });
+      const skills = sqlite
+        .prepare("PRAGMA table_info(contacts)")
+        .all()
+        .find((r) => (r as { name: string }).name === "skills") as
+        | { type: string; notnull: number; dflt_value: unknown }
+        | undefined;
+      expect(skills).toMatchObject({ type: "TEXT", notnull: 0, dflt_value: null });
+
+      sqlite
+        .prepare(
+          "INSERT INTO contacts (id, full_name, source, created_at, updated_at) VALUES (?,?,?,?,?)",
+        )
+        .run("c1", "Jane Doe", "test", "n", "n");
+      expect(sqlite.prepare("SELECT skills FROM contacts WHERE id = 'c1'").get()).toEqual({
+        skills: null,
+      });
+      // JSON-mode column: an array round-trips through drizzle as an array.
+      db.update(schema.contacts)
+        .set({ skills: ["python", "kubernetes"] })
+        .run();
+      expect(sqlite.prepare("SELECT skills FROM contacts WHERE id = 'c1'").get()).toEqual({
+        skills: '["python","kubernetes"]',
+      });
+      expect(db.select({ skills: schema.contacts.skills }).from(schema.contacts).get()).toEqual({
+        skills: ["python", "kubernetes"],
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("upgrades a pre-0005 database in place, keeping the contact and the search index", () => {
+    const temporary = mkdtempSync(join(tmpdir(), "netpro-migration-0005-"));
+    const sqlite = new Database(":memory:");
+    try {
+      const journal = JSON.parse(
+        readFileSync(join(folder, "meta/_journal.json"), "utf8"),
+      ) as { entries: Array<{ tag: string }> };
+      const upTo0004 = journal.entries.filter((e) => !e.tag.startsWith("0005"));
+      expect(upTo0004.length).toBe(journal.entries.length - 1);
+      mkdirSync(join(temporary, "meta"));
+      writeFileSync(
+        join(temporary, "meta/_journal.json"),
+        JSON.stringify({ ...journal, entries: upTo0004 }),
+      );
+      for (const entry of upTo0004) {
+        copyFileSync(
+          join(folder, `${entry.tag}.sql`),
+          join(temporary, `${entry.tag}.sql`),
+        );
+      }
+
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: temporary });
+      expect(
+        sqlite
+          .prepare("PRAGMA table_info(contacts)")
+          .all()
+          .some((r) => (r as { name: string }).name === "skills"),
+      ).toBe(false);
+      sqlite
+        .prepare(
+          "INSERT INTO contacts (id, full_name, source, created_at, updated_at) VALUES (?,?,?,?,?)",
+        )
+        .run("legacy", "Ada Lovelace", "test", "n", "n");
+      sqlite
+        .prepare(
+          "INSERT INTO search_index (contact_id, search_text, updated_at) VALUES (?,?,?)",
+        )
+        .run("legacy", "ada lovelace analytical engine", "n");
+
+      migrate(db, { migrationsFolder: folder });
+
+      expect(sqlite.prepare("SELECT full_name, skills FROM contacts").get()).toEqual({
+        full_name: "Ada Lovelace",
+        skills: null,
+      });
+      expect(
+        sqlite
+          .prepare("SELECT contact_id FROM contacts_fts WHERE contacts_fts MATCH ?")
+          .all("analytical"),
+      ).toEqual([{ contact_id: "legacy" }]);
+      expect(
+        sqlite.prepare("SELECT count(*) AS n FROM __drizzle_migrations").get(),
+      ).toEqual({ n: journal.entries.length });
+      // Re-running is a no-op: the column is not added twice.
+      migrate(db, { migrationsFolder: folder });
+      expect(
+        sqlite
+          .prepare("PRAGMA table_info(contacts)")
+          .all()
+          .filter((r) => (r as { name: string }).name === "skills"),
+      ).toHaveLength(1);
+    } finally {
+      sqlite.close();
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  });
+});

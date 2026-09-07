@@ -30,6 +30,7 @@ export default async function AppLayout({
         <Link href="/contacts">Contacts</Link>
         <Link href="/edges">Edges</Link>
         <Link href="/graph">Graph</Link>
+        <Link href="/skills">Skills</Link>
         <Link href="/import">Import</Link>
         <Link href="/settings/card">Profile card</Link>
         <Link href="/settings">Settings</Link>

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { conn } from '@/lib/db';
 import { getContactTimeline } from '@netpro/core/src/crm';
+import { getSkillsProfile, skillCategory, type Skill } from '@netpro/core/src/skills';
 import { dueLabel, relativeDayLabel, scoreLabel, utcDay } from '@/lib/format';
 import { AddFollowUpPanel, FollowUpActions, LogInteractionPanel } from './panels';
 import { MetAtEventPanel } from '../../edges/panels';
@@ -20,6 +21,8 @@ export default async function ContactDetailPage({
   const { id } = await params;
   const timeline = await getContactTimeline(conn, id);
   if (!timeline) notFound();
+  // v2.0 Phase 5 — stored verdict + fresh evidence, one core call.
+  const skills = await getSkillsProfile(conn, id);
 
   const { contact, stats, interactions, followUps } = timeline;
   const now = new Date();
@@ -55,6 +58,8 @@ export default async function ContactDetailPage({
         {stats.interactionCount} interaction{stats.interactionCount === 1 ? '' : 's'} · last touch{' '}
         {stats.lastInteraction ? relativeDayLabel(stats.lastInteraction, now) : 'never'}
       </p>
+
+      {skills ? <SkillsSection profile={skills} /> : null}
 
       <section aria-label="Pending follow-ups" style={{ marginTop: '1.25rem' }}>
         <h2 style={{ fontSize: '1rem' }}>
@@ -122,5 +127,84 @@ export default async function ContactDetailPage({
         </section>
       )}
     </div>
+  );
+}
+
+/**
+ * Skill tags with their evidence (v2.0 Phase 5). Tags are the union of the
+ * stored verdict and what the current text supports; a stored skill the text
+ * no longer backs is shown, but marked, so an owner/AI claim is never
+ * silently dropped and never silently trusted.
+ */
+function SkillsSection({ profile }: { profile: NonNullable<Awaited<ReturnType<typeof getSkillsProfile>>> }) {
+  const { stored, current, unsupported, evidence } = profile;
+  const tags: Skill[] = [...new Set<Skill>([...current.skills, ...stored])];
+  const evidenceFor = (skill: Skill) => current.evidence[skill]?.[0];
+  const latest = evidence[0];
+  return (
+    <section aria-label="Skills" style={{ marginTop: '1.25rem' }}>
+      <h2 style={{ fontSize: '1rem' }}>
+        Skills{' '}
+        <Link href={`/skills`} style={{ fontSize: '0.8rem', fontWeight: 'normal' }}>
+          gap analyzer
+        </Link>
+      </h2>
+      {tags.length === 0 ? (
+        <p style={{ color: '#9ca3af' }}>
+          No taxonomy skills recognised in this contact&apos;s headline, role, notes or tags yet.
+        </p>
+      ) : (
+        <ul style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', padding: 0, listStyle: 'none', margin: 0 }}>
+          {tags.map((skill) => {
+            const ev = evidenceFor(skill);
+            const stale = unsupported.includes(skill);
+            const title = ev
+              ? `${skillCategory(skill)} · from ${ev.field}: “${ev.snippet}”`
+              : 'stored verdict — not supported by the current text';
+            return (
+              <li key={skill}>
+                <Link
+                  href={`/skills?skills=${encodeURIComponent(skill)}`}
+                  title={title}
+                  style={{
+                    display: 'inline-block',
+                    padding: '0.2rem 0.6rem',
+                    border: `1px ${stale ? 'dashed' : 'solid'} ${stale ? '#d97706' : '#e5e7eb'}`,
+                    borderRadius: 999,
+                    textDecoration: 'none',
+                    color: stale ? '#92400e' : '#1f2937',
+                  }}
+                >
+                  {skill}
+                  {stale ? ' ?' : ''}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {current.details.length > 0 ? (
+        <details style={{ marginTop: '0.5rem' }}>
+          <summary style={{ cursor: 'pointer', color: '#6b7280', fontSize: '0.85rem' }}>
+            Why these skills? ({current.details.length} matched)
+          </summary>
+          <ul style={{ fontSize: '0.85rem', color: '#374151', paddingLeft: '1.25rem' }}>
+            {current.details.map((d) => (
+              <li key={d.skill}>
+                <strong>{d.skill}</strong> [{d.category}] · {d.confidence.toFixed(2)} ·{' '}
+                {d.evidence.map((e) => `${e.field}: “${e.snippet}”`).join('; ')}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+      <p style={{ color: '#6b7280', fontSize: '0.8rem', margin: '0.5rem 0 0' }}>
+        {stored.length === 0
+          ? 'Not stored yet — tags above are live from the current text; derive skills on the gap analyzer page to store them.'
+          : `Stored ${latest ? `by ${latest.provider.replace('skills_', '')} extraction on ${utcDay(latest.fetchedAt)}` : ''}${
+              unsupported.length > 0 ? ` · ${unsupported.join(', ')} stored but not supported by the current text` : ''
+            }.`}
+      </p>
+    </section>
   );
 }

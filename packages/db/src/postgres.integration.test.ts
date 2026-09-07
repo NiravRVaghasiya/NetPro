@@ -149,6 +149,29 @@ describeIfPg('PostgreSQL integration', () => {
     expect(row?.interactionCount).toBe(3);
   });
 
+  it('adds contacts.skills as nullable text that round-trips a JSON verdict (phase 5)', async () => {
+    const col = await conn.db.execute<{ data_type: string; is_nullable: string }>(
+      sql`SELECT data_type, is_nullable FROM information_schema.columns
+          WHERE table_name = 'contacts' AND column_name = 'skills'`
+    );
+    expect(col.rows).toEqual([{ data_type: 'text', is_nullable: 'YES' }]);
+
+    await conn.db.insert(schema.contacts).values({
+      id: 'pg-skills',
+      fullName: 'Grace Hopper',
+      source: 'test',
+      skills: JSON.stringify(['python', 'kubernetes']),
+    });
+    const rows = await conn.db.select().from(schema.contacts);
+    const row = rows.find((r) => r.id === 'pg-skills');
+    // Postgres stores the verdict as the exact JSON text the core wrote, so the
+    // shared reader can JSON.parse it identically on both dialects.
+    expect(row?.skills).toBe('["python","kubernetes"]');
+    expect(JSON.parse(row!.skills!)).toEqual(['python', 'kubernetes']);
+    const untouched = rows.find((r) => r.id === 'pg-roundtrip');
+    expect(untouched?.skills).toBeNull();
+  });
+
   it('stores the profile card as plain JSON text in both dialects', async () => {
     const profile = JSON.stringify({ fullName: 'Grace Hopper' });
     await conn.db

@@ -243,6 +243,51 @@ over the owner-only JSON APIs `GET /api/graph/overview` and
 `GET /api/graph/paths?target=&from=&depth=` (the web API caps depth at 6;
 the CLI accepts the engine's full 1–8).
 
+## Find who has the skills you need (v2.0 Phase 5)
+
+NetPro derives **skills** from what you already know about each contact —
+headline, role, department, industry, tags, custom fields and notes — against
+a fixed, explainable taxonomy (~100 skills across languages, frontend,
+backend, mobile, cloud, data, AI, security, product, design, leadership and
+business). Nothing is guessed: every skill points at the field and the words
+that produced it. It runs offline; no key, no network.
+
+```bash
+netpro skills status                          # how many contacts have a stored verdict
+netpro skills extract --dry-run               # preview what would be derived
+netpro skills extract                         # derive + store (idempotent; reruns only write changes)
+netpro skills "Ada Lovelace"                  # stored + current skills with evidence
+netpro skills gap --role "Staff Data Engineer" --skills "python,k8s,airflow"
+netpro skills gap --description "$(cat job.txt)"       # paste a job description
+netpro skills gap --contact bob@data.dev --skills "python,dbt,kubernetes"
+netpro search --skills "python,k8s"           # filter: every listed skill required
+```
+
+`skills gap` prints the required taxonomy skills it recognised (and the names
+it ignored), per-skill coverage — who has each one, strongest tie first — the
+skills **nobody** covers, and the best individual matches ranked by match
+score then relationship. A match score counts a skill as *partial* when an
+adjacent skill covers it (`kubernetes` via `docker`, `sql` via `postgresql`,
+`typescript` via `javascript`), at half weight, and always says which rule
+applied.
+
+Extraction stores the **verdict** on the contact (`contacts.skills`) and the
+**evidence** in `enrichments` (`provider = skills_heuristic | skills_ai`), so a
+re-run can show what changed and why. Source fields are never modified. An
+optional AI pass (`netpro skills extract --mode ai`) reuses the outreach
+credentials and may only pick from the same taxonomy; if the model fails the
+heuristic result still stands and the failure is reported. It is off unless
+you ask for it.
+
+The web app has **Skills** in the navigation (`/skills`): the target form,
+the coverage table (each name links to the contact and to a warm-intro
+search), the gaps, the ranked matches, a one-click **Derive skills** panel,
+and — with no target — a map of what your network collectively knows. Skill
+tags with their evidence appear on every contact page (a stored skill the
+current text no longer supports is drawn dashed with a `?`). The same data is
+available over the owner-only JSON APIs `GET /api/skills/gap?role=&description=&skills=[&contact=]`
+and `POST /api/skills/extract` (`{ mode?, contact?, dryRun? }`).
+
 ## Draft AI outreach
 
 NetPro drafts personalized outreach from your contact data — **you** review and
