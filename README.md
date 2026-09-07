@@ -4,6 +4,8 @@
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FNiravRVaghasiya%2FNetPro&env=DB_DIALECT,DATABASE_URL,NEXTAUTH_SECRET,GITHUB_CLIENT_ID,GITHUB_CLIENT_SECRET,NETPRO_OWNER_GITHUB_ID&envDescription=NetPro%20needs%20a%20Postgres%20URL%2C%20an%20auth%20secret%2C%20a%20GitHub%20OAuth%20app%2C%20and%20your%20numeric%20GitHub%20user%20ID&envLink=https%3A%2F%2Fgithub.com%2FNiravRVaghasiya%2FNetPro%2Fblob%2Fmaster%2Fdocs%2Fdeployment.md&project-name=netpro&repository-name=netpro)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Release: v1.5.0](https://img.shields.io/badge/Release-v1.5.0-2ea44f)](https://github.com/NiravRVaghasiya/NetPro/releases)
+[![Changelog](https://img.shields.io/badge/Changelog-CHANGELOG.md-8A2BE2)](CHANGELOG.md)
 
 **v1.0 (Phases 1–6) and v1.5 (Phases 7–8) are implemented** on top of the
 v0.1-alpha scaffold:
@@ -47,7 +49,7 @@ v0.1-alpha scaffold:
   `/api/health`, and a hardened Docker Compose stack. See
   **[docs/deployment.md](docs/deployment.md)**.
 
-  Verifying against a *real* PostgreSQL server for the first time surfaced two
+  Verifying against a _real_ PostgreSQL server for the first time surfaced two
   release-blocking bugs that a passing local build could never have shown:
 
   1. **Concurrent migrations failed 5 of 6 cold starts.** Each instance ran
@@ -57,7 +59,7 @@ v0.1-alpha scaffold:
      Now serialized with a Postgres advisory lock, with a mutation-verified
      regression test.
   2. **Production authentication was completely broken.** Auth.js v5 derives
-     host trust from `AUTH_URL`/`AUTH_TRUST_HOST`/`VERCEL` — *not* from
+     host trust from `AUTH_URL`/`AUTH_TRUST_HOST`/`VERCEL` — _not_ from
      `NEXTAUTH_URL`, which is what NetPro's docs told operators to set. Every
      self-hosted production request failed with `UntrustedHost`. Development
      and Vercel both masked it.
@@ -98,12 +100,15 @@ Auth.js) builds, lints, typechecks, and tests successfully — **592 tests**,
 plus a live PostgreSQL integration suite that runs in CI against a real
 database. **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
 reminders, and batch campaigns are implemented, and per-contact relationship
-scoring now has a producer (interaction logging). Next: the deferred
-**graph analytics** (Louvain communities, centrality, warm-intro paths over the
-`edges` table), **hybrid search** (SQLite FTS5 + pgvector with RRF re-ranking),
-and — if wanted — **real SMTP delivery** for campaigns (NetPro drafts today; a
-human sends). Per-user encrypted web key storage and the `$EDITOR` draft-review
-loop remain deferred and are documented in the
+scoring now has a producer (interaction logging). Next up is **v2.0 — "The
+Strategist"** (see the [v2.0 implementation
+plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)): graph
+analytics (Louvain communities, centrality, warm-intro paths over the `edges`
+table), hybrid search (SQLite FTS5 + pgvector with RRF re-ranking), a skills
+gap analyzer, and an event matcher. The blueprint also lists real SMTP delivery
+for campaigns as optional follow-up work (NetPro drafts today; a human sends).
+Per-user encrypted web key storage and the `$EDITOR` draft-review loop remain
+deferred and are documented in the
 [Phase 4 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase4-ai-outreach-design.md).
 
 > **Analytics scope note:** clustering is attribute-based (normalized company)
