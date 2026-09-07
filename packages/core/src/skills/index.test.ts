@@ -15,7 +15,7 @@ describe('skills extraction', () => {
 describe('gap analysis', () => {
   it('returns present, partial, missing and a deterministic score', () => {
     const result = gapAnalysis({ role: 'Staff Engineer', description: 'TypeScript, Kubernetes, security' }, ['typescript', 'security']);
-    expect(result.present).toEqual(['typescript', 'security']);
+    expect(result.present).toEqual(['security', 'typescript']);
     expect(result.missing).toEqual(['kubernetes']);
     expect(result.matchScore).toBeCloseTo(2 / 3);
   });
