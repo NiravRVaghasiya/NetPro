@@ -138,14 +138,14 @@ from `GET /api/analytics`: metric cards, a 12-month growth chart, top
 companies/industries, clusters, your reconnect list, and — since v2.0
 Phase 2 — a **Network graph** section (Louvain communities, centrality,
 components, and warm-intro candidates over your confirmed edges; `pending`
-candidates stay out until you confirm them).
+candidates stay out until you confirm them). Use **Graph** (`/graph`) to turn
+those candidates into actual intro plans (see below).
 
 > Analytics reads LinkedIn's "Connected On" date — imports record it as the
 > contact's `createdAt` and initial `lastInteraction`, so growth reflects when
 > relationships actually formed, not when the CSV was imported. Graph-native
-> analytics (Louvain clusters, centrality, paths) arrive with the phase that
-> populates the `edges` table; per-contact relationship scoring arrives with
-> interaction logging (CRM).
+> analytics and the pathfinder shipped with v2.0 Phases 2–3; per-contact
+> relationship scoring comes from interaction logging (CRM).
 
 ## Graph edges (v2.0 Phase 1)
 
@@ -167,6 +167,38 @@ netpro edge merge                     # collapse A→B / B→A duplicates
 The web UI is **Edges** in the navigation (`/edges`, `GET/POST /api/edges`).
 On a contact page, **Also met at…** records event attendance and links them
 to others already marked at that event.
+
+## Find a warm intro (v2.0 Phase 3)
+
+Once edges exist, NetPro finds the shortest chains of links to the person you
+want to reach and names the first ask — ranked by your relationship strength
+with each hop, never auto-picked:
+
+```bash
+netpro path "Zoe Zodiac"                            # start = your strongest tie (said out loud)
+netpro path zoe@acme.com --from "Ada Lovelace"      # explicit start
+netpro path "Zoe Zodiac" --alt 3                     # ranked k-shortest alternatives
+netpro path "Zoe Zodiac" --max-depth 2 --relation colleague
+netpro path "Zoe Zodiac" --status all                # preview pending candidates too
+netpro path "Zoe Zodiac" --draft                     # AI drafts the ask email — you send
+netpro path "Zoe Zodiac" --json                      # scriptable plan payload
+```
+
+Each hop prints your relationship score and last-touch date for the person,
+plus the edge provenance walked to get there (`relation`, confidence,
+one-way). `--draft` reuses the outreach credentials from `netpro config` /
+the environment and remains **draft-only**: NetPro composes, you review and
+send.
+
+The web app has **Graph** in the navigation (`/graph`): a target picker
+(search the contact list or type any name/email/id), the ranked chain cards,
+and a one-click **Draft intro request** link that pre-fills the outreach
+composer with the right recipient, context and ask. `/graph/<contactId>`
+shows one person's centrality, community, and every link they have (pending
+rows included, so you can confirm right there). The same data is available
+over the owner-only JSON APIs `GET /api/graph/overview` and
+`GET /api/graph/paths?target=&from=&depth=` (the web API caps depth at 6;
+the CLI accepts the engine's full 1–8).
 
 ## Draft AI outreach
 

@@ -21,10 +21,24 @@ interface Draft {
 
 const TONES = ["professional", "warm", "casual", "friendly"] as const;
 
-export default function OutreachComposer() {
+export interface OutreachComposerInitial {
+  /** Pre-selected recipient (v2.0 Phase 3: the graph page's "draft intro"). */
+  initialContact?: ContactHit;
+  initialContext?: string;
+  initialPurpose?: string;
+  /** Pre-picked tone for intro asks; the composer still validates it. */
+  initialTone?: (typeof TONES)[number];
+}
+
+export default function OutreachComposer({
+  initialContact,
+  initialContext,
+  initialPurpose,
+  initialTone,
+}: OutreachComposerInitial = {}) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<ContactHit[]>([]);
-  const [selected, setSelected] = useState<ContactHit | null>(null);
+  const [selected, setSelected] = useState<ContactHit | null>(initialContact ?? null);
   const [searching, setSearching] = useState(false);
 
   const [adhoc, setAdhoc] = useState({
@@ -34,9 +48,9 @@ export default function OutreachComposer() {
     role: "",
   });
   const [mode, setMode] = useState<"contact" | "adhoc">("contact");
-  const [tone, setTone] = useState<(typeof TONES)[number]>("professional");
-  const [context, setContext] = useState("");
-  const [purpose, setPurpose] = useState("");
+  const [tone, setTone] = useState<(typeof TONES)[number]>(initialTone ?? "professional");
+  const [context, setContext] = useState(initialContext ?? "");
+  const [purpose, setPurpose] = useState(initialPurpose ?? "");
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);

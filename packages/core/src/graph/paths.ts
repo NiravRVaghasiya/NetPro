@@ -39,6 +39,8 @@ export interface IntroPathNode {
   company: string | null;
   role: string | null;
   relationshipScore: number | null;
+  /** Recency of the owner's last recorded touch with this contact (v2.0 Phase 3). */
+  lastInteraction: string | null;
   /** The edge that brought us here, from the previous node (null for the origin). */
   via: PathHopMeta | null;
 }
@@ -151,6 +153,7 @@ function nodeFor(graph: LoadedGraph, id: string): IntroPathNode {
     company: node?.company ?? null,
     role: node?.role ?? null,
     relationshipScore: node?.relationshipScore ?? null,
+    lastInteraction: node?.lastInteraction ?? null,
     via: null,
   };
 }

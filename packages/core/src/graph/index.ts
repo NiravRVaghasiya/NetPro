@@ -10,3 +10,7 @@ export * from './communities';
 export * from './centrality';
 export * from './paths';
 export * from './network';
+// v2.0 Phase 3 — pathfinder SURFACE: ranking + ask drafting (pathfinder.ts)
+// and the per-contact graph-position view behind `/graph/<id>` (position.ts).
+export * from './pathfinder';
+export * from './position';

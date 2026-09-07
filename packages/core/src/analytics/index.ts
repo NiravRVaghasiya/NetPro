@@ -19,6 +19,8 @@ export {
   getCentrality,
   getNetworkGraph,
   findIntroPaths,
+  planIntroPaths,
+  getContactGraphPosition,
   louvain,
   modularityOf,
 } from "../graph";
@@ -31,4 +33,7 @@ export type {
   FindIntroPathsResult,
   IntroPath,
   LouvainResult,
+  IntroPathPlan,
+  RankedIntroPath,
+  ContactGraphPosition,
 } from "../graph";

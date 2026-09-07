@@ -108,8 +108,12 @@ function gitUserName(): string | undefined {
   }
 }
 
-/** Read AI credentials from the encrypted keychain with env fallbacks. */
-async function readCredentials(providerFlag?: string) {
+/**
+ * Read AI credentials from the encrypted keychain with env fallbacks.
+ * Exported for `netpro path --draft` (v2.0 Phase 3) — both draft-only AI
+ * surfaces must resolve credentials identically.
+ */
+export async function readCredentials(providerFlag?: string) {
   const [keychainProvider, openaiKey, anthropicKey] = await Promise.all([
     Keychain.get("ai.provider"),
     Keychain.get("ai.openai.key"),

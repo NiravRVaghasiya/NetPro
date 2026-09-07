@@ -7,6 +7,35 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
 
 ## [Unreleased]
 
+### Added — v2.0 Phase 3: Warm-intro pathfinder surface
+
+- The Phase 2 engine gains its decision layer in `packages/core/graph`:
+  `planIntroPaths()` (selectors → ranked chains), `rankIntroPaths` /
+  `scoreIntroPath` (score = 0.6 × weakest-tie + 0.4 × mean hop
+  strength×confidence — deterministic, hand-tested), `defaultPathOrigin`
+  (strongest tie, skipping the target itself), and `buildIntroAskInput`
+  (feeds the Phase 4 compose pipeline — draft-only, BYO-key).
+- `IntroPathNode` now carries `lastInteraction`, so every hop shows your
+  relationship score **and** recency on both surfaces.
+- CLI: `netpro path <target> [--from] [--max-depth n] [--relation r]
+  [--status s] [--alt n] [--draft] [--json]` — ranked k-shortest chains, the
+  first ask to make, and an optional AI-drafted ask email. A failed `--draft`
+  prints the plan and exits non-zero so scripts can tell.
+- Web: `/graph` — server-rendered target picker (contact datalist + free
+  selectors), ranked chain cards with per-hop provenance, and a one-click
+  **Draft intro request** deep link that pre-fills the outreach composer
+  (`/outreach?contactId=&context=&purpose=`). `/graph/<contactId>` shows one
+  person's centrality, Louvain community, adjacency (pending rows included,
+  so the page doubles as a confirmation entry point) and the suggestions
+  they appear in.
+- API (owner-only via the proxy, like every `/api` route):
+  `GET /api/graph/paths?target=&from=&depth=&relation=&status=&k=` (unknown
+  target 404, ambiguous selector 400, depth capped to 1–6 for the web while
+  the engine/CLI keep the 1–8 range) and `GET /api/graph/overview`.
+- No migration (Phase 1's `0003` covers everything read), no new runtime
+  dependencies, and "auto-picking the intermediary" stays deferred per the
+  plan: chains are **ranked**, the human chooses.
+
 ### Added — v2.0 Phase 2: Graph analytics engine
 
 - `packages/core/graph` analytics: pure-TS **Louvain community detection**
