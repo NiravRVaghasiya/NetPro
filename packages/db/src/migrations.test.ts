@@ -151,3 +151,145 @@ describe("profile card migration", () => {
     }
   });
 });
+
+describe("hybrid search migration (v2.0 phase 4)", () => {
+  it("adds the search_index columns, the FTS5 table, and its sync triggers", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: folder });
+
+      const cols = sqlite
+        .prepare("PRAGMA table_info(search_index)")
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(cols).toEqual(
+        expect.arrayContaining([
+          "embedding",
+          "embedding_model",
+          "embedding_dim",
+          "embedding_updated_at",
+          "content_hash",
+        ]),
+      );
+
+      expect(
+        sqlite
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'contacts_fts'",
+          )
+          .all(),
+      ).toEqual([{ name: "contacts_fts" }]);
+
+      const triggers = sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'contacts_fts_%' ORDER BY name",
+        )
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(triggers).toEqual([
+        "contacts_fts_ad",
+        "contacts_fts_ai",
+        "contacts_fts_au",
+      ]);
+
+      expect(
+        sqlite
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_search_index_updated_at'",
+          )
+          .all(),
+      ).toHaveLength(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("keeps FTS5 in step with every search_index write", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: folder });
+      sqlite
+        .prepare(
+          "INSERT INTO contacts (id, full_name, source, created_at, updated_at) VALUES (?,?,?,?,?)",
+        )
+        .run("c1", "Jane Doe", "test", "n", "n");
+
+      const match = (term: string) =>
+        sqlite
+          .prepare("SELECT contact_id FROM contacts_fts WHERE contacts_fts MATCH ?")
+          .all(term)
+          .map((r) => (r as { contact_id: string }).contact_id);
+
+      sqlite
+        .prepare(
+          "INSERT INTO search_index (contact_id, search_text, updated_at) VALUES (?,?,?)",
+        )
+        .run("c1", "jane doe stripe payments", "n");
+      expect(match("payments")).toEqual(["c1"]);
+
+      sqlite
+        .prepare("UPDATE search_index SET search_text = ? WHERE contact_id = ?")
+        .run("jane doe vercel edge", "c1");
+      expect(match("payments")).toEqual([]);
+      expect(match("vercel")).toEqual(["c1"]);
+
+      sqlite.prepare("DELETE FROM search_index WHERE contact_id = ?").run("c1");
+      expect(match("vercel")).toEqual([]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("backfills the FTS mirror when upgrading a database that already has index rows", () => {
+    // The realistic upgrade path: 0003 applied, rows written by a future
+    // producer, then 0004 lands. The mirror must not start out empty.
+    const temporary = mkdtempSync(join(tmpdir(), "netpro-fts-upgrade-"));
+    const sqlite = new Database(":memory:");
+    try {
+      const journal = JSON.parse(
+        readFileSync(join(folder, "meta/_journal.json"), "utf8"),
+      ) as { entries: Array<{ tag: string }> };
+      const upTo0003 = journal.entries.slice(0, 4);
+      mkdirSync(join(temporary, "meta"));
+      writeFileSync(
+        join(temporary, "meta/_journal.json"),
+        JSON.stringify({ ...journal, entries: upTo0003 }),
+      );
+      for (const entry of upTo0003) {
+        copyFileSync(
+          join(folder, `${entry.tag}.sql`),
+          join(temporary, `${entry.tag}.sql`),
+        );
+      }
+
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: temporary });
+      sqlite
+        .prepare(
+          "INSERT INTO contacts (id, full_name, source, created_at, updated_at) VALUES (?,?,?,?,?)",
+        )
+        .run("legacy", "Ada Lovelace", "test", "n", "n");
+      sqlite
+        .prepare(
+          "INSERT INTO search_index (contact_id, search_text, updated_at) VALUES (?,?,?)",
+        )
+        .run("legacy", "ada lovelace analytical engine", "n");
+
+      migrate(db, { migrationsFolder: folder });
+
+      expect(
+        sqlite
+          .prepare("SELECT contact_id FROM contacts_fts WHERE contacts_fts MATCH ?")
+          .all("analytical"),
+      ).toEqual([{ contact_id: "legacy" }]);
+      expect(
+        sqlite.prepare("SELECT count(*) AS n FROM __drizzle_migrations").get(),
+      ).toEqual({ n: journal.entries.length });
+    } finally {
+      sqlite.close();
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  });
+});

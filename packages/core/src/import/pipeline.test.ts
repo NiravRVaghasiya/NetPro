@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { eq } from 'drizzle-orm';
 import * as schema from '@netpro/db/src/schema.sqlite';
+import { createTestSqliteConn } from '@netpro/db/src/testing';
 import { runImport } from './pipeline';
 import type { SqliteConn } from '@netpro/db';
 
@@ -172,5 +173,59 @@ describe('runImport', () => {
     const [after] = await conn.db.select().from(conn.schema.contacts);
     expect(after!.lastInteraction).toBe('2026-06-01T00:00:00.000Z');
     expect(after!.createdAt).toBe('2024-01-01T00:00:00.000Z');
+  });
+});
+
+// v2.0 Phase 4 — import is the main `search_index` producer, so that the
+// keyword arm has data without anyone remembering to run a command.
+describe('runImport — search index production', () => {
+  const CSV = [
+    'First Name,Last Name,Email Address,Company,Position,Connected On,URL',
+    'Jane,Doe,jane@stripe.com,Stripe,Senior Engineer,01 Jan 2024,',
+    'John,Smith,john@vercel.com,Vercel,Product Manager,02 Jan 2024,',
+  ].join('\n');
+
+  it('indexes every imported contact and mirrors them into FTS5', async () => {
+    const { conn: migrated, sqlite } = createTestSqliteConn();
+
+    const summary = await runImport(CSV, migrated);
+    expect(summary).toMatchObject({ imported: 2, indexed: { indexed: 2, skipped: 0 } });
+
+    expect(sqlite.prepare('SELECT count(*) AS n FROM search_index').get()).toEqual({ n: 2 });
+    expect(
+      sqlite
+        .prepare('SELECT contact_id FROM contacts_fts WHERE contacts_fts MATCH ?')
+        .all('stripe'),
+    ).toHaveLength(1);
+    // Import must stay offline: no vectors without an explicit reindex.
+    expect(
+      sqlite.prepare('SELECT count(*) AS n FROM search_index WHERE embedding IS NOT NULL').get(),
+    ).toEqual({ n: 0 });
+  });
+
+  it('re-indexes only what a re-import actually changed', async () => {
+    const { conn: migrated } = createTestSqliteConn();
+    await runImport(CSV, migrated);
+
+    const unchanged = await runImport(CSV, migrated);
+    expect(unchanged).toMatchObject({ merged: 2, indexed: { indexed: 0, skipped: 2 } });
+
+    const changed = await runImport(
+      [
+        'First Name,Last Name,Email Address,Company,Position,Connected On,URL',
+        'Jane,Doe,jane@stripe.com,Monzo,Staff Engineer,01 Jan 2024,',
+      ].join('\n'),
+      migrated,
+    );
+    expect(changed).toMatchObject({ merged: 1, indexed: { indexed: 1, skipped: 0 } });
+  });
+
+  it('still succeeds on a database that predates migration 0004', async () => {
+    // The hand-rolled fixture above has only a contacts table — no
+    // search_index, no FTS mirror.
+    const legacy = createTestConn();
+    const summary = await runImport(CSV, legacy);
+    expect(summary).toMatchObject({ imported: 2, errors: [] });
+    expect(summary.indexed).toBeUndefined();
   });
 });

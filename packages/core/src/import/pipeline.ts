@@ -15,11 +15,20 @@ export interface ImportSummary {
   errors: ImportError[];
   /** Pending mutual-network candidates surfaced for confirmation — never auto-confirmed. */
   edgeCandidates?: { candidates: number; inserted: number; skipped: number };
+  /**
+   * Search-index rows written for the contacts this run touched (v2.0 Phase 4).
+   * Keyword-only and fully offline — embeddings are never produced by an
+   * import, they need `netpro reindex --embeddings` and a configured key.
+   * Absent when the index could not be written (an unmigrated database must
+   * not fail an import).
+   */
+  indexed?: { indexed: number; skipped: number };
 }
 
 export async function runImport(csv: string, conn: SqliteConn | PgConn): Promise<ImportSummary> {
   const rawContacts = parseLinkedInCSV(csv);
   const errors: ImportError[] = [];
+  const touched: string[] = [];
   let imported = 0;
   let merged = 0;
 
@@ -59,9 +68,10 @@ export async function runImport(csv: string, conn: SqliteConn | PgConn): Promise
         // re-imports must never erase a newer recorded interaction.
         const backfillDate = existing.lastInteraction === null ? connectionDate : undefined;
         await updateContact(conn, existing.id, mergedContact, raw.linkedinUrl, backfillDate);
+        touched.push(existing.id);
         merged++;
       } else {
-        await insertContact(conn, normalized, raw.linkedinUrl, connectionDate);
+        touched.push(await insertContact(conn, normalized, raw.linkedinUrl, connectionDate));
         imported++;
       }
     } catch (e) {
@@ -79,7 +89,22 @@ export async function runImport(csv: string, conn: SqliteConn | PgConn): Promise
     edgeCandidates = undefined;
   }
 
-  return { imported, merged, errors, edgeCandidates };
+  // Keep the search index in step with what we just wrote. Best effort by
+  // design: a database that predates migration 0004 (or any index failure)
+  // must not turn a successful import into a failed one — search simply falls
+  // back to the portable engine until `netpro reindex` runs.
+  let indexed: ImportSummary['indexed'];
+  if (touched.length > 0) {
+    try {
+      const { reindexSearchIndex } = await import('../search/indexer');
+      const result = await reindexSearchIndex(conn, { contactIds: touched });
+      indexed = { indexed: result.indexed, skipped: result.skipped };
+    } catch {
+      indexed = undefined;
+    }
+  }
+
+  return { imported, merged, errors, edgeCandidates, indexed };
 }
 
 // NOTE: `conn.db.select()`/`.insert()`/`.update()` don't typecheck against the raw
@@ -116,7 +141,7 @@ async function findExistingContact(conn: SqliteConn | PgConn, normalized: Normal
   return null;
 }
 
-async function insertContact(conn: SqliteConn | PgConn, normalized: NormalizedContact, linkedinUrl: string | undefined, connectionDate: string | undefined): Promise<void> {
+async function insertContact(conn: SqliteConn | PgConn, normalized: NormalizedContact, linkedinUrl: string | undefined, connectionDate: string | undefined): Promise<string> {
   const now = new Date().toISOString();
   const values = {
     id: randomUUID(),
@@ -140,10 +165,11 @@ async function insertContact(conn: SqliteConn | PgConn, normalized: NormalizedCo
 
   if (conn.dialect === 'sqlite') {
     await conn.db.insert(conn.schema.contacts).values(values);
-    return;
+    return values.id;
   }
 
   await conn.db.insert(conn.schema.contacts).values(values);
+  return values.id;
 }
 
 async function updateContact(conn: SqliteConn | PgConn, id: string, merged: NormalizedContact, linkedinUrl: string | undefined, backfillInteractionDate?: string): Promise<void> {

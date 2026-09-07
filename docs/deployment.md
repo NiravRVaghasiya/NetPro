@@ -52,6 +52,7 @@ out to many instances, and each one opens its own connections.
 | `NETPRO_AUTO_MIGRATE` | Recommended | `false` — see [Migrations](#migrations) |
 | `HUNTER_API_KEY`, `PDL_API_KEY`, `CLEARBIT_API_KEY` | Optional | Enrichment providers (BYO key) |
 | `AI_PROVIDER`, `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Optional | AI outreach drafting (BYO key) |
+| `EMBEDDINGS_PROVIDER`, `EMBEDDINGS_API_KEY` | Optional | Semantic search arm — see [Search](#search) |
 
 `NETPRO_OWNER_GITHUB_ID` is the **only** access control. Get it wrong and either
 nobody can sign in (fails closed, safe) or the wrong account can. It is your
@@ -213,7 +214,51 @@ pooled/pgbouncer connection string rather than raising `NETPRO_DB_POOL_MAX`.
 Point your load balancer or uptime monitor at it. Anonymous responses omit
 diagnostic detail on purpose — driver errors can contain hostnames and
 database names. Add `?verbose` **while signed in as the owner** to see
-migration counts and the underlying error.
+migration counts, the underlying error, and a `search` block reporting which
+engine your instance is actually serving (`portable` / `keyword` / `hybrid`)
+plus index coverage — the fastest way to confirm a `netpro reindex` landed.
+
+### Search
+
+Search has three engines. They stack, and each one is opt-in on top of the
+last, so **an instance that configures nothing behaves exactly as it did in
+v1**.
+
+| Engine | Requires | What you get |
+| --- | --- | --- |
+| `portable` | Nothing | ANSI-SQL substring matching over name, email, headline, company, role, location. The v1 behaviour, both dialects. |
+| `keyword` | Migration `0004` + `netpro reindex` | SQLite FTS5 / Postgres `tsvector` over the full document — **also** notes, tags, industry, seniority, department, country — with prefix matching and BM25/`ts_rank` ordering. No key, no network, no cost. |
+| `hybrid` | The above + `EMBEDDINGS_*` on Postgres | Adds a vector arm; the two ranked lists are merged with reciprocal rank fusion (k=60). |
+
+```bash
+# One-off after deploying 0004 — builds the keyword index for existing rows.
+netpro reindex
+
+# Optional: also write embeddings (costs one API call per batch of 64).
+netpro reindex --embeddings
+
+# What is my instance actually serving?
+netpro reindex --status
+```
+
+Imports keep the keyword index current automatically; **imports never call an
+embedding provider**, so a large CSV can't run up a bill. Re-run
+`netpro reindex --embeddings` after a big import, or on a schedule.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `EMBEDDINGS_PROVIDER` | `disabled` | `openai` or `disabled`. Anything else is treated as `disabled` by the web app (a typo must not 500 a page) and is a hard error in the CLI. |
+| `EMBEDDINGS_API_KEY` | — | Falls back to `OPENAI_API_KEY` **only** when `EMBEDDINGS_PROVIDER` is explicitly set. |
+| `EMBEDDINGS_MODEL` | `text-embedding-3-small` | Change it and the next `reindex` re-embeds; vectors from other models are ignored, never mixed. |
+| `EMBEDDINGS_BASE_URL` | OpenAI | Any OpenAI-compatible `/v1` endpoint (llama.cpp, LM Studio, a gateway). |
+| `EMBEDDINGS_DIMENSIONS` | model default | Only for models supporting truncation. |
+
+The key is read from the server environment only — it is never sent to the
+browser, and the semantic toggle on `/search` simply doesn't render when no key
+is configured. **SQLite has no vector support**: the semantic arm is skipped
+there and `--semantic` degrades to keyword with a note, not an error. Same if
+the embeddings API is down mid-request — you get keyword results and a reason,
+never a failed search.
 
 ### Security headers
 
@@ -229,6 +274,7 @@ additionally marked no-store so no shared cache or CDN retains private data.
 
 - [ ] `DB_DIALECT=postgresql` with a managed Postgres `DATABASE_URL` (never SQLite)
 - [ ] `NEXTAUTH_SECRET` generated with `openssl rand -base64 32`, unique to this instance
+- [ ] `netpro reindex` run once after deploying (search falls back to substring matching until it is)
 - [ ] `NETPRO_OWNER_GITHUB_ID` is your numeric GitHub ID, and you can sign in
 - [ ] Anyone else's GitHub account is rejected at sign-in
 - [ ] `NEXTAUTH_URL` (or `AUTH_URL`) matches your real HTTPS origin

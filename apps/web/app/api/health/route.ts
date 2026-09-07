@@ -12,8 +12,10 @@
 import { NextResponse } from 'next/server';
 import { sql } from 'drizzle-orm';
 import { appliedMigrationCount, pendingMigrationTotal } from '@netpro/db';
+import { searchIndexStatus } from '@netpro/core/src/search';
 import { conn } from '@/lib/db';
 import { auth } from '@/lib/auth';
+import { semanticSearchAvailable } from '@/lib/search-config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,8 +26,43 @@ type Health = {
   latencyMs: number;
   timestamp: string;
   migrations?: { applied: number; expected: number };
+  /**
+   * Hybrid-search capability (v2.0 Phase 4). Owner-only, like `migrations`:
+   * contact and index counts are inventory data, and even the bare mode
+   * fingerprints how the instance is configured. Deploy smoke tests that need
+   * it authenticate; the anonymous probe stays terse.
+   */
+  search?: {
+    /** The best engine this deployment can actually serve. */
+    mode: 'portable' | 'keyword' | 'hybrid';
+    indexed: number;
+    contacts: number;
+    embedded: number;
+  };
   error?: string;
 };
+
+/**
+ * What can this deployment serve *today*? Not what was requested — what the
+ * migrations, the index, and the configured key add up to.
+ */
+async function searchCapability(): Promise<Health['search'] | undefined> {
+  try {
+    const status = await searchIndexStatus(conn);
+    const keyword = status.keywordIndexAvailable && status.indexed > 0;
+    const hybrid = keyword && status.embedded > 0 && semanticSearchAvailable();
+    return {
+      mode: hybrid ? 'hybrid' : keyword ? 'keyword' : 'portable',
+      indexed: status.indexed,
+      contacts: status.contacts,
+      embedded: status.embedded,
+    };
+  } catch {
+    // An unmigrated or unreachable database is already reported elsewhere in
+    // this handler; search capability just goes unreported.
+    return undefined;
+  }
+}
 
 export async function GET(request: Request): Promise<Response> {
   const start = Date.now();
@@ -90,6 +127,8 @@ export async function GET(request: Request): Promise<Response> {
       );
     }
 
+    const search = isOwner ? await searchCapability() : undefined;
+
     return respond(
       {
         status: 'healthy',
@@ -97,6 +136,7 @@ export async function GET(request: Request): Promise<Response> {
         latencyMs: Date.now() - start,
         timestamp: new Date().toISOString(),
         ...(isOwner ? { migrations } : {}),
+        ...(search ? { search } : {}),
       },
       200
     );

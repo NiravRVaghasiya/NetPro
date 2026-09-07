@@ -1,11 +1,14 @@
 import Link from "next/link";
 import { conn } from "@/lib/db";
 import {
+  isSearchMode,
   searchContacts,
   type SearchContactsOptions,
+  type SearchEngineReport,
   type SearchFacets,
   type FacetBucket,
 } from "@netpro/core/src/search";
+import { searchEmbedder, semanticSearchAvailable } from "@/lib/search-config";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -44,6 +47,7 @@ function buildParams(
     "seniority",
     "sort",
     "limit",
+    "mode",
   ];
   const current: Record<string, string | undefined> = {};
   for (const k of keys) current[k] = one(sp[k]);
@@ -64,6 +68,13 @@ export default async function SearchPage({
   const limit = Number(one(sp.limit) ?? "25");
   const offset = Number(one(sp.offset) ?? "0");
 
+  // v2.0 Phase 4. An unrecognised ?mode= is ignored rather than 400-ing the
+  // page — a stale bookmark should still render results, and the engine badge
+  // below reports what actually ran.
+  const requestedMode = one(sp.mode);
+  const mode = isSearchMode(requestedMode) ? requestedMode : undefined;
+  const semanticAvailable = semanticSearchAvailable();
+
   const options: SearchContactsOptions = {
     query: one(sp.q),
     company: one(sp.company),
@@ -75,9 +86,14 @@ export default async function SearchPage({
     sort: (one(sp.sort) as SearchContactsOptions["sort"]) ?? "relevance",
     limit: Number.isNaN(limit) ? 25 : limit,
     offset: Number.isNaN(offset) ? 0 : offset,
+    mode,
   };
 
-  const results = await searchContacts(conn, options);
+  const results = await searchContacts(
+    conn,
+    options,
+    mode === "hybrid" ? { embedder: searchEmbedder() } : {},
+  );
   const activeSort = options.sort ?? "relevance";
 
   return (
@@ -92,8 +108,20 @@ export default async function SearchPage({
           defaultValue={options.query ?? ""}
           aria-label="Search contacts"
         />
+        <select name="mode" defaultValue={mode ?? "portable"} aria-label="Search engine">
+          <option value="portable">Exact match</option>
+          <option value="keyword">Smart (full-text)</option>
+          {/* Only offered when a key is configured: a toggle that silently
+              does nothing is worse than no toggle. */}
+          {semanticAvailable ? <option value="hybrid">Smart + semantic</option> : null}
+        </select>
         <button type="submit">Search</button>
       </form>
+
+      <EngineBadge
+        engine={results.engine}
+        semanticAvailable={semanticAvailable}
+      />
 
       <form
         method="GET"
@@ -107,6 +135,7 @@ export default async function SearchPage({
       >
         {/* Preserve the free-text query across filter changes. */}
         <input type="hidden" name="q" value={options.query ?? ""} />
+        {mode ? <input type="hidden" name="mode" value={mode} /> : null}
         <input
           name="company"
           placeholder="Company"
@@ -228,6 +257,65 @@ export default async function SearchPage({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Say which engine served these results, and — when an arm was dropped — what
+ * to do about it. Silence would leave the owner guessing why "Smart" behaved
+ * exactly like "Exact match".
+ */
+function EngineBadge({
+  engine,
+  semanticAvailable,
+}: {
+  engine: SearchEngineReport;
+  semanticAvailable: boolean;
+}) {
+  if (engine.requested === "portable") return null;
+
+  const label =
+    engine.mode === "hybrid"
+      ? "Results powered by full-text + vector search"
+      : engine.mode === "keyword"
+        ? "Results powered by full-text search"
+        : "Results powered by substring matching";
+
+  const notes: string[] = [];
+  const { keyword, semantic } = engine.arms;
+  if (!keyword.used) {
+    notes.push(
+      keyword.reason === "index_empty"
+        ? "The search index is empty — run `netpro reindex` to build it."
+        : keyword.reason === "index_missing"
+          ? "The full-text index is missing — run `netpro migrate`."
+          : "Full-text ranking is unavailable right now.",
+    );
+  }
+  if (engine.requested === "hybrid" && !semantic.used) {
+    notes.push(
+      semantic.reason === "not_configured"
+        ? semanticAvailable
+          ? "Semantic ranking is off for this request."
+          : "Semantic ranking needs EMBEDDINGS_API_KEY on the server."
+        : semantic.reason === "no_embeddings"
+          ? "No embeddings stored yet — run `netpro reindex --embeddings`."
+          : "The embeddings provider did not respond; lexical results are shown.",
+    );
+  }
+  if (engine.truncated) {
+    notes.push("Showing the top candidates only — narrow the query to see more.");
+  }
+
+  return (
+    <p style={{ marginTop: "0.5rem", fontSize: "0.85rem", opacity: 0.8 }}>
+      <span>{label}</span>
+      {notes.map((note) => (
+        <span key={note} style={{ display: "block" }}>
+          {note}
+        </span>
+      ))}
+    </p>
   );
 }
 

@@ -189,11 +189,22 @@ export const searchIndex = pgTable('search_index', {
   seniorityNorm: text('seniority_norm'),
   industryNorm: text('industry_norm'),
 
+  // Semantic arm (v2.0 Phase 4). The vector is stored portably as a JSON
+  // array of floats so the same producer works on SQLite and Postgres; a
+  // native pgvector column + ANN index is a documented later optimization
+  // (see docs/superpowers/plans/2026-09-07-v2.0-phase4-hybrid-search-progress.md).
   embedding: text('embedding'),
   embeddingModel: text('embedding_model'),
+  embeddingDim: integer('embedding_dim'),
+  embeddingUpdatedAt: text('embedding_updated_at'),
+
+  /** Hash of searchText — lets a reindex skip unchanged rows (and not re-pay for embeddings). */
+  contentHash: text('content_hash'),
 
   updatedAt: text('updated_at').notNull(),
-});
+}, (t) => ({
+  updatedAtIdx: index('idx_search_index_updated_at').on(t.updatedAt),
+}));
 
 export const profileViews = pgTable('profile_views', {
   id: text('id').primaryKey(),

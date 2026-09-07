@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { conn } from "@/lib/db";
 import {
+  isSearchMode,
   searchContacts,
+  SEARCH_MODES,
   type SearchContactsOptions,
+  type SearchMode,
   type SearchSort,
 } from "@netpro/core/src/search";
+import { searchEmbedder } from "@/lib/search-config";
 
 const VALID_SORTS: SearchSort[] = ["relevance", "score", "recent", "name"];
 
@@ -30,6 +34,20 @@ export async function GET(request: Request) {
     );
   }
 
+  // v2.0 Phase 4. Unknown modes are a 400 rather than a silent downgrade: a
+  // caller asking for `mode=vector` has a bug, and quietly serving substring
+  // results would hide it.
+  const modeParam = str(p.get("mode"));
+  if (modeParam !== undefined && !isSearchMode(modeParam)) {
+    return NextResponse.json(
+      {
+        error: `Invalid mode "${modeParam}". Expected one of: ${SEARCH_MODES.join(", ")}.`,
+      },
+      { status: 400 },
+    );
+  }
+  const mode = modeParam as SearchMode | undefined;
+
   const options: SearchContactsOptions = {
     query: str(p.get("q")),
     company: str(p.get("company")),
@@ -43,10 +61,17 @@ export async function GET(request: Request) {
     sort: sortParam,
     limit: num(p.get("limit")),
     offset: num(p.get("offset")),
+    mode,
   };
 
   try {
-    const results = await searchContacts(conn, options);
+    // Build the embedder only for a hybrid request — the portable and keyword
+    // paths must not depend on credentials existing.
+    const results = await searchContacts(
+      conn,
+      options,
+      mode === "hybrid" ? { embedder: searchEmbedder() } : {},
+    );
     return NextResponse.json(results);
   } catch (error) {
     return NextResponse.json(

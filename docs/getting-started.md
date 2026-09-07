@@ -113,9 +113,52 @@ Sort options: `relevance` (default), `score` (relationship score), `recent`
 (`/search`) — it has the same query/filter/sort/facet/pagination controls and
 calls `GET /api/search`.
 
-> Search runs in portable ANSI SQL on both SQLite and Postgres. The blueprint's
-> hybrid FTS5 + vector-semantic search is a later phase; it builds on the same
-> `searchContacts` core entry point.
+### Better search: full-text and semantic (v2.0 Phase 4)
+
+The search above is portable substring matching over six columns — it works
+everywhere with zero setup, and it's still the default. Two stronger engines
+stack on top of it.
+
+**Full-text** (SQLite FTS5 / Postgres `tsvector`) needs no key and no network.
+Build the index once, then ask for it:
+
+```bash
+node apps/cli/dist/index.js reindex            # build/refresh the index
+node apps/cli/dist/index.js reindex --status   # coverage + what's enabled
+
+node apps/cli/dist/index.js search "payments" --mode keyword
+```
+
+It searches the *whole* contact document — notes, tags, industry, seniority,
+department, country — not just the six portable columns, and it does prefix
+matching, so `stri` finds Stripe. Imports keep it current automatically.
+
+**Semantic** adds an embedding arm and fuses the two ranked lists with
+reciprocal rank fusion. It is opt-in, needs your own key, and needs Postgres
+(SQLite has no vector support):
+
+```bash
+export EMBEDDINGS_PROVIDER=openai
+export EMBEDDINGS_API_KEY=sk-...              # or: netpro config set embeddings.key sk-...
+node apps/cli/dist/index.js reindex --embeddings
+
+node apps/cli/dist/index.js search "someone who can introduce me to fintech" --semantic
+```
+
+Every result set explains itself:
+
+```
+Engine: keyword — full-text 1, substring 0
+```
+
+That line is the point of the feature — the contact was found by the full-text
+arm and would have been missed by substring matching. The web app shows the
+same thing as a "Results powered by …" badge, and its semantic toggle only
+appears when the server has a key.
+
+Nothing here changes behaviour until you opt in: no index → substring search,
+no key → no semantic arm, embeddings API down → keyword results with a note
+instead of an error.
 
 ## Analyze your network
 

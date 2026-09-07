@@ -83,6 +83,13 @@ jobs:
       - name: Run live PostgreSQL integration tests
         run: npm run test -w @netpro/db
 
+      # v2.0 Phase 4: the hybrid search engine's keyword arm is the only
+      # dialect-specific SQL in packages/core. SQLite covers it in-memory;
+      # this runs the same `searchContacts` entry point against a real server
+      # so tsvector/GIN/to_tsquery are proven, not just typechecked.
+      - name: Run core search integration tests against PostgreSQL
+        run: npm run test -w @netpro/core -- src/search/postgres.integration.test.ts
+
       - name: Verify the migration CLI against a real database
         env:
           DB_DIALECT: postgresql
