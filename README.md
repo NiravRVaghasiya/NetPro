@@ -97,9 +97,9 @@ implemented** on top of the v0.1-alpha scaffold:
 > See [owner authentication setup](docs/getting-started.md#configure-owner-sign-in).
 
 The full monorepo (CLI + web, dual-dialect Drizzle database, GitHub OAuth via
-Auth.js) builds, lints, typechecks, and tests successfully — **767 tests**,
-plus a live PostgreSQL integration suite that runs in CI against a real
-database. **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
+Auth.js) builds, lints, typechecks, and tests successfully — **1190 tests**,
+plus 33 more in a live PostgreSQL integration suite that runs in CI against a
+real database. **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
 reminders, and batch campaigns are implemented, and per-contact relationship
 scoring now has a producer (interaction logging). **v2.0 — "The Strategist"**
 is underway (see the [v2.0 implementation
@@ -152,7 +152,27 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   pages, and the owner-only `GET /api/skills/gap` / `POST /api/skills/extract`.
   **Offline by default**: the AI pass is opt-in per run, may only pick from
   the taxonomy, and degrades to the heuristic result when the model fails.
-- Still ahead in v2.0: the event matcher and the release cut. The blueprint also lists real SMTP delivery
+- **Phase 6 — Event matcher (shipped):** no migration — Phase 1's `events`
+  and `event_attendees` tables finally have a producer. `packages/core/events`
+  imports a conference CSV (alias-tolerant headers: `Event Name`, `starts_at`,
+  `Attendee Emails`…), matches each attendee line against your contacts in
+  three explainable tiers — exact email (1.0), exact name (0.9), last name +
+  first initial (0.6, reported but never linked without asking) — and refuses
+  to choose when more than one person fits. Imports are idempotent, and the
+  `met_at_event` edges they create land **pending**: an attendee list is
+  evidence of attendance, not of a meeting. Attendee lines that resolve to
+  nobody are parked on the event (in `activity_log`) so you can re-check them
+  after importing new contacts, or link them by hand. `recommendEvents` ranks
+  where to go next — 0.6 × how many of your contacts went, 0.2 × industry fit,
+  0.2 × timing — and prints the reason for every score. Surfaced as
+  `netpro events list|show|add|import|match|link|unlink|recommend|rm`, the
+  `/events` and `/events/[id]` pages, an **Events** section on each contact,
+  and the owner-only `GET/POST /api/events`, `GET/DELETE /api/events/[id]`,
+  `POST /api/events/[id]/match` and `POST/DELETE /api/events/[id]/attendees`.
+  Pairwise linking is capped per event (250) and says so when it stops, and
+  live event *discovery* ships as a disabled provider interface — no scraping,
+  no network.
+- Still ahead in v2.0: the release cut (Phase 7). The blueprint also lists real SMTP delivery
 for campaigns as optional follow-up work (NetPro drafts today; a human sends).
 Per-user encrypted web key storage and the `$EDITOR` draft-review loop remain
 deferred and are documented in the
@@ -171,11 +191,13 @@ deferred and are documented in the
 > the CRM (Phase 7)**, is recomputed on every logged interaction, and since
 > Phase 3 is what ranks intro chains — recency + score appear on every hop.
 
-> **Search implementation note:** this is the v1 _portable_ search —
-> case-insensitive substring matching and facets in ANSI SQL that runs
-> identically on SQLite and Postgres. The blueprint's hybrid engine (SQLite
-> FTS5 + pgvector embeddings with RRF re-ranking) is deferred to a later
-> phase and will build on the same `searchContacts` entry point.
+> **Search implementation note:** `searchContacts` is a three-arm dispatcher
+> (portable substring, keyword full-text, opt-in semantic) merged with
+> reciprocal rank fusion — see Phase 4 above. The portable arm alone runs
+> identically on both dialects, so an un-migrated or un-indexed database keeps
+> working; the keyword and semantic arms light up when the migration and a key
+> are present. A native pgvector column for the semantic arm remains a
+> documented later optimization.
 
 See the [Phase 1 plan](docs/superpowers/plans/2026-08-31-v1.0-phase1-import-enrichment-export.md)
 and its [design spec](docs/superpowers/specs/2026-08-31-v1.0-phase1-import-enrichment-export-design.md)
@@ -192,9 +214,9 @@ for the draft-only campaign decisions.
 ## Structure
 
 - `apps/web` — Next.js app (App Router), Auth.js v5 with GitHub OAuth
-- `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|outreach|analyze|path|track|edge|campaign|export|card|migrate`)
+- `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|reindex|outreach|analyze|path|track|edge|campaign|export|card|migrate|skills|events`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
-- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths), and the Phase 3 pathfinder surface (ranking, first-ask, per-contact graph position)
+- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths), the Phase 3 pathfinder surface (ranking, first-ask, per-contact graph position), the v2.0 skills taxonomy/gap analyzer, and the Phase 6 event matcher (CSV import, attendee matching, recommendations)
 - `packages/ui` — shared React components
 - `packages/config` — shared ESLint and Tailwind configs
 

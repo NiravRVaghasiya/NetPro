@@ -7,6 +7,54 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
 
 ## [Unreleased]
 
+### Added — v2.0 Phase 6: Event matcher
+
+- No migration: Phase 1's `events` / `event_attendees` tables finally have a
+  producer. New `@netpro/core/events` module — CSV import, attendee matching,
+  overlap, and recommendations.
+- Import: alias-tolerant headers (`Event Name`, `starts_at`, `Attendee
+  Emails`, `names`…), attendees split on `, ; |` and newline, and dates
+  normalized to UTC ISO. Unparseable or ambiguous dates (`14/03/2026`,
+  `2026-02-31`) are **rejected per row** rather than guessed. Imports are
+  idempotent — events dedupe on normalized name, attendance on
+  `(event, contact)` — and support `--dry-run` / `{ dryRun: true }`.
+- Matching is three explainable tiers: exact email (1.0), exact name (0.9 —
+  accent-, case- and punctuation-insensitive), last name + first initial
+  (0.6, reported as `review` and never linked unless asked). Anything with
+  more than one plausible contact is `ambiguous` and is returned with its
+  candidates; a line whose email and name disagree is ambiguous too. No code
+  path picks between two people.
+- **Imported `met_at_event` edges are `pending`** (`source = event_import`):
+  an attendee list is evidence of attendance, not of a meeting. Manual links
+  (`netpro events link`, the web form) are `confirmed`. Pairwise linking is
+  capped at 250 edges per event per run and reports `edgeCapReached` when it
+  stops. Attendance for an event that has not started is recorded as
+  `planned` (`attended = false`).
+- Attendee lines that match nobody are parked per event in `activity_log`
+  (`action = events.unmatched`, replaced each run) — no new table — so they
+  can be re-checked after importing new contacts or linked by hand.
+- `recommendEvents` ranks events `0.6 × peers` (how many of your contacts
+  went; 5 saturates it) `+ 0.2 × industry` (share of your network in the
+  attendees' industries) `+ 0.2 × timing`, returns the reason for every
+  component, and drops empty past events. Timing is UTC-day granular so a
+  page cannot print "in 7d" and "starts in 6 days" for one event.
+- CLI (17th command): `netpro events list|show|add|import|match|link|unlink|
+  recommend|rm`, each with `--json`; event selectors take an id or an exact
+  name and refuse to guess between same-named events.
+- Web: `/events` (list, filters, **Where to go next** recommendations with
+  reasons, add form, CSV import panel that previews first and names ambiguous
+  rows), `/events/[id]` (attendee overlap strongest-tie first, industries and
+  companies, the unmatched bucket with per-row linking, a re-match panel, and
+  delete), an **Events** section on `/contacts/[id]`, an **Events** nav link,
+  `/events` in the proxy's protected routes, and the owner-only APIs
+  `GET/POST /api/events`, `GET/DELETE /api/events/[id]`,
+  `POST /api/events/[id]/match` and `POST/DELETE /api/events/[id]/attendees`.
+  `EventError` now maps to HTTP the way `CrmError` and `GraphError` do
+  (400 / 404 / 409; ambiguity is 400 everywhere).
+- Live event *discovery* (Luma/Eventbrite) is **not** shipped: it lands as a
+  `EventDiscoveryProvider` interface with a disabled default, so a provider
+  can be added later without touching the core, the CLI or the web.
+
 ### Added — v2.0 Phase 5: Skills gap analyzer
 
 - Additive migration `0005` (both dialects) adds a nullable

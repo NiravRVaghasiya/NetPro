@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { conn } from '@/lib/db';
 import { getContactTimeline } from '@netpro/core/src/crm';
 import { getSkillsProfile, skillCategory, type Skill } from '@netpro/core/src/skills';
+import { listContactEvents } from '@netpro/core/src/events';
 import { dueLabel, relativeDayLabel, scoreLabel, utcDay } from '@/lib/format';
 import { AddFollowUpPanel, FollowUpActions, LogInteractionPanel } from './panels';
 import { MetAtEventPanel } from '../../edges/panels';
@@ -23,6 +24,8 @@ export default async function ContactDetailPage({
   if (!timeline) notFound();
   // v2.0 Phase 5 — stored verdict + fresh evidence, one core call.
   const skills = await getSkillsProfile(conn, id);
+  // v2.0 Phase 6 — where you crossed paths with this person.
+  const events = await listContactEvents(conn, id);
 
   const { contact, stats, interactions, followUps } = timeline;
   const now = new Date();
@@ -114,6 +117,38 @@ export default async function ContactDetailPage({
         <div style={{ marginTop: '0.75rem' }}>
           <LogInteractionPanel contactId={contact.id} />
         </div>
+      </section>
+
+      <section aria-label="Events" style={{ marginTop: '1.5rem' }}>
+        <h2 style={{ fontSize: '1rem' }}>
+          Events{events.length > 0 ? ` (${events.length})` : ''}{' '}
+          <Link href="/events" style={{ fontSize: '0.8rem', fontWeight: 'normal' }}>
+            event matcher
+          </Link>
+        </h2>
+        {events.length === 0 ? (
+          <p style={{ margin: '0.25rem 0', color: '#9ca3af' }}>
+            No events recorded — record where you met below, or import an attendee list.
+          </p>
+        ) : (
+          <ul style={{ margin: '0.25rem 0', paddingLeft: '1.25rem' }}>
+            {events.map((e) => (
+              <li key={e.id} style={{ marginBottom: '0.25rem' }}>
+                <Link href={`/events/${encodeURIComponent(e.id)}`}>{e.name}</Link>
+                {e.location ? <span style={{ color: '#6b7280' }}> · {e.location}</span> : null}
+                {e.startsAt ? (
+                  <span style={{ color: '#6b7280' }}>
+                    {' '}
+                    · {utcDay(e.startsAt)} ({relativeDayLabel(e.startsAt, now)})
+                  </span>
+                ) : null}
+                {e.attendeeCount > 1 ? (
+                  <span style={{ color: '#6b7280' }}> · {e.attendeeCount} in your network</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section aria-label="Also met at" style={{ marginTop: '1.5rem' }}>

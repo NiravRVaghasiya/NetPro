@@ -31,6 +31,7 @@ const PROTECTED_ROUTES = [
   "/edges",
   "/graph",
   "/skills",
+  "/events",
   "/settings",
   "/import",
 ];

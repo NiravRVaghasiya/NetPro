@@ -281,6 +281,7 @@ additionally marked no-store so no shared cache or CDN retains private data.
 - [ ] OAuth callback URL registered as `<origin>/api/auth/callback/github`
 - [ ] `/api/health` returns `healthy`
 - [ ] `/api/card` returns 401 when signed out
+- [ ] `/api/events` returns 401 when signed out (every `/api` route is owner-only)
 - [ ] Postgres is not reachable from the public internet
 - [ ] Migrations run as a deploy step, with `NETPRO_AUTO_MIGRATE=false`
 - [ ] You have a database backup/restore plan — NetPro does not make backups
