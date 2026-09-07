@@ -165,8 +165,94 @@ The web app drafts from the **Outreach** page (`/outreach`, backed by
 tone, and add context. Configure the server with `AI_PROVIDER`,
 `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`), optionally `OPENAI_BASE_URL` for an
 OpenAI-compatible endpoint, and `OPENAI_MODEL`/`ANTHROPIC_MODEL` overrides; the
-**Settings** page shows which integrations are configured. Batch campaigns and
-actual email delivery (SMTP) are planned for a later release.
+**Settings** page shows which integrations are configured.
+
+## Track relationships & follow-ups
+
+NetPro v1.5 keeps a per-contact interaction history — email, meetings, calls,
+notes, LinkedIn messages, intros — with a computed relationship score, plus
+follow-up reminders with due-today/overdue/upcoming views. The web CRM lives at
+**Contacts** in the navigation (`/contacts`, `/contacts/[id]`); from the
+terminal, `netpro track` speaks the same language:
+
+```bash
+# Log yesterday's coffee — meeting defaults to inbound + in_person
+netpro track log "Jane Doe" --type meeting --note "Discussed OSS collab" --at 2026-09-06
+
+# The blueprint's one-shot workflow: met at an event + schedule the follow-up
+netpro track add "Jane Doe" --met-at "React Conf" --follow-up 7d
+netpro track add "Pat Lee" --met-at "WASM meetup" --follow-up 2w --reason "share Drizzle talk"
+
+# Where's the follow-up queue?
+netpro track list                      # all pending follow-ups
+netpro track list --due-today          # act on these first
+netpro track list --overdue
+netpro track list --upcoming --limit 50
+netpro track list --recent             # recent interactions instead
+netpro track list --contact "jane@stripe.com" --json
+
+# Close the loop
+netpro track done <followUpId>         # full id or unique prefix
+netpro track snooze <followUpId> --for 3d
+netpro track snooze <followUpId> --until 2026-10-01
+netpro track cancel <followUpId>
+```
+
+`<contact>` selectors accept an email, contact id, or a unique full name
+(ambiguous names list the candidates). Types are whitelisted
+(`meeting`, `call`, `note`, `email_sent`, `email_received`,
+`linkedin_message`, `intro_made`) and backdating is allowed — log it when it
+happened, not when you remember it.
+
+## Run draft-only batch campaigns
+
+Personalize one message or a multi-step drip for a list of contacts — and
+remember, **NetPro drafts, you send**. Every message is rendered per recipient
+from whitelisted merge variables (`{{firstName}}`, `{{company}}`, `{{role}}`,
+`{{headline}}`, `{{location}}`, `{{industry}}`, `{{email}}`, `{{fullName}}`,
+`{{lastName}}`); no SMTP, no secrets, nothing leaves your machine automatically.
+The web UI is at **Campaigns** in the navigation (`/outreach/campaigns`,
+`/outreach/campaigns/[id]`); the CLI commands:
+
+```bash
+# Create a draft campaign: one message, recipients from a search snapshot
+netpro campaign create --name "React Conf follow-up" \
+  --subject "Great meeting you, {{firstName}}" \
+  --body "Hi {{firstName}}, enjoyed our chat at React Conf — …" \
+  --query "conf" --company Stripe --daily-limit 20
+
+# Or a drip sequence with per-step delays (max 5 steps):
+# --step DAYS:SUBJECT:BODY (delay is a whole number of days)
+netpro campaign create --name "OSS collab drip" \
+  --subject "Hi {{firstName}} — quick question" \
+  --body "…" \
+  --step "3:Quick nudge:Hi {{firstName}}, just following up on our chat…" \
+  --step "7:Closing the loop:…" \
+  --contact <contactId> --contact <contactId> --daily-limit 20
+
+# Review the sequence, recipients, and every personalized draft
+netpro campaign list
+netpro campaign show <campaign>            # prints every rendered draft
+
+# Your mailbox is the (only) sender — record the outcome here
+netpro campaign mark-sent <campaign> <recipient>          # logs an email_sent interaction
+netpro campaign mark-sent <campaign> <recipient> --force  # ignore the daily limit
+netpro campaign mark-replied <campaign> <recipient>       # logs inbound reply, cancels drip
+netpro campaign mark-skipped <campaign> <recipient>       # opt out; nothing logged
+
+# Lifecycle: draft → active → paused → completed (archived from any state)
+netpro campaign activate <campaign>
+netpro campaign pause <campaign>
+netpro campaign complete <campaign>
+netpro campaign archive <campaign>
+```
+
+`<recipient>` accepts the same selectors as `netpro track` (email, contact id,
+or unique full name). Recipients are snapshotted at creation (explicit ids or a
+search snapshot), so a campaign is a commitment to a concrete list. Confirmed
+sends and replies feed the same interaction history as `netpro track`, keeping
+the relationship score and analytics true from one source of truth. Scheduled
+drip times are advice shown in the UI — nothing is sent automatically.
 
 ## Create your profile card
 
