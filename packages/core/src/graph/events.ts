@@ -94,6 +94,29 @@ export async function listEventAttendeeIds(
   return rows.map((r) => r.contactId);
 }
 
+async function isAttendee(
+  conn: SqliteConn | PgConn,
+  eventId: string,
+  contactId: string
+): Promise<boolean> {
+  if (conn.dialect === 'sqlite') {
+    const a = conn.schema.eventAttendees;
+    const existing = await conn.db
+      .select({ contactId: a.contactId })
+      .from(a)
+      .where(and(eq(a.eventId, eventId), eq(a.contactId, contactId)))
+      .limit(1);
+    return existing.length > 0;
+  }
+  const a = conn.schema.eventAttendees;
+  const existing = await conn.db
+    .select({ contactId: a.contactId })
+    .from(a)
+    .where(and(eq(a.eventId, eventId), eq(a.contactId, contactId)))
+    .limit(1);
+  return existing.length > 0;
+}
+
 /**
  * Record that `contactId` also met people at `eventName`. Creates the event
  * if needed, an attendee row, and confirmed `met_at_event` edges to every
@@ -114,25 +137,7 @@ export async function recordEventAttendance(
     opts
   );
   const now = resolveNow(opts).toISOString();
-
-  let already = false;
-  if (conn.dialect === 'sqlite') {
-    const a = conn.schema.eventAttendees;
-    const existing = await conn.db
-      .select({ contactId: a.contactId })
-      .from(a)
-      .where(and(eq(a.eventId, event.id), eq(a.contactId, contact.id)))
-      .limit(1);
-    already = existing.length > 0;
-  } else {
-    const a = conn.schema.eventAttendees;
-    const existing = await conn.db
-      .select({ contactId: a.contactId })
-      .from(a)
-      .where(and(eq(a.eventId, event.id), eq(a.contactId, contact.id)))
-      .limit(1);
-    already = existing.length > 0;
-  }
+  const already = await isAttendee(conn, event.id, contact.id);
 
   if (!already) {
     const attendee = {
