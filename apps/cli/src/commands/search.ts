@@ -1,10 +1,16 @@
 import type { Command } from "commander";
 import type { SqliteConn, PgConn } from "@netpro/db";
 import {
+  createEmbeddingProvider,
+  isSearchMode,
   searchContacts,
+  SEARCH_MODES,
   type SearchContactsOptions,
+  type SearchEngineReport,
+  type SearchMode,
   type SearchSort,
 } from "@netpro/core/src/search";
+import { readEmbeddingsConfig } from "./reindex";
 
 export interface SearchCommandOptions {
   query?: string;
@@ -21,6 +27,9 @@ export interface SearchCommandOptions {
   limit?: string;
   offset?: string;
   json?: boolean;
+  // v2.0 Phase 4 — hybrid search. `--semantic` is shorthand for `--mode hybrid`.
+  mode?: string;
+  semantic?: boolean;
 }
 
 const VALID_SORTS: SearchSort[] = ["relevance", "score", "recent", "name"];
@@ -47,6 +56,20 @@ export function toSearchOptions(
     );
   }
 
+  // `--semantic` upgrades to hybrid; an explicit `--mode` always wins so the
+  // two flags can never contradict each other silently.
+  let mode: SearchMode | undefined;
+  if (opts.mode !== undefined) {
+    if (!isSearchMode(opts.mode)) {
+      throw new Error(
+        `Unknown --mode "${opts.mode}". Expected one of: ${SEARCH_MODES.join(", ")}.`,
+      );
+    }
+    mode = opts.mode;
+  } else if (opts.semantic) {
+    mode = "hybrid";
+  }
+
   const minScore = parseNumber(opts.minScore, "min-score");
   if (minScore !== undefined && (minScore < 0 || minScore > 1)) {
     throw new Error("--min-score must be between 0 and 1");
@@ -67,7 +90,47 @@ export function toSearchOptions(
     sort,
     limit: parseNumber(opts.limit, "limit"),
     offset: parseNumber(opts.offset, "offset"),
+    mode,
   };
+}
+
+/**
+ * One line explaining which engine actually served the results.
+ *
+ * Printed for keyword/hybrid runs only: the portable default must stay as
+ * quiet as it was in v1. When an arm was dropped, say why — "semantic off:
+ * no key" is actionable, a silently keyword-only result is not.
+ */
+export function engineLine(engine: SearchEngineReport): string | null {
+  if (engine.requested === "portable") return null;
+
+  const parts: string[] = [];
+  const { keyword, semantic } = engine.arms;
+  parts.push(keyword.used ? `full-text ${keyword.hits}` : `full-text off (${reasonLabel(keyword.reason)})`);
+  if (engine.requested === "hybrid") {
+    parts.push(semantic.used ? `semantic ${semantic.hits}` : `semantic off (${reasonLabel(semantic.reason)})`);
+  }
+  parts.push(`substring ${engine.arms.portable.hits}`);
+
+  const truncated = engine.truncated ? " (candidate pool capped)" : "";
+  return `Engine: ${engine.mode} — ${parts.join(", ")}${truncated}`;
+}
+
+function reasonLabel(reason: SearchEngineReport["arms"]["keyword"]["reason"]): string {
+  switch (reason) {
+    case "index_empty":
+      return "index empty; run netpro reindex";
+    case "index_missing":
+      return "index missing; run netpro migrate";
+    case "not_configured":
+      return "no embeddings key";
+    case "no_embeddings":
+      return "no vectors; run netpro reindex --embeddings";
+    case "provider_error":
+      return "provider error";
+    default:
+      return "not run";
+  }
 }
 
 function scoreLabel(score: number | null): string {
@@ -78,15 +141,28 @@ function scoreLabel(score: number | null): string {
 export async function executeSearch(
   options: SearchCommandOptions,
   conn: SqliteConn | PgConn,
+  deps: { embedder?: Parameters<typeof searchContacts>[2] } = {},
 ): Promise<string> {
-  const res = await searchContacts(conn, toSearchOptions(options));
+  const searchOptions = toSearchOptions(options);
+
+  // Only pay for credential resolution when the semantic arm was asked for.
+  const embedder =
+    deps.embedder ??
+    (searchOptions.mode === "hybrid"
+      ? { embedder: createEmbeddingProvider(await readEmbeddingsConfig()) }
+      : undefined);
+
+  const res = await searchContacts(conn, searchOptions, embedder);
 
   if (options.json) {
     return JSON.stringify(res, null, 2);
   }
 
+  const engineNote = engineLine(res.engine);
+
   if (res.contacts.length === 0) {
-    return `No contacts match. (${res.total} total matches)`;
+    const empty = `No contacts match. (${res.total} total matches)`;
+    return engineNote ? `${empty}\n${engineNote}` : empty;
   }
 
   const lines: string[] = [];
@@ -111,6 +187,7 @@ export async function executeSearch(
   if (topCompanies.length > 0) {
     lines.push(`Top companies: ${topCompanies.join(", ")}`);
   }
+  if (engineNote) lines.push(engineNote);
 
   return lines.join("\n");
 }
@@ -137,6 +214,11 @@ export function registerSearchCommand(program: Command): void {
       "Only contacts active within the last N days",
     )
     .option("--sort <order>", "relevance | score | recent | name", "relevance")
+    .option(
+      "--mode <engine>",
+      "portable (default) | keyword (adds full-text) | hybrid (adds embeddings)",
+    )
+    .option("--semantic", "Shorthand for --mode hybrid")
     .option("--limit <n>", "Max results per page", "25")
     .option("--offset <n>", "Skip the first N results (pagination)")
     .option(

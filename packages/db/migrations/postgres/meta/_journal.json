@@ -29,6 +29,13 @@
       "when": 1788796800000,
       "tag": "0003_edge_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788883200000,
+      "tag": "0004_hybrid_search",
+      "breakpoints": true
     }
   ]
 }

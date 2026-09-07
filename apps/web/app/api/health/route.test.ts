@@ -103,6 +103,44 @@ describe('GET /api/health', () => {
     vi.doUnmock('@/lib/auth');
     vi.resetModules();
   });
+
+  // ── v2.0 Phase 4: hybrid search capability ────────────────────────────
+
+  it('hides search capability from anonymous callers', async () => {
+    // Index/contact counts are inventory data, and even the bare mode
+    // fingerprints how the instance is configured.
+    const body = await (await call('?verbose')).json();
+    expect(body.search).toBeUndefined();
+  });
+
+  it('reports the portable mode to the owner before anything is indexed', async () => {
+    authMock.mockResolvedValue({ user: { id: 'owner' } });
+    const body = await (await call('?verbose')).json();
+    expect(body.search).toMatchObject({ mode: 'portable', indexed: 0, embedded: 0 });
+  });
+
+  it('reports the keyword mode once contacts are indexed', async () => {
+    const { reindexSearchIndex } = await import('@netpro/core/src/search');
+    fixture.conn.db
+      .insert(fixture.conn.schema.contacts)
+      .values({
+        id: 'health-c1',
+        fullName: 'Jane Doe',
+        source: 'test',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .run();
+    await reindexSearchIndex(fixture.conn);
+
+    authMock.mockResolvedValue({ user: { id: 'owner' } });
+    const body = await (await call('?verbose')).json();
+    expect(body.search).toMatchObject({ mode: 'keyword', contacts: 1, indexed: 1 });
+    // No key configured in the test environment, so hybrid is not claimed.
+    expect(body.search.mode).not.toBe('hybrid');
+
+    fixture.sqlite.exec("DELETE FROM search_index; DELETE FROM contacts WHERE id = 'health-c1'");
+  });
 });
 
 // Keep the shared fixture from leaking into other suites' file handles.

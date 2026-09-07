@@ -4,6 +4,7 @@ import { registerConfigCommand } from './commands/config';
 import { registerImportCommand } from './commands/import';
 import { registerEnrichCommand } from './commands/enrich';
 import { registerSearchCommand } from './commands/search';
+import { registerReindexCommand } from './commands/reindex';
 import { registerOutreachCommand } from './commands/outreach';
 import { registerAnalyzeCommand } from './commands/analyze';
 import { registerPathCommand } from './commands/path';
@@ -27,6 +28,7 @@ export function createProgram(): Command {
   registerImportCommand(program);
   registerEnrichCommand(program);
   registerSearchCommand(program);
+  registerReindexCommand(program);
   registerOutreachCommand(program);
   registerAnalyzeCommand(program);
   registerPathCommand(program);

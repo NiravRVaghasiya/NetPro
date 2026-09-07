@@ -212,4 +212,174 @@ describeIfPg('PostgreSQL integration', () => {
   it('exposes a migrations folder for the postgres dialect', () => {
     expect(resolveMigrationsFolder('postgresql')).toMatch(/migrations[/\\]postgres$/);
   });
+
+  // ── v2.0 Phase 4: hybrid search ────────────────────────────────────────
+  //
+  // The keyword arm is the one part of search whose SQL genuinely differs by
+  // dialect (FTS5 vs tsvector). SQLite is covered by the in-memory fixture in
+  // packages/core; this is the half that only a real server can prove — the
+  // generated column's immutability, the GIN index, and to_tsquery's prefix
+  // operator all fail at DDL/plan time, not at typecheck time.
+  describe('hybrid search (phase 4)', () => {
+    let searchDb: string;
+    let searchConn: PgConn;
+
+    beforeAll(async () => {
+      searchDb = await freshDatabase('search');
+      searchConn = connect(searchDb);
+      await runMigrations(searchConn, { force: true });
+
+      await searchConn.db.insert(schema.contacts).values([
+        {
+          id: 's1',
+          fullName: 'Jane Doe',
+          email: 'jane@stripe.com',
+          company: 'Stripe',
+          role: 'Senior Engineer',
+          headline: 'Payments infrastructure',
+          location: 'Berlin',
+          source: 'test',
+          relationshipScore: 0.8,
+        },
+        {
+          id: 's2',
+          fullName: 'John Smith',
+          email: 'john@vercel.com',
+          company: 'Vercel',
+          role: 'Product Manager',
+          headline: 'Building the web',
+          location: 'San Francisco',
+          source: 'test',
+          relationshipScore: 0.5,
+        },
+      ]);
+    }, 60_000);
+
+    afterAll(async () => {
+      await searchConn?.pool.end();
+    });
+
+    it('creates the generated tsvector column and its GIN index', async () => {
+      const columns = await searchConn.db.execute<{
+        column_name: string;
+        data_type: string;
+        is_generated: string;
+      }>(
+        sql`SELECT column_name, data_type, is_generated
+            FROM information_schema.columns
+            WHERE table_name = 'search_index'
+            ORDER BY column_name`
+      );
+      const byName = new Map(columns.rows.map((r) => [r.column_name, r]));
+      for (const added of [
+        'embedding_dim',
+        'embedding_updated_at',
+        'content_hash',
+        'search_vector',
+      ]) {
+        expect(byName.has(added)).toBe(true);
+      }
+      expect(byName.get('search_vector')?.data_type).toBe('tsvector');
+      // ALWAYS = a stored generated column: no producer can forget to fill it,
+      // and no trigger has to exist (the SQLite side needs three).
+      expect(byName.get('search_vector')?.is_generated).toBe('ALWAYS');
+
+      const indexes = await searchConn.db.execute<{ indexname: string; indexdef: string }>(
+        sql`SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'search_index'`
+      );
+      const gin = indexes.rows.find((r) => r.indexname === 'idx_search_index_vector');
+      expect(gin?.indexdef).toMatch(/USING gin/i);
+      expect(
+        indexes.rows.some((r) => r.indexname === 'idx_search_index_updated_at')
+      ).toBe(true);
+    });
+
+    it('populates search_vector automatically and matches with a prefix tsquery', async () => {
+      await searchConn.db.insert(schema.searchIndex).values([
+        {
+          contactId: 's1',
+          searchText: 'jane doe jane@stripe.com payments infrastructure stripe senior engineer berlin',
+          contentHash: 'hash-1',
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          contactId: 's2',
+          searchText: 'john smith john@vercel.com building the web vercel product manager san francisco',
+          contentHash: 'hash-2',
+          updatedAt: new Date().toISOString(),
+        },
+      ]);
+
+      // Exactly the query the keyword arm issues (arms.ts::keywordArm).
+      const hits = await searchConn.db.execute<{ id: string }>(
+        sql`SELECT search_index.contact_id AS id
+            FROM search_index
+            JOIN contacts ON contacts.id = search_index.contact_id
+            WHERE search_index.search_vector @@ to_tsquery('english', ${'payment:*'})
+              AND contacts.deleted_at IS NULL
+            ORDER BY ts_rank(search_index.search_vector, to_tsquery('english', ${'payment:*'})) DESC`
+      );
+      // Prefix matching plus English stemming: "payment:*" finds "payments".
+      expect(hits.rows.map((r) => r.id)).toEqual(['s1']);
+    });
+
+    it('regenerates search_vector when the document changes', async () => {
+      await searchConn.db.execute(
+        sql`UPDATE search_index SET search_text = 'jane doe vercel edge functions'
+            WHERE contact_id = 's1'`
+      );
+      const stale = await searchConn.db.execute<{ id: string }>(
+        sql`SELECT contact_id AS id FROM search_index
+            WHERE search_vector @@ to_tsquery('english', ${'payment:*'})`
+      );
+      expect(stale.rows).toEqual([]);
+      const fresh = await searchConn.db.execute<{ id: string }>(
+        sql`SELECT contact_id AS id FROM search_index
+            WHERE search_vector @@ to_tsquery('english', ${'edge:*'})`
+      );
+      expect(fresh.rows.map((r) => r.id)).toEqual(['s1']);
+    });
+
+    it('refuses to let a generated column be written directly', async () => {
+      // Guards the producer contract: search_vector is derived, never supplied.
+      await expect(
+        searchConn.db.execute(
+          sql`UPDATE search_index SET search_vector = to_tsvector('english', 'nope') WHERE contact_id = 's1'`
+        )
+      ).rejects.toThrow();
+    });
+
+    it('cascades index rows away with the contact', async () => {
+      await searchConn.db.execute(sql`DELETE FROM contacts WHERE id = 's2'`);
+      const rows = await searchConn.db.execute<{ n: string }>(
+        sql`SELECT count(*) AS n FROM search_index WHERE contact_id = 's2'`
+      );
+      expect(Number(rows.rows[0]?.n)).toBe(0);
+    });
+
+    it('round-trips a stored embedding as portable JSON text', async () => {
+      // The semantic arm reads this back with JSON.parse on both dialects, so
+      // Postgres must hand back the exact string it was given.
+      const vector = JSON.stringify([0.125, -0.25, 0.5]);
+      await searchConn.db.execute(
+        sql`UPDATE search_index
+            SET embedding = ${vector}, embedding_model = 'text-embedding-3-small',
+                embedding_dim = 3, embedding_updated_at = ${new Date().toISOString()}
+            WHERE contact_id = 's1'`
+      );
+      const [row] = (
+        await searchConn.db.execute<{
+          embedding: string;
+          embedding_dim: number;
+          embedding_model: string;
+        }>(
+          sql`SELECT embedding, embedding_dim, embedding_model FROM search_index WHERE contact_id = 's1'`
+        )
+      ).rows;
+      expect(typeof row?.embedding).toBe('string');
+      expect(row?.embedding).toBe(vector);
+      expect(row?.embedding_dim).toBe(3);
+      expect(JSON.parse(row!.embedding)).toEqual([0.125, -0.25, 0.5]);
+    });
+  });
 });

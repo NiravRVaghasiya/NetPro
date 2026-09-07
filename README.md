@@ -13,11 +13,12 @@ implemented** on top of the v0.1-alpha scaffold:
 - **Phase 1 — Import, Enrichment & Export:** LinkedIn CSV import with
   dedup/merge, three-provider contact enrichment (Hunter.io, People Data Labs,
   Clearbit), and CSV export.
-- **Phase 2 — People Search:** faceted full-text search over your contacts —
+- **Phase 2 — People Search:** faceted search over your contacts —
   free-text query plus company/role/location/industry/seniority/email/score/
   activity filters, relevance/score/recent/name sorting, facets, and
   pagination — wired into both the CLI (`netpro search`) and the web app
-  (`/search`, `GET /api/search`).
+  (`/search`, `GET /api/search`). Portable SQL by default; v2.0 Phase 4 adds
+  the FTS5/`tsvector` and semantic arms behind the same entry point.
 - **Phase 3 — Network Analytics:** a composite network health score,
   activity/dormancy breakdown, 12-month growth series, industry/company
   diversity (Shannon entropy), company clusters, and the dormant-ties
@@ -124,8 +125,21 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   incl. pending rows), and the owner-only APIs `GET /api/graph/paths` +
   `GET /api/graph/overview`. Chains are ranked; **you** pick the intermediary
   — the plan's auto-pick stays deferred.
-- Still ahead in v2.0: hybrid search (FTS5 + pgvector + RRF), the skills gap
-  analyzer, the event matcher, and the release cut. The blueprint also lists real SMTP delivery
+- **Phase 4 — Hybrid search (shipped):** additive migration `0004` gives
+  `search_index` a real producer plus an FTS5 virtual table (SQLite) and a
+  generated `tsvector` + GIN index (Postgres). `searchContacts` is now a
+  three-arm dispatcher — portable substring, keyword full-text, and an
+  opt-in embedding arm — merged with **reciprocal rank fusion** (k=60).
+  The keyword arm indexes the whole contact document (notes, tags, industry,
+  seniority, department, country), so it finds people substring matching
+  misses. Surfaced as `netpro search --mode keyword|hybrid` / `--semantic`,
+  the new `netpro reindex [--embeddings] [--status]`, a `/search` engine
+  selector + "Results powered by…" badge, `GET /api/search?mode=`, and a
+  `search` block in the owner-only health payload. **Configuring nothing
+  changes nothing**: no index → substring search, no key → no semantic arm,
+  provider down → keyword results with a stated reason rather than an error.
+- Still ahead in v2.0: the skills gap analyzer, the event matcher, and the
+  release cut. The blueprint also lists real SMTP delivery
 for campaigns as optional follow-up work (NetPro drafts today; a human sends).
 Per-user encrypted web key storage and the `$EDITOR` draft-review loop remain
 deferred and are documented in the

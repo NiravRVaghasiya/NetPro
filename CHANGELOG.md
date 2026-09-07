@@ -7,6 +7,45 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
 
 ## [Unreleased]
 
+### Added — v2.0 Phase 4: Hybrid search
+
+- Additive migration `0004` (both dialects) turns `search_index` into a real
+  index: `search_text`/`content_hash`/`embedding` columns, an FTS5 virtual
+  table with `unicode61 remove_diacritics 2` + sync triggers on SQLite, and a
+  generated `search_vector tsvector` with a GIN index on Postgres. v1 portable
+  search keeps working untouched on an un-migrated or un-indexed database.
+- `searchContacts()` is now a dispatcher over three arms behind the **same
+  entry point and the same filters**: portable substring (always), keyword
+  full-text (`bm25()` / `ts_rank`, prefix matching), and an opt-in semantic
+  arm. Results are merged with **reciprocal rank fusion** (`k=60`, weights
+  keyword 1 / semantic 0.9 / portable 0.5) and deduped per contact. Every
+  response carries an `engine` report naming which arms ran, how many hits
+  each returned, and *why* one was skipped.
+- The keyword arm indexes the full contact document — name, email, headline,
+  company, role, seniority, department, industry, location, country, tags and
+  **notes** — so it finds people the six-column substring search cannot.
+- `netpro reindex [--embeddings] [--force] [--status]` builds and inspects the
+  index; it is content-hash guarded, so re-running it is nearly free. Imports
+  produce index rows automatically (best-effort — a failed index write never
+  fails an import) and **never call an embedding provider**.
+- CLI `netpro search --mode portable|keyword|hybrid` / `--semantic`, plus an
+  `Engine: …` line explaining the result set. Web: an engine selector on
+  `/search` (the semantic option is hidden unless the server has a key), a
+  "Results powered by …" badge with actionable hints, `GET /api/search?mode=`
+  (unknown mode → explicit 400, never a silent downgrade), and an owner-only
+  `search` block in `GET /api/health?verbose`.
+- New env, all optional and defaulting to off: `EMBEDDINGS_PROVIDER`
+  (`openai|disabled`), `EMBEDDINGS_API_KEY`, `EMBEDDINGS_MODEL`,
+  `EMBEDDINGS_BASE_URL`, `EMBEDDINGS_DIMENSIONS`. The CLI also reads them from
+  the encrypted keychain (`netpro config set embeddings.key`). Keys stay
+  server-side; the browser never receives one.
+- **No configuration = no behaviour change.** No index → substring search; no
+  key → no semantic arm; SQLite → keyword-only (no vector support); embeddings
+  API down mid-request → keyword results with a stated reason, not an error.
+- No new runtime dependencies (the embeddings client is fetch-only, mirroring
+  the existing AI provider surface). Measured on 1,000 contacts: cold reindex
+  85 ms, warm 10 ms, portable query 12 ms, keyword 14 ms, hybrid 33 ms.
+
 ### Added — v2.0 Phase 3: Warm-intro pathfinder surface
 
 - The Phase 2 engine gains its decision layer in `packages/core/graph`:
