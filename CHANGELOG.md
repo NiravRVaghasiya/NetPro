@@ -7,6 +7,28 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
 
 ## [Unreleased]
 
+### Added — v2.0 Phase 2: Graph analytics engine
+
+- `packages/core/graph` analytics: pure-TS **Louvain community detection**
+  (no new dependency — decision + measurement in the phase progress doc),
+  degree + **Brandes betweenness** centrality, and a **warm-intro pathfinder**
+  (bounded BFS over `edges`; `maxDepth` default 4; one-way rows traversed
+  one way only; `rejected` never; `pending` only via `status=all`).
+- `getNetworkGraph()` — merged dashboard view: node/edge coverage,
+  communities (modularity + labels), most-connected list, components, exact
+  average path length, and warm-intro candidate pairs (contact → hub via the
+  strongest intermediary). Over-budget graphs degrade honestly (documented
+  caps: 50k edges, 1.5k-node betweenness, 600-node APL — each skip reported,
+  never faked).
+- `netpro analyze --graph` section (fourth mutually exclusive section flag);
+  `--json` carries the graph payload.
+- Web: `GET /api/analytics` now includes `graph` (`?graph=0` opts out) and
+  `/dashboard` renders a server-rendered **Network graph** strip with
+  onboarding empty state, pending-candidate nudge, and cap-notice degrade.
+- `analytics/metrics.test.ts` and the CLI/web analytics test fixtures moved
+  onto the migrated `createTestSqliteConn` fixture — no duplicated DDL.
+- No migration: Phase 1's `0003` (columns + indexes) is all this reads.
+
 ### Added — v2.0 Phase 1: Edge provenance
 
 - Additive migration `0003` (both dialects): `edges.source`, `edges.confidence`,

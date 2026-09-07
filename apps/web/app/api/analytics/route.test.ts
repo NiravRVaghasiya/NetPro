@@ -1,24 +1,12 @@
-import { describe, it, expect, vi } from "vitest";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import * as schema from "@netpro/db/src/schema.sqlite";
+import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/db", () => {
-  const sqlite = new Database(":memory:");
-  const db = drizzle(sqlite, { schema });
-  sqlite.exec(`
-    CREATE TABLE contacts (
-      id TEXT PRIMARY KEY, full_name TEXT NOT NULL, first_name TEXT, last_name TEXT,
-      email TEXT, email_verified INTEGER DEFAULT 0, phone TEXT, avatar_url TEXT,
-      headline TEXT, company TEXT, company_domain TEXT, role TEXT, seniority TEXT,
-      department TEXT, industry TEXT, location TEXT, country TEXT, timezone TEXT,
-      linkedin_url TEXT, github_url TEXT, twitter_url TEXT, website_url TEXT,
-      source TEXT NOT NULL, source_id TEXT, tags TEXT, custom_fields TEXT, notes TEXT,
-      relationship_score REAL DEFAULT 0, last_interaction TEXT, interaction_count INTEGER DEFAULT 0,
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
-    );
-  `);
-  const now = new Date();
+const fixture = await vi.hoisted(async () => {
+  const { createTestSqliteConn } = await import("@netpro/db/src/testing");
+  const f = createTestSqliteConn();
+  const NOW = new Date("2026-09-06T12:00:00.000Z");
+  const iso = (daysAgo: number) =>
+    new Date(NOW.getTime() - daysAgo * 86400000).toISOString();
+
   const rows = [
     {
       id: "c1",
@@ -28,8 +16,8 @@ vi.mock("@/lib/db", () => {
       role: "Senior Engineer",
       industry: "Fintech",
       relationshipScore: 0.8,
-      lastInteraction: new Date(now.getTime() - 5 * 86400000).toISOString(),
-      createdAt: new Date(now.getTime() - 400 * 86400000).toISOString(),
+      lastInteraction: iso(5),
+      createdAt: iso(400),
     },
     {
       id: "c2",
@@ -40,7 +28,7 @@ vi.mock("@/lib/db", () => {
       industry: "Fintech",
       relationshipScore: 0.4,
       lastInteraction: null,
-      createdAt: new Date(now.getTime() - 200 * 86400000).toISOString(),
+      createdAt: iso(200),
     },
     {
       id: "c3",
@@ -50,31 +38,51 @@ vi.mock("@/lib/db", () => {
       role: "Designer",
       industry: "Software",
       relationshipScore: 0.2,
-      lastInteraction: new Date(now.getTime() - 120 * 86400000).toISOString(),
-      createdAt: new Date(now.getTime() - 120 * 86400000).toISOString(),
+      lastInteraction: iso(120),
+      createdAt: iso(120),
     },
   ];
   for (const r of rows) {
-    sqlite
-      .prepare(
-        `INSERT INTO contacts (id, full_name, email, company, role, industry, relationship_score, last_interaction, created_at, updated_at, source)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'test')`,
-      )
-      .run(
-        r.id,
-        r.fullName,
-        r.email,
-        r.company,
-        r.role,
-        r.industry,
-        r.relationshipScore,
-        r.lastInteraction,
-        r.createdAt,
-        now.toISOString(),
-      );
+    await f.conn.db.insert(f.conn.schema.contacts).values({
+      ...r,
+      source: "test",
+      updatedAt: NOW.toISOString(),
+    });
   }
-  return { conn: { dialect: "sqlite", db, schema } };
+  // One confirmed edge (Jane–John) and one pending candidate (John–Alice):
+  // the graph section must count the first and only expose the second as a
+  // pending candidate.
+  await f.conn.db.insert(f.conn.schema.edges).values([
+    {
+      id: "e1",
+      sourceId: "c1",
+      targetId: "c2",
+      relation: "colleague",
+      strength: 0.6,
+      bidirectional: true,
+      source: "manual",
+      confidence: 1,
+      status: "confirmed",
+      discoveredAt: iso(50),
+      updatedAt: iso(50),
+    },
+    {
+      id: "e2",
+      sourceId: "c2",
+      targetId: "c3",
+      relation: "mutual_network",
+      strength: 0.5,
+      bidirectional: true,
+      source: "linkedin_csv",
+      confidence: 0.5,
+      status: "pending",
+      discoveredAt: iso(10),
+      updatedAt: iso(10),
+    },
+  ]);
+  return f;
 });
+vi.mock("@/lib/db", () => ({ conn: fixture.conn }));
 
 import { GET } from "./route";
 
@@ -94,6 +102,15 @@ describe("GET /api/analytics", () => {
       topCompanies: Array<{ value: string; count: number }>;
       clusters: Array<{ key: string; size: number }>;
       dormant: Array<{ id: string }>;
+      graph: {
+        nodes: number;
+        edges: number;
+        pendingCandidates: number;
+        components: { count: number };
+        avgPathLength: { value: number | null };
+        communities: { count: number };
+        warmIntros: unknown[];
+      };
       generatedAt: string;
     };
 
@@ -105,6 +122,22 @@ describe("GET /api/analytics", () => {
     expect(body.clusters[0]).toMatchObject({ key: "stripe", size: 2 });
     expect(body.dormant).toHaveLength(2);
     expect(typeof body.generatedAt).toBe("string");
+
+    // v2.0 Phase 2 — the graph section rides along in the same payload.
+    expect(body.graph.nodes).toBe(2); // confirmed edge only
+    expect(body.graph.edges).toBe(1);
+    expect(body.graph.pendingCandidates).toBe(1);
+    expect(body.graph.components).toMatchObject({ count: 1 });
+    expect(body.graph.avgPathLength.value).toBe(1);
+    expect(body.graph.communities.count).toBeGreaterThanOrEqual(1);
+    expect(body.graph.warmIntros).toEqual([]); // 2-node graph has no 2-hop pairs
+  });
+
+  it("omits the graph section with ?graph=0", async () => {
+    const res = await get("/api/analytics?graph=0");
+    const body = (await res.json()) as { graph?: unknown; metrics: unknown };
+    expect(body.graph).toBeUndefined();
+    expect(body.metrics).toBeDefined();
   });
 
   it("accepts the dormancy window via ?days=", async () => {

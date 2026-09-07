@@ -13,6 +13,7 @@ import {
   projectContacts,
   topValues,
 } from "./metrics";
+import { getNetworkGraph, type NetworkGraph } from "../graph/network";
 import {
   resolveAnalyticsOptions,
   type AnalyticsOptions,
@@ -24,7 +25,8 @@ export const TOP_VALUES_LIMIT = 5;
 
 /**
  * Build the full network overview: metrics, composite score, growth,
- * top companies/industries, clusters, and the dormant-ties list.
+ * top companies/industries, clusters, the dormant-ties list, and the
+ * graph-analytics section (`includeGraph: false` opts out — v2.0 Phase 2).
  */
 export async function getNetworkOverview(
   conn: SqliteConn | PgConn,
@@ -32,12 +34,22 @@ export async function getNetworkOverview(
 ): Promise<NetworkOverview> {
   const { now } = resolveAnalyticsOptions(options);
 
-  const [metrics, growth, clusters, dormant, rows] = await Promise.all([
+  const graphPromise: Promise<NetworkGraph | undefined> =
+    options.includeGraph === false
+      ? Promise.resolve(undefined)
+      : getNetworkGraph(conn, {
+          ...options.graph,
+          limit: options.graph?.limit ?? Math.min(options.limit ?? 10, 50),
+          now,
+        });
+
+  const [metrics, growth, clusters, dormant, rows, graph] = await Promise.all([
     computeNetworkMetrics(conn, options),
     getGrowthSummary(conn, options),
     detectClusters(conn, options),
     getDormantContacts(conn, options),
     projectContacts(conn),
+    graphPromise,
   ]);
 
   const score = computeNetworkScore({
@@ -55,6 +67,7 @@ export async function getNetworkOverview(
     topIndustries: topValues(rows, "industry", metrics.totalContacts, TOP_VALUES_LIMIT),
     clusters,
     dormant,
+    ...(graph ? { graph } : {}),
     generatedAt: now.toISOString(),
   };
 }

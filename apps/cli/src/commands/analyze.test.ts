@@ -1,30 +1,16 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import * as schema from "@netpro/db/src/schema.sqlite";
 import {
   executeAnalyze,
   selectedSection,
   toAnalyzeOptions,
 } from "./analyze";
 import type { SqliteConn } from "@netpro/db";
+import { createTestSqliteConn } from "@netpro/db/src/testing";
 
+// Migrated fixture: contacts + edges + everything `getNetworkOverview`
+// (including the v2.0 graph section) reads, straight from the migrations.
 function createTestConn(): SqliteConn {
-  const sqlite = new Database(":memory:");
-  const db = drizzle(sqlite, { schema });
-  sqlite.exec(`
-    CREATE TABLE contacts (
-      id TEXT PRIMARY KEY, full_name TEXT NOT NULL, first_name TEXT, last_name TEXT,
-      email TEXT, email_verified INTEGER DEFAULT 0, phone TEXT, avatar_url TEXT,
-      headline TEXT, company TEXT, company_domain TEXT, role TEXT, seniority TEXT,
-      department TEXT, industry TEXT, location TEXT, country TEXT, timezone TEXT,
-      linkedin_url TEXT, github_url TEXT, twitter_url TEXT, website_url TEXT,
-      source TEXT NOT NULL, source_id TEXT, tags TEXT, custom_fields TEXT, notes TEXT,
-      relationship_score REAL DEFAULT 0, last_interaction TEXT, interaction_count INTEGER DEFAULT 0,
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
-    );
-  `);
-  return { dialect: "sqlite", db, schema };
+  return createTestSqliteConn().conn;
 }
 
 function iso(daysAgo: number): string {
@@ -102,6 +88,7 @@ describe("selectedSection", () => {
     [{ networkScore: true }, "score"],
     [{ dormant: true }, "dormant"],
     [{ clusters: true }, "clusters"],
+    [{ graph: true }, "graph"],
   ] as const)("maps each section flag %j", (opts, expected) => {
     expect(selectedSection(opts)).toBe(expected);
   });
@@ -109,6 +96,7 @@ describe("selectedSection", () => {
   it.each([
     [{ networkScore: true, dormant: true }],
     [{ dormant: true, clusters: true }],
+    [{ clusters: true, graph: true }],
     [{ networkScore: true, clusters: true, dormant: true }],
   ])("rejects combinations %j", (opts) => {
     expect(() => selectedSection(opts as never)).toThrow(/mutually exclusive/);
@@ -203,5 +191,91 @@ describe("executeAnalyze", () => {
   it("--json wins over section flags for scripts", async () => {
     const out = await executeAnalyze({ json: true, dormant: true }, conn);
     expect(() => JSON.parse(out)).not.toThrow();
+  });
+});
+
+describe("executeAnalyze --graph", () => {
+  it("shows the empty state until edges exist", async () => {
+    const conn = createTestConn();
+    conn.db
+      .insert(conn.schema.contacts)
+      .values({ id: "x", fullName: "Solo Sam", source: "test", createdAt: iso(10), updatedAt: iso(10) })
+      .run();
+    const out = await executeAnalyze({ graph: true }, conn);
+    expect(out).toMatch(/Network graph:/);
+    expect(out).toMatch(/No confirmed edges yet/);
+    expect(out).not.toMatch(/Network score/);
+  });
+
+  it("renders communities, centrality, and warm-intro candidates", async () => {
+    const conn = createTestConn();
+    const people = [
+      ["a", "Ada Lovelace"],
+      ["b", "Bob Builder"],
+      ["c", "Cara Chen"],
+      ["d", "Dan Delta"],
+    ] as const;
+    for (const [id, fullName] of people) {
+      conn.db
+        .insert(conn.schema.contacts)
+        .values({
+          id,
+          fullName,
+          source: "test",
+          relationshipScore: id === "b" ? 0.9 : 0.3,
+          createdAt: iso(10),
+          updatedAt: iso(10),
+        })
+        .run();
+    }
+    for (const [s, t] of [["a", "b"], ["b", "c"], ["c", "a"], ["b", "d"]] as const) {
+      conn.db
+        .insert(conn.schema.edges)
+        .values({
+          id: `${s}-${t}`,
+          sourceId: s,
+          targetId: t,
+          relation: "manual",
+          strength: 0.5,
+          bidirectional: true,
+          source: "manual",
+          confidence: 1,
+          status: "confirmed",
+          discoveredAt: iso(5),
+          updatedAt: iso(5),
+        })
+        .run();
+    }
+    const out = await executeAnalyze({ graph: true }, conn);
+    expect(out).toMatch(/Network graph \(4 of 4 contacts linked · 4 edges\)/);
+    // K3+tail has no positive-Q split: Louvain settles at Q = 0.
+    expect(out).toMatch(/Communities: 2 \(modularity 0\)/);
+    expect(out).toMatch(/Most connected:/);
+    // b sits interior to exactly {a,d} and {c,d}: raw 2, norm 2/3 = 0.67.
+    expect(out).toMatch(/Bob Builder — 3 edges · betweenness 0\.67/);
+    expect(out).toMatch(/Components: 1 .* · avg path length 1\.33/);
+    expect(out).toMatch(/Warm-intro candidates/);
+    // Hubs are ranked by degree, so the first suggestion reaches a degree-2
+    // contact from the other side of Bob: d→a and d→c before a→d/c→d.
+    expect(out).toMatch(/Dan Delta → Ada Lovelace via Bob Builder \(2 hops\)/);
+    expect(out).not.toMatch(/pending edge candidate/);
+  });
+
+  it("includes the graph strip in the full report too", async () => {
+    const conn = createTestConn();
+    conn.db
+      .insert(conn.schema.contacts)
+      .values({ id: "x", fullName: "Solo Sam", source: "test", createdAt: iso(10), updatedAt: iso(10) })
+      .run();
+    const out = await executeAnalyze({}, conn);
+    expect(out).toMatch(/Network graph:/);
+    expect(out).toMatch(/Network score/);
+  });
+
+  it("--json carries the graph section", async () => {
+    const conn = createTestConn();
+    const out = await executeAnalyze({ json: true }, conn);
+    const parsed = JSON.parse(out) as { graph?: { nodes: number } };
+    expect(parsed.graph?.nodes).toBe(0);
   });
 });
