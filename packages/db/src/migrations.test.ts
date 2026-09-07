@@ -112,13 +112,12 @@ describe("profile card migration", () => {
       );
       const db = drizzle(sqlite, { schema });
       migrate(db, { migrationsFolder: temporary });
-      db.insert(schema.contacts)
-        .values({
-          id: "existing",
-          fullName: "Keep this contact",
-          source: "test",
-        })
-        .run();
+      // This fixture intentionally has only the first migration applied, so
+      // use raw SQL rather than the current schema (which includes later
+      // additive columns such as contacts.skills).
+      sqlite
+        .prepare("INSERT INTO contacts (id, full_name, source) VALUES (?, ?, ?)")
+        .run("existing", "Keep this contact", "test");
       db.insert(schema.users)
         .values({ id: "owner", email: "owner@example.com" })
         .run();

@@ -1,5 +1,5 @@
 import { conn } from '@/lib/db';
-import { analyzeNetworkGaps } from '@netpro/core/src/skills';
+import { analyzeNetworkGaps, loadSkillContacts } from '@netpro/core/src/skills';
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)?.trim() || '';
@@ -8,8 +8,8 @@ export default async function SkillsPage({ searchParams }: { searchParams: Searc
   const q = await searchParams;
   const role = one(q.role);
   const description = one(q.description);
-  const rows = await conn.db.select().from(conn.schema.contacts);
-  const result = role || description ? analyzeNetworkGaps({ role, description }, rows.filter((r) => !r.deletedAt).map((r) => r as never)) : null;
+  const contacts = role || description ? await loadSkillContacts(conn) : [];
+  const result = role || description ? analyzeNetworkGaps({ role, description }, contacts) : null;
   return <main style={{ maxWidth: 860, margin: '2rem auto', padding: '0 1rem' }}>
     <h1>Skills gap analyzer</h1>
     <p>Find the people in your network who can help with a target role. Analysis is local and uses NetPro&apos;s explainable skill taxonomy.</p>

@@ -97,13 +97,20 @@ export function analyzeNetworkGaps(target: { role?: string; skills?: string[]; d
 
 /** Persist only the derived verdict; source notes and imported fields are untouched. */
 export async function writeExtractedSkills(conn: SqliteConn | PgConn, contactId: string, extraction: SkillExtraction): Promise<void> {
-  const value = conn.dialect === 'sqlite' ? extraction.skills : JSON.stringify(extraction.skills);
-  await conn.db.update(conn.schema.contacts).set({ skills: value } as never).where(eq(conn.schema.contacts.id, contactId));
+  if (conn.dialect === 'sqlite') {
+    await conn.db.update(conn.schema.contacts).set({ skills: extraction.skills }).where(eq(conn.schema.contacts.id, contactId));
+  } else {
+    await conn.db.update(conn.schema.contacts).set({ skills: JSON.stringify(extraction.skills) }).where(eq(conn.schema.contacts.id, contactId));
+  }
 }
 
 /** Read live contacts without making skills analysis depend on a dialect-specific query. */
 export async function loadSkillContacts(conn: SqliteConn | PgConn): Promise<SkillContact[]> {
+  if (conn.dialect === 'sqlite') {
+    const rows = await conn.db.select().from(conn.schema.contacts).where(isNull(conn.schema.contacts.deletedAt));
+    return rows.map((row: typeof rows[number]) => row as unknown as SkillContact);
+  }
   const rows = await conn.db.select().from(conn.schema.contacts).where(isNull(conn.schema.contacts.deletedAt));
-  return rows.map((row) => row as unknown as SkillContact);
+  return rows.map((row: typeof rows[number]) => row as unknown as SkillContact);
 }
 
