@@ -5,7 +5,7 @@ All notable changes to NetPro are documented here. The format is based on
 the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint.md)
 (`vX.Y` milestones, published as `X.Y.0` npm/GitHub versions).
 
-## [Unreleased]
+## [2.0.0] - 2026-09-08
 
 ### Added — v2.0 Phase 6: Event matcher
 
@@ -202,6 +202,43 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
 - CLI: `netpro edge add|list|rm|import|merge|confirm|reject`.
 - Web: `/edges`, `/api/edges`, contact-detail “Also met at…” panel.
 
+### Changed
+
+- Package versions moved from `1.5.0` to `2.0.0` across every workspace
+  package to mark the milestone release. The CLI already reported `2.0.0`;
+  the packages now agree with it. (Keeping `0.x` until an npm publish was the
+  alternative — the v1.5 precedent of publishing the product milestone as the
+  package version wins, so `netpro --version`, the tags and the packages all
+  tell the same story.)
+- `docs/deployment.md` gained operating notes for the v2.0 surfaces: the
+  skills taxonomy and its opt-in AI pass, event CSV import (what lands
+  `pending` and why), and graph sizing. `docs/getting-started.md` gained the
+  events cookbook.
+- CI's PostgreSQL job now also runs the v2.0 performance pass (5k contacts /
+  20k edges) and asserts that the semantic arm needs no `pgvector` extension.
+
+### Deferred — v2.0 deliberately does not ship
+
+- **Live event discovery.** No Luma/Eventbrite scraping and no provider API
+  calls: `EventDiscoveryProvider` ships as an interface with a disabled
+  default, so a provider can be added later without touching the core, the CLI
+  or the web.
+- **A native pgvector column.** Embeddings are stored as portable JSON text
+  and merged in the fusion step, so a managed Postgres without the extension
+  is a fully supported deployment. A `vector` column + ANN index remains a
+  later optimization, not a missing feature.
+- **AI skills extraction by default.** The offline heuristic taxonomy is the
+  product — explainable, with evidence per skill. `--mode ai` is opt-in per
+  run, restricted to the same taxonomy, and degrades to the heuristic result.
+- **Automatic graph caching or incremental recomputation.** The graph is
+  rebuilt per request; ~50k edges is the documented comfort ceiling, and
+  betweenness / exact average path length keep their own smaller node budgets.
+- **Real SMTP delivery for campaigns** (unchanged from v1.5): NetPro drafts, a
+  human sends. No stored mail credentials, no open/click/bounce tracking.
+- **Per-user encrypted web key storage and the `$EDITOR` draft-review loop** —
+  still deferred per the
+  [Phase 4 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase4-ai-outreach-design.md).
+
 ## [1.5.0] - 2026-09-07
 
 ### Added — Phase 7: CRM tracking & follow-up reminders
@@ -281,3 +318,4 @@ complete|archive|mark-sent|mark-replied|mark-skipped`.
 [0.1.0-alpha]: https://github.com/NiravRVaghasiya/NetPro/releases/tag/v0.1.0-alpha
 [1.0.0]: https://github.com/NiravRVaghasiya/NetPro/releases/tag/v1.0.0
 [1.5.0]: https://github.com/NiravRVaghasiya/NetPro/releases/tag/v1.5.0
+[2.0.0]: https://github.com/NiravRVaghasiya/NetPro/releases/tag/v2.0.0

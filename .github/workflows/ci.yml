@@ -98,6 +98,13 @@ jobs:
       - name: Run core events integration tests against PostgreSQL
         run: npm run test -w @netpro/core -- src/events/postgres.integration.test.ts
 
+      # v2.0 Phase 7: the release-cut performance pass. 5k contacts / 20k
+      # edges against a real server, timing the core entry points behind the
+      # dashboard, /api/search and /api/graph. Skipped locally (no
+      # NETPRO_TEST_DATABASE_URL), so `npm test` stays hermetic.
+      - name: Run the v2.0 performance pass against PostgreSQL
+        run: npm run test -w @netpro/core -- src/postgres.perf.test.ts
+
       - name: Verify the migration CLI against a real database
         env:
           DB_DIALECT: postgresql

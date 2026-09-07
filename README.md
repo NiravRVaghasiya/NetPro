@@ -98,11 +98,11 @@ implemented** on top of the v0.1-alpha scaffold:
 
 The full monorepo (CLI + web, dual-dialect Drizzle database, GitHub OAuth via
 Auth.js) builds, lints, typechecks, and tests successfully — **1191 tests**,
-plus 33 more in a live PostgreSQL integration suite that runs in CI against a
-real database. **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
+plus 38 more in live PostgreSQL suites that run in CI against a real database
+(including a performance pass at 5k contacts / 20k edges). **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
 reminders, and batch campaigns are implemented, and per-contact relationship
-scoring now has a producer (interaction logging). **v2.0 — "The Strategist"**
-is underway (see the [v2.0 implementation
+scoring now has a producer (interaction logging). **v2.0 — "The Strategist" is
+complete** — shipped as `v2.0.0` on 2026-09-08 (see the [v2.0 implementation
 plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
 
 - **Phase 1 — Edge provenance (shipped):** `edges` gained `source`,
@@ -172,10 +172,23 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   Pairwise linking is capped per event (250) and says so when it stops, and
   live event *discovery* ships as a disabled provider interface — no scraping,
   no network.
-- Still ahead in v2.0: the release cut (Phase 7). The blueprint also lists real SMTP delivery
-for campaigns as optional follow-up work (NetPro drafts today; a human sends).
-Per-user encrypted web key storage and the `$EDITOR` draft-review loop remain
-deferred and are documented in the
+- **Phase 7 — Release readiness & the `v2.0.0` cut (shipped):** workspace
+  versions moved to `2.0.0`; the CHANGELOG closed out with an explicit
+  **Deferred** list; deployment docs gained the skills, events and graph
+  operating notes; and the release gate now includes a **performance pass
+  against a real PostgreSQL server** — 5k contacts / 20k edges, timing the
+  dashboard, hybrid search and the graph endpoints (327 ms / 32 ms / 209 ms
+  median on the measured machine, recorded in the [Phase 7 progress
+  doc](docs/superpowers/plans/2026-09-08-v2.0-phase7-release-progress.md)).
+  CI also pins the promise that **no `pgvector` extension is required** —
+  embeddings are portable JSON, so a managed Postgres works as-is.
+
+**Deferred from v2.0 (deliberate, not forgotten):** live event discovery
+providers (the `EventDiscoveryProvider` interface ships, disabled); a native
+pgvector column + ANN index (a later optimization); AI skills extraction as a
+default (opt-in per run); real SMTP delivery for campaigns (NetPro drafts
+today, a human sends); per-user encrypted web key storage and the `$EDITOR`
+draft-review loop — the last two documented in the
 [Phase 4 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase4-ai-outreach-design.md).
 
 > **Analytics scope note:** the clustering story is **two-section** and, since
