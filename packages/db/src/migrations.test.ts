@@ -116,8 +116,8 @@ describe("profile card migration", () => {
       // use raw SQL rather than the current schema (which includes later
       // additive columns such as contacts.skills).
       sqlite
-        .prepare("INSERT INTO contacts (id, full_name, source) VALUES (?, ?, ?)")
-        .run("existing", "Keep this contact", "test");
+        .prepare("INSERT INTO contacts (id, full_name, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+        .run("existing", "Keep this contact", "test", "2026-01-01", "2026-01-01");
       db.insert(schema.users)
         .values({ id: "owner", email: "owner@example.com" })
         .run();
