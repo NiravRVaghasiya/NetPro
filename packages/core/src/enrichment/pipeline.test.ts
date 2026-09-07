@@ -44,6 +44,7 @@ function createTestConn(): SqliteConn {
       tags TEXT,
       custom_fields TEXT,
       notes TEXT,
+      skills TEXT,
       relationship_score REAL DEFAULT 0,
       last_interaction TEXT,
       interaction_count INTEGER DEFAULT 0,
