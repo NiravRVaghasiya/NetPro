@@ -17,6 +17,37 @@ import * as schema from "./schema.sqlite";
 
 const folder = fileURLToPath(new URL("../migrations/sqlite", import.meta.url));
 
+describe("crm indexes migration (v1.5)", () => {
+  it("creates every CRM index on a fresh database", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: folder });
+      const names = sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%'",
+        )
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(names).toEqual(
+        expect.arrayContaining([
+          "idx_contacts_relationship_score",
+          "idx_contacts_last_interaction",
+          "idx_interactions_contact",
+          "idx_interactions_campaign",
+          "idx_followups_due",
+          "idx_followups_contact",
+          "idx_campaigns_status",
+          "idx_campaign_recipients_status",
+          "idx_campaign_recipients_scheduled",
+        ]),
+      );
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
 describe("profile card migration", () => {
   it("upgrades an existing database without changing contacts and remains idempotent", () => {
     const temporary = mkdtempSync(join(tmpdir(), "netpro-migration-"));
@@ -67,9 +98,11 @@ describe("profile card migration", () => {
       expect(
         sqlite.prepare("SELECT count(*) AS n FROM profile_cards").get(),
       ).toEqual({ n: 1 });
+      // Asserted against the journal (not a literal) so additive migrations —
+      // like the v1.5 CRM indexes — don't break the idempotency claim.
       expect(
         sqlite.prepare("SELECT count(*) AS n FROM __drizzle_migrations").get(),
-      ).toEqual({ n: 2 });
+      ).toEqual({ n: journal.entries.length });
     } finally {
       sqlite.close();
       rmSync(temporary, { recursive: true, force: true });

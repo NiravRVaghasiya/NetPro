@@ -26,6 +26,7 @@ export default async function AppLayout({
         <Link href="/dashboard">Dashboard</Link>
         <Link href="/search">Search</Link>
         <Link href="/outreach">Outreach</Link>
+        <Link href="/outreach/campaigns">Campaigns</Link>
         <Link href="/contacts">Contacts</Link>
         <Link href="/import">Import</Link>
         <Link href="/settings/card">Profile card</Link>
