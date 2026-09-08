@@ -45,7 +45,9 @@ beforeAll(() => {
   vi.setSystemTime(new Date('2026-09-07T12:00:00Z'));
 });
 afterEach(() => {
-  fixture.sqlite.exec('DELETE FROM profile_views; DELETE FROM edges; DELETE FROM activity_log; DELETE FROM contacts;');
+  fixture.sqlite.exec(
+    'DELETE FROM content_mentions; DELETE FROM content_metrics; DELETE FROM content_items; DELETE FROM profile_views; DELETE FROM edges; DELETE FROM activity_log; DELETE FROM contacts;'
+  );
 });
 afterAll(() => {
   vi.useRealTimers();
@@ -170,5 +172,53 @@ describe('/dashboard Profile views (v2.5 phase 3)', () => {
     expect(html).toContain('/contacts/a');
     expect(html).toContain('Ada Lovelace');
     expect(html).toContain('anonymous');
+  });
+});
+
+describe('/dashboard Content strip (v2.5 Phase 5)', () => {
+  it('renders nothing until content is tracked', async () => {
+    insertContacts();
+    const html = await render();
+    expect(html).not.toContain('<h2>Content</h2>');
+    expect(html).not.toContain('latest-known views');
+  });
+
+  it('renders the tracker totals, the top pieces and the platform mix once items exist', async () => {
+    insertContacts();
+    const { upsertContentItem, recordMetrics } = await import('@netpro/core/src/content');
+    const seeded = [
+      { url: 'https://example.dev/blog/one', title: 'The first post', platform: 'blog', publishedAt: NOW },
+      { url: 'https://example.dev/blog/two', title: 'The second post', platform: 'blog', publishedAt: NOW },
+      { url: 'https://dev.to/ada/three', title: 'A devto post', platform: 'devto', publishedAt: NOW },
+    ];
+    const ids: string[] = [];
+    for (const s of seeded) {
+      const { item } = await upsertContentItem(
+        fixture.conn,
+        { url: s.url, title: s.title, platform: s.platform, publishedAt: s.publishedAt },
+        { now: new Date(NOW) }
+      );
+      ids.push(item.id);
+    }
+    // A minute apart so "latest" is deterministic — ties fall back to id.
+    await recordMetrics(
+      fixture.conn,
+      { contentId: ids[0]!, views: 100, likes: 2 },
+      { now: new Date(NOW) }
+    );
+    await recordMetrics(
+      fixture.conn,
+      { contentId: ids[0]!, views: 1200, likes: 40 },
+      { now: new Date('2026-09-07T12:01:00Z') }
+    );
+    const html = await render();
+    expect(html).toContain('<h2>Content</h2>');
+    expect(html).toContain('3 items · 1 measured · 1,200 latest-known views · 2 on Blog, 1 on dev.to.');
+    expect(html).toContain('The first post');
+    expect(html).toContain(`href="/content/${ids[0]}"`);
+    // Top pieces are ranked by latest-known views; unmeasured rows are absent.
+    expect(html).toContain('· 1,200 views');
+    expect(html).not.toContain('A devto post');
+    expect(html).toContain('Open the tracker');
   });
 });

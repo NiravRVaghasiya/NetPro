@@ -375,6 +375,87 @@ export async function listContentItems(
   };
 }
 
+export interface ListContentSummariesResult {
+  items: ContentItemSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/**
+ * The list with engagement attached: latest snapshot, snapshot count and
+ * live-mention count per row, via three batched `IN` queries (never a
+ * per-item round-trip). This is what list pages and the API list answer
+ * with — the bare `listContentItems` stays for callers that only need the
+ * rows themselves.
+ */
+export async function listContentSummaries(
+  conn: Conn,
+  opts: ListContentOptions = {},
+): Promise<ListContentSummariesResult> {
+  const { items, total, limit, offset } = await listContentItems(conn, opts);
+  return { items: await enrichSummaries(conn, items), total, limit, offset };
+}
+
+/**
+ * Attach `latestMetrics`, `metricsCount` and `mentionsCount` to item rows.
+ * Three batched queries keyed on the item ids — no per-item round-trips.
+ */
+async function enrichSummaries(
+  conn: Conn,
+  items: ContentItem[],
+): Promise<ContentItemSummary[]> {
+  if (items.length === 0) return [];
+  const ids = items.map((i) => i.id);
+  const idList = sql.join(
+    ids.map((id) => sql`${id}`),
+    sql`, `,
+  );
+  // The latest snapshot per item: the row for which no newer row exists,
+  // newest-first on (fetched_at, created_at, id). Row-value comparison is
+  // portable across SQLite and Postgres.
+  const latestRows = await rawAll<MetricSqlRow>(
+    conn,
+    sql`${METRIC_SELECT} FROM content_metrics m
+        WHERE m.content_id IN (${idList})
+          AND (m.fetched_at, m.created_at, m.id) = (
+            SELECT n.fetched_at, n.created_at, n.id FROM content_metrics n
+            WHERE n.content_id = m.content_id
+            ORDER BY n.fetched_at DESC, n.created_at DESC, n.id DESC
+            LIMIT 1
+          )`,
+  );
+  const metricCounts = await rawAll<{ content_id: string; n: number | string }>(
+    conn,
+    sql`SELECT content_id, COUNT(*) AS n FROM content_metrics m
+        WHERE m.content_id IN (${idList}) GROUP BY content_id`,
+  );
+  const mentionCounts = await rawAll<{
+    content_id: string;
+    n: number | string;
+  }>(
+    conn,
+    sql`SELECT m.content_id AS content_id, COUNT(*) AS n FROM content_mentions m
+        JOIN contacts c ON c.id = m.contact_id
+        WHERE m.content_id IN (${idList}) AND c.deleted_at IS NULL
+        GROUP BY m.content_id`,
+  );
+
+  const latestById = new Map<string, ContentMetric>();
+  for (const r of latestRows) latestById.set(r.content_id, toMetric(r));
+  const metricsById = new Map<string, number>();
+  for (const r of metricCounts) metricsById.set(r.content_id, num(r.n));
+  const mentionsById = new Map<string, number>();
+  for (const r of mentionCounts) mentionsById.set(r.content_id, num(r.n));
+
+  return items.map((item) => ({
+    ...item,
+    latestMetrics: latestById.get(item.id) ?? null,
+    metricsCount: metricsById.get(item.id) ?? 0,
+    mentionsCount: mentionsById.get(item.id) ?? 0,
+  }));
+}
+
 /**
  * Resolve an id or an exact URL to one item. URLs normalize first, so a link
  * pasted with `?utm_source=…` still finds its row. Ambiguity is impossible
@@ -880,54 +961,7 @@ export async function getContentOverview(
     };
   }
 
-  const ids = items.map((i) => i.id);
-  const idList = sql.join(
-    ids.map((id) => sql`${id}`),
-    sql`, `,
-  );
-  // The latest snapshot per item: the row for which no newer row exists,
-  // newest-first on (fetched_at, created_at, id). Row-value comparison is
-  // portable across SQLite and Postgres.
-  const latestRows = await rawAll<MetricSqlRow>(
-    conn,
-    sql`${METRIC_SELECT} FROM content_metrics m
-        WHERE m.content_id IN (${idList})
-          AND (m.fetched_at, m.created_at, m.id) = (
-            SELECT n.fetched_at, n.created_at, n.id FROM content_metrics n
-            WHERE n.content_id = m.content_id
-            ORDER BY n.fetched_at DESC, n.created_at DESC, n.id DESC
-            LIMIT 1
-          )`,
-  );
-  const metricCounts = await rawAll<{ content_id: string; n: number | string }>(
-    conn,
-    sql`SELECT content_id, COUNT(*) AS n FROM content_metrics m
-        WHERE m.content_id IN (${idList}) GROUP BY content_id`,
-  );
-  const mentionCounts = await rawAll<{
-    content_id: string;
-    n: number | string;
-  }>(
-    conn,
-    sql`SELECT m.content_id AS content_id, COUNT(*) AS n FROM content_mentions m
-        JOIN contacts c ON c.id = m.contact_id
-        WHERE m.content_id IN (${idList}) AND c.deleted_at IS NULL
-        GROUP BY m.content_id`,
-  );
-
-  const latestById = new Map<string, ContentMetric>();
-  for (const r of latestRows) latestById.set(r.content_id, toMetric(r));
-  const metricsById = new Map<string, number>();
-  for (const r of metricCounts) metricsById.set(r.content_id, num(r.n));
-  const mentionsById = new Map<string, number>();
-  for (const r of mentionCounts) mentionsById.set(r.content_id, num(r.n));
-
-  const summaries: ContentItemSummary[] = items.map((item) => ({
-    ...item,
-    latestMetrics: latestById.get(item.id) ?? null,
-    metricsCount: metricsById.get(item.id) ?? 0,
-    mentionsCount: mentionsById.get(item.id) ?? 0,
-  }));
+  const summaries = await enrichSummaries(conn, items);
 
   let totalViews = 0;
   let withMetrics = 0;

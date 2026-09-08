@@ -191,12 +191,58 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
   - Reads are portable raw SQL (row-value latest-snapshot comparison,
     `ESCAPE '\\'` LIKE, `(published_at IS NULL)` ordering); writes go
     through Drizzle with JSON stringified on Postgres only.
-- No CLI/web surface yet — `netpro content`, `/content` and
-  `/api/content` ship in Phase 5 on top of these exact functions.
 - Incidental hardening: the 0005/0006 upgrade fixtures asserted
   journal-relative lengths, so adding 0007 broke them (and the 0006
   tag-prefix filter leaked the new migration into its pre-upgrade
   fixture); all three now assert explicit migration idxs.
+
+### Added — v2.5 Phase 5: Content analytics surface (CLI + web + API)
+
+- **`netpro content` (18th top-level command)** with seven subcommands,
+  all with `--json`: `list` (platform/tag/days/query filters, engagement
+  per row from the same batched summaries the API list answers with),
+  `add` (idempotent on the normalized URL), `show` (detail + series with
+  `--metrics`, id-or-URL selector), `import` (CSV/feed file or `--rows`,
+  `--dry-run` previews), `fetch` (manual snapshot flags; the auto path
+  resolves providers and explains `not_configured`), `rm`, and `analyze`
+  (windowed overview with an explicit all-time-onboarding vs
+  windowed-empty distinction).
+- **Owner-only `/api/content` API**: `GET` lists items with latest
+  snapshot, snapshot count and live-mention count attached (50 default /
+  100 max, days window clamped 1–365, unknown platform → 400 naming the
+  whitelist); `POST` adds one piece idempotently (duplicate → 201 with
+  `created: false`, existing row untouched) or imports a CSV / feed XML
+  body, `?dryRun=1` previews, multipart file uploads capped at 1 MiB,
+  per-row errors/warnings reported, 413/415/400 discipline from the shared
+  request helpers.
+- **Owner-only `/api/content/[id]` API**: id-or-exact-URL selectors
+  (tracking junk tolerated via the same canonicalizer the dedupe key
+  uses); `GET` detail + mentions, `DELETE` removes the item with its
+  snapshots and mentions explicitly. Sub-routes
+  `/api/content/[id]/metrics` (`GET` series oldest-first, `POST` append a
+  manual snapshot — ≥1 metric, never an update) and
+  `/api/content/[id]/mentions` (`POST`/`DELETE` link/unlink a contact by
+  id, email or exact name; ambiguous names → 400, never a guess).
+- **`/content` (list page)** — GET-form filters (platform, 7/30/90-day
+  window, exact tag, title/URL/author query), status line, engagement per
+  row, and the "At a glance" overview (top performers by latest-known
+  views + platform breakdown) that mirrors the CLI and the dashboard.
+- **`/content/[id]` (detail page)** — the piece's URL/tags/summary, its
+  latest snapshot and full history in tables, its contacts with contexts
+  and unlink actions, a snapshot form, an add-mention form, and delete.
+  Missing metrics render "—": unreported never looks like zero.
+- **Contacts pages now list the content a person is part of**
+  (`/contacts/[id]` "Content" section), and **the dashboard gets a
+  "Content" strip** (items · measured · latest-known views · platform mix
+  · top 3), hidden until the first item exists; content tables join the
+  dashboard test teardown.
+- **Nav & edge**: "Content" in the app nav, `/content` under the
+  authenticated `/login` redirect in the edge proxy (with the API 401/200
+  rows covered by `proxy.test.ts`).
+- Core follow-up: the three-query enrichment behind `getContentOverview`
+  was factored into `enrichSummaries` and exposed as
+  `listContentSummaries`, so the list surfaces read engagement with three
+  batched `IN` queries, never per-item round-trips.
 
 ## [2.0.0] - 2026-09-08
 

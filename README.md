@@ -184,7 +184,7 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   CI also pins the promise that **no `pgvector` extension is required** —
   embeddings are portable JSON, so a managed Postgres works as-is.
 
-- **v2.5 — “The Observer”: Phases 1–4 shipped.** Migration `0006` and the
+- **v2.5 — “The Observer”: Phases 1–5 shipped.** Migration `0006` and the
   `@netpro/core/views` module made the producer-less `profile_views` table
   trustworthy and privacy-preserving — daily-salted HMAC viewer hashing (no
   raw IPs ever stored; legacy values blanked on upgrade), a vendored bot
@@ -209,8 +209,15 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   canonicalization, alias-tolerant CSV + dependency-free RSS/Atom import,
   metrics snapshots, mentions, windowed overviews), and the provider seam
   (`manual` + `rss` built in; `devto`/`twitter`/`github` as disabled,
-  self-explaining stubs). The content surface (`netpro content`,
-  `/content`, `/api/content`) lands in Phase 5 per the
+  self-explaining stubs). Phase 5 shipped the content surface on top of
+  that model: `netpro content` (18th top-level command; `list`/`add`/
+  `show`/`import`/`fetch`/`rm`/`analyze`, all with `--json`), the
+  owner-only `/api/content` API (list with engagement attached,
+  idempotent adds, CSV/feed imports with dry runs and multipart uploads,
+  id-or-URL selectors, series + snapshot routes, mention links), the
+  `/content` library and `/content/[id]` detail pages (latest snapshot +
+  history + contacts), a Content section on `/contacts/[id]`, and a
+  "Content" strip on `/dashboard` — see the
   [v2.5 implementation plan](docs/superpowers/plans/2026-09-08-v2.5-implementation-plan.md).
 
 **Deferred from v2.0 (deliberate, not forgotten):** live event discovery
@@ -257,7 +264,7 @@ for the draft-only campaign decisions.
 ## Structure
 
 - `apps/web` — Next.js app (App Router), Auth.js v5 with GitHub OAuth
-- `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|reindex|outreach|analyze|path|track|edge|campaign|export|card|migrate|skills|events`)
+- `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|reindex|outreach|analyze|path|track|edge|campaign|export|card|migrate|skills|events|content`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
 - `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths), the Phase 3 pathfinder surface (ranking, first-ask, per-contact graph position), the v2.0 skills taxonomy/gap analyzer, the Phase 6 event matcher (CSV import, attendee matching, recommendations), the v2.5 profile-view beacon + viewer analytics (privacy-hardened ingestion, windowed stats, timelines, known-visitor matches), and the v2.5 content tracker data model (URL identity, CSV/feed import, metrics snapshots, mentions, provider interface)
 - `packages/ui` — shared React components
