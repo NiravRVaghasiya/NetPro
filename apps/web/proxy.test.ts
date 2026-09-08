@@ -100,6 +100,23 @@ describe("proxy route boundaries", () => {
     expect(run("/api/events?query=x", true).status).toBe(200);
   });
 
+  it.each(["/content", "/content/some-content-id"])(
+    "redirects %s to login when signed out (v2.5 Phase 5)",
+    (path) => {
+      expect(run(path).status).toBe(307);
+      expect(run(path).headers.get("location")).toBe("https://netpro.example/login");
+      expect(run(path, true).status).toBe(200);
+    }
+  );
+
+  it("protects the content APIs with 401 and permits the owner (v2.5 Phase 5)", () => {
+    expect(run("/api/content").status).toBe(401);
+    expect(run("/api/content/some-id").status).toBe(401);
+    expect(run("/api/content/some-id/metrics").status).toBe(401);
+    expect(run("/api/content/some-id/mentions").status).toBe(401);
+    expect(run("/api/content?platform=blog", true).status).toBe(200);
+  });
+
   it("protects the graph APIs with 401 and permits the owner", () => {
     expect(run("/api/graph/paths?target=x").status).toBe(401);
     expect(run("/api/graph/overview").status).toBe(401);

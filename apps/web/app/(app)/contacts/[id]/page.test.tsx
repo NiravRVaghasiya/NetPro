@@ -36,7 +36,7 @@ async function render(id: string): Promise<string> {
 
 beforeEach(() => {
   fixture.sqlite.exec(
-    'DELETE FROM follow_ups; DELETE FROM interactions; DELETE FROM enrichments; DELETE FROM contacts;'
+    'DELETE FROM content_mentions; DELETE FROM content_metrics; DELETE FROM content_items; DELETE FROM follow_ups; DELETE FROM interactions; DELETE FROM enrichments; DELETE FROM contacts;'
   );
   fixture.conn.db
     .insert(fixture.conn.schema.contacts)
@@ -132,6 +132,31 @@ describe('/contacts/[id] detail page', () => {
 
   it('404s for unknown contacts', async () => {
     await expect(render('missing')).rejects.toThrow('NOT_FOUND');
+  });
+
+  it('lists the content a contact is part of, and shows the empty state otherwise (v2.5 Phase 5)', async () => {
+    const { upsertContentItem, addContentMention } = await import('@netpro/core/src/content');
+    const { item } = await upsertContentItem(
+      fixture.conn,
+      {
+        url: 'https://example.dev/blog/one',
+        title: 'The Jane Doe interview',
+        platform: 'blog',
+        publishedAt: NOW.toISOString(),
+      },
+      { now: NOW }
+    );
+    await addContentMention(fixture.conn, { contentId: item.id, contactId: 'c1', context: 'interviewed' });
+    const html = await render('c1');
+    expect(html).toContain('Content (1)');
+    expect(html).toContain('The Jane Doe interview');
+    expect(html).toContain(`href="/content/${item.id}"`);
+    expect(html).toContain('content tracker');
+    expect(html).toContain('Blog');
+
+    fixture.sqlite.exec('DELETE FROM content_mentions; DELETE FROM content_items;');
+    const empty = await render('c1');
+    expect(empty).toContain('No content links this person yet');
   });
 
   it('shows guidance when there is no history yet', async () => {

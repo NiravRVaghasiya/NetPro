@@ -6,7 +6,9 @@ import {
   type NetworkOverview,
 } from "@netpro/core/src/analytics";
 import type { ViewsOverview } from "@netpro/core/src/views";
+import { getContentOverview, type ContentOverview } from "@netpro/core/src/content";
 import { listFollowUps } from "@netpro/core/src/crm";
+import { formatCount, platformLabel } from "@/lib/content";
 
 // ─── small presentational helpers (pure, no client JS) ──────────────────────
 
@@ -353,13 +355,51 @@ function ProfileViewsSection({ views }: { views: ViewsOverview | undefined }) {
   );
 }
 
+/** v2.5 Phase 5 — the content tracker at a glance, when it has rows. */
+function ContentSection({ content }: { content: ContentOverview }) {
+  if (content.items === 0) return null;
+  return (
+    <section style={{ marginTop: "1.5rem" }}>
+      <h2>Content</h2>
+      <p style={{ color: "#6b7280", margin: "0.25rem 0" }}>
+        {content.items} item{content.items === 1 ? "" : "s"} · {content.withMetrics} measured ·{" "}
+        {formatCount(content.totalViews)} latest-known views
+        {content.byPlatform.length > 0
+          ? ` · ${content.byPlatform
+              .map((p) => `${p.items} on ${platformLabel(p.platform)}`)
+              .join(", ")}`
+          : ""}
+        . <Link href="/content">Open the tracker</Link>
+      </p>
+      {content.top.length > 0 ? (
+        <ol style={{ paddingLeft: "1.25rem", margin: "0.25rem 0" }}>
+          {content.top.slice(0, 3).map((t) => (
+            <li key={t.id} style={{ marginBottom: "0.25rem" }}>
+              <Link href={`/content/${encodeURIComponent(t.id)}`}>{t.title}</Link>{" "}
+              <span style={{ color: "#6b7280" }}>
+                · {formatCount(t.latestMetrics?.views ?? null)} views
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p style={{ color: "#9ca3af", margin: "0.25rem 0" }}>
+          No snapshots yet — <Link href="/content">track your first piece</Link> and record its
+          numbers.
+        </p>
+      )}
+    </section>
+  );
+}
+
 // ─── page ────────────────────────────────────────────────────────────────────
 
 export default async function DashboardPage() {
   // limit 1: only the pending counts are consumed, for the follow-up card.
-  const [overview, followUps] = await Promise.all([
+  const [overview, followUps, content] = await Promise.all([
     getNetworkOverview(conn),
     listFollowUps(conn, { view: "pending", limit: 1 }),
+    getContentOverview(conn),
   ]);
   const m = overview.metrics;
   const g = overview.growth;
@@ -374,6 +414,7 @@ export default async function DashboardPage() {
           <Link href="/import">Import your connections</Link> to see network
           analytics here.
         </p>
+        <ContentSection content={content} />
       </div>
     );
   }
@@ -469,6 +510,8 @@ export default async function DashboardPage() {
       <NetworkGraphSection graph={overview.graph} />
 
       <ProfileViewsSection views={overview.views} />
+
+      <ContentSection content={content} />
 
       <section style={{ marginTop: "1.5rem" }}>
         <h2>Dormant ties</h2>

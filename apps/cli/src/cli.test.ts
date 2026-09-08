@@ -8,10 +8,18 @@ describe('CLI root program', () => {
     expect(program.version()).toBe('2.0.0');
   });
 
-  it('registers all seventeen top-level commands', () => {
+  it('registers all eighteen top-level commands', () => {
     const program = createProgram();
     const names = program.commands.map((c) => c.name());
-    expect(names).toEqual(['init', 'config', 'import', 'enrich', 'search', 'reindex', 'outreach', 'analyze', 'path', 'track', 'edge', 'campaign', 'export', 'card', 'migrate', 'skills', 'events']);
+    expect(names).toEqual(['init', 'config', 'import', 'enrich', 'search', 'reindex', 'outreach', 'analyze', 'path', 'track', 'edge', 'campaign', 'export', 'card', 'migrate', 'skills', 'events', 'content']);
+  });
+
+  it('registers the content subcommands (v2.5 Phase 5)', () => {
+    const program = createProgram();
+    const content = program.commands.find((c) => c.name() === 'content');
+    expect(content).toBeDefined();
+    const subNames = (content as import('commander').Command).commands.map((c) => c.name());
+    expect(subNames).toEqual(['list', 'add', 'show', 'import', 'fetch', 'rm', 'analyze']);
   });
 
   it('registers the events subcommands (v2.0 Phase 6)', () => {

@@ -4,7 +4,9 @@ import { conn } from '@/lib/db';
 import { getContactTimeline } from '@netpro/core/src/crm';
 import { getSkillsProfile, skillCategory, type Skill } from '@netpro/core/src/skills';
 import { listContactEvents } from '@netpro/core/src/events';
+import { listContactContent } from '@netpro/core/src/content';
 import { dueLabel, relativeDayLabel, scoreLabel, utcDay } from '@/lib/format';
+import { platformLabel } from '@/lib/content';
 import { AddFollowUpPanel, FollowUpActions, LogInteractionPanel } from './panels';
 import { MetAtEventPanel } from '../../edges/panels';
 
@@ -26,6 +28,8 @@ export default async function ContactDetailPage({
   const skills = await getSkillsProfile(conn, id);
   // v2.0 Phase 6 — where you crossed paths with this person.
   const events = await listContactEvents(conn, id);
+  // v2.5 Phase 5 — content this person is part of (co-authored, mentioned…).
+  const content = await listContactContent(conn, id);
 
   const { contact, stats, interactions, followUps } = timeline;
   const now = new Date();
@@ -145,6 +149,34 @@ export default async function ContactDetailPage({
                 {e.attendeeCount > 1 ? (
                   <span style={{ color: '#6b7280' }}> · {e.attendeeCount} in your network</span>
                 ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section aria-label="Content" style={{ marginTop: '1.5rem' }}>
+        <h2 style={{ fontSize: '1rem' }}>
+          Content{content.length > 0 ? ` (${content.length})` : ''}{' '}
+          <Link href="/content" style={{ fontSize: '0.8rem', fontWeight: 'normal' }}>
+            content tracker
+          </Link>
+        </h2>
+        {content.length === 0 ? (
+          <p style={{ margin: '0.25rem 0', color: '#9ca3af' }}>
+            No content links this person yet — mention them on a piece&apos;s page (co-authored,
+            quoted, reviewed…).
+          </p>
+        ) : (
+          <ul style={{ margin: '0.25rem 0', paddingLeft: '1.25rem' }}>
+            {content.map((c) => (
+              <li key={c.id} style={{ marginBottom: '0.25rem' }}>
+                <Link href={`/content/${encodeURIComponent(c.id)}`}>{c.title}</Link>
+                <span style={{ color: '#6b7280' }}>
+                  {' '}
+                  · {platformLabel(c.platform)}
+                  {c.publishedAt ? ` · ${utcDay(c.publishedAt)}` : ''}
+                </span>
               </li>
             ))}
           </ul>
