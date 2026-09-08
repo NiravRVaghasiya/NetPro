@@ -45,6 +45,8 @@ describe("proxy route boundaries", () => {
 
   it.each([
     "/api/card",
+    "/api/card/views",
+    "/api/card/views?days=7",
     "/api/search",
     "/api/authentication",
     "/api/healthcheck",
@@ -58,6 +60,13 @@ describe("proxy route boundaries", () => {
     expect(run("/api/card/pixel.gif").status).toBe(200);
     expect(run("/api/card/view").status).toBe(200);
     expect(run("/api/card/pixel.gif", true).status).toBe(200);
+  });
+
+  it("keeps the viewer-analytics API private while the beacons stay public (v2.5 phase 3)", () => {
+    // `/api/card/views` must not prefix-match the public `/api/card/view`.
+    expect(run("/api/card/views").status).toBe(401);
+    expect(run("/api/card/views", true).status).toBe(200);
+    expect(run("/api/card/view").status).toBe(200);
   });
 
   it.each(["/graph", "/graph/some-contact-id"])("redirects %s to login when signed out (v2.0 Phase 3)", (path) => {

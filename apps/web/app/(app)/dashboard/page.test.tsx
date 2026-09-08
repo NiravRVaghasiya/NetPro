@@ -45,7 +45,7 @@ beforeAll(() => {
   vi.setSystemTime(new Date('2026-09-07T12:00:00Z'));
 });
 afterEach(() => {
-  fixture.sqlite.exec('DELETE FROM edges; DELETE FROM activity_log; DELETE FROM contacts;');
+  fixture.sqlite.exec('DELETE FROM profile_views; DELETE FROM edges; DELETE FROM activity_log; DELETE FROM contacts;');
 });
 afterAll(() => {
   vi.useRealTimers();
@@ -121,5 +121,54 @@ describe('/dashboard Network graph', () => {
     expect(html).toContain('No confirmed edges yet');
     expect(html).toContain('1 pending candidate');
     expect(html).toContain('/edges?status=pending');
+  });
+});
+
+describe('/dashboard Profile views (v2.5 phase 3)', () => {
+  function insertViews() {
+    const rows = [
+      { id: 'w1', referrer: 'https://blog.example/hello', country: 'GB', contact: 'a' },
+      { id: 'w2', referrer: null, country: null, contact: null },
+    ];
+    for (const [i, r] of rows.entries()) {
+      fixture.conn.db
+        .insert(fixture.conn.schema.profileViews)
+        .values({
+          id: r.id,
+          viewerIp: `3${i}23456789abcdef`,
+          viewerFingerprint: `c3${i}23456789abcde`,
+          isBot: false,
+          isOwnerView: false,
+          sessionId: `sess-${r.id}`,
+          viewedPage: '/card',
+          viewedAt: NOW,
+          referrer: r.referrer,
+          country: r.country,
+          resolvedContact: r.contact,
+        })
+        .run();
+    }
+  }
+
+  it('shows the onboarding empty state until the card gets views', async () => {
+    insertContacts();
+    const html = await render();
+    expect(html).toContain('Profile views');
+    expect(html).toContain('No views in the last 30 days yet');
+    expect(html).toContain('/settings/card');
+  });
+
+  it('renders totals, sparkline, referrers, and recent views with contact links', async () => {
+    insertContacts();
+    insertViews();
+    const html = await render();
+    expect(html).toContain('2 views · 2 unique viewers · 1 known-visitor view');
+    expect(html).toContain('Profile views per day');
+    expect(html).toContain('Top referrers');
+    expect(html).toContain('blog.example');
+    expect(html).toContain('Recent views');
+    expect(html).toContain('/contacts/a');
+    expect(html).toContain('Ada Lovelace');
+    expect(html).toContain('anonymous');
   });
 });

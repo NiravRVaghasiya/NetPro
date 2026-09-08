@@ -89,6 +89,7 @@ describe("selectedSection", () => {
     [{ dormant: true }, "dormant"],
     [{ clusters: true }, "clusters"],
     [{ graph: true }, "graph"],
+    [{ views: true }, "views"],
   ] as const)("maps each section flag %j", (opts, expected) => {
     expect(selectedSection(opts)).toBe(expected);
   });
@@ -97,6 +98,7 @@ describe("selectedSection", () => {
     [{ networkScore: true, dormant: true }],
     [{ dormant: true, clusters: true }],
     [{ clusters: true, graph: true }],
+    [{ graph: true, views: true }],
     [{ networkScore: true, clusters: true, dormant: true }],
   ])("rejects combinations %j", (opts) => {
     expect(() => selectedSection(opts as never)).toThrow(/mutually exclusive/);
@@ -277,5 +279,117 @@ describe("executeAnalyze --graph", () => {
     const out = await executeAnalyze({ json: true }, conn);
     const parsed = JSON.parse(out) as { graph?: { nodes: number } };
     expect(parsed.graph?.nodes).toBe(0);
+  });
+});
+
+describe("executeAnalyze --views (v2.5 phase 3)", () => {
+  function seedViews(conn: SqliteConn): void {
+    const rows = [
+      { id: "w1", at: iso(0), referrer: "https://blog.example/hello", country: "GB", contact: "c1" },
+      { id: "w2", at: iso(1), referrer: "https://blog.example/other", country: "GB", contact: null },
+      { id: "w3", at: iso(1), referrer: null, country: null, contact: null },
+      { id: "w4", at: iso(0), referrer: null, country: null, contact: null, bot: true },
+    ];
+    for (const [i, r] of rows.entries()) {
+      conn.db
+        .insert(conn.schema.profileViews)
+        .values({
+          id: r.id,
+          viewerIp: `0${i}23456789abcdef`,
+          viewerFingerprint: `f0${i}23456789abcde`,
+          isBot: r.bot ?? false,
+          isOwnerView: false,
+          sessionId: `sess-${r.id}`,
+          viewedPage: "/card",
+          viewedAt: r.at,
+          referrer: r.referrer,
+          country: r.country,
+          resolvedContact: r.contact,
+        })
+        .run();
+    }
+  }
+
+  it("maps the section flag and keeps the mutual exclusion", () => {
+    expect(selectedSection({ views: true })).toBe("views");
+    expect(() => selectedSection({ views: true, graph: true } as never)).toThrow(/mutually exclusive/);
+    expect(() => selectedSection({ views: true, dormant: true } as never)).toThrow(/mutually exclusive/);
+  });
+
+  it("renders stats, referrers, timeline, and known visitors — bots excluded with a note", async () => {
+    const conn = createTestConn();
+    seed(conn);
+    seedViews(conn);
+    const out = await executeAnalyze({ views: true }, conn);
+    expect(out).toMatch(/Profile views \(last 30 days\):/);
+    expect(out).toMatch(/3 views · 3 unique viewers · 1 known-visitor view/);
+    expect(out).toMatch(/1 bot view excluded/);
+    expect(out).toMatch(/Top referrers:/);
+    expect(out).toMatch(/blog\.example {2}2 \(67%\)/);
+    expect(out).toMatch(/Recent views \(showing 3 of 3\):/);
+    expect(out).toMatch(/Jane Doe/);
+    expect(out).toMatch(/Known visitors \(1 view\):/);
+    expect(out).not.toMatch(/Network score/);
+    expect(out).not.toMatch(/Dormant ties/);
+  });
+
+  it("shows the empty state on a fresh database", async () => {
+    const out = await executeAnalyze({ views: true }, createTestConn());
+    expect(out).toMatch(/Profile views \(last 30 days\):/);
+    expect(out).toMatch(/No views yet — publish your card/);
+  });
+
+  it("--days is the views window here, and --limit caps the lists", async () => {
+    const conn = createTestConn();
+    seed(conn);
+    seedViews(conn);
+    const out = await executeAnalyze({ views: true, days: "7", limit: "1" }, conn);
+    expect(out).toMatch(/Profile views \(last 7 days\):/);
+    expect(out).toMatch(/Recent views \(showing 1 of 3\):/);
+  });
+
+  it("rejects a views window past the 90-day retention bound", async () => {
+    const conn = createTestConn();
+    await expect(executeAnalyze({ views: true, days: "365" }, conn)).rejects.toThrow(/days must be/);
+  });
+
+  it("keeps --days 365 valid for the dormancy sections (no views-window leak)", async () => {
+    const conn = createTestConn();
+    seed(conn);
+    const out = await executeAnalyze({ days: "365" }, conn);
+    expect(out).toMatch(/no known interaction in 365\+ days/);
+    // The full report still carries the default 30-day views strip.
+    expect(out).toMatch(/Profile views \(last 30 days\):/);
+  });
+
+  it("includes the views strip in the full report too", async () => {
+    const conn = createTestConn();
+    seed(conn);
+    seedViews(conn);
+    const out = await executeAnalyze({}, conn);
+    expect(out).toMatch(/Network score/);
+    expect(out).toMatch(/Profile views \(last 30 days\):/);
+    expect(out).toMatch(/3 views · 3 unique viewers/);
+  });
+
+  it("--include-bots counts bot views in the section", async () => {
+    const conn = createTestConn();
+    seed(conn);
+    seedViews(conn);
+    const out = await executeAnalyze({ views: true, includeBots: true }, conn);
+    expect(out).toMatch(/4 views · 4 unique viewers/);
+    expect(out).not.toMatch(/bot view excluded/);
+  });
+
+  it("--json carries the views section with the requested window", async () => {
+    const conn = createTestConn();
+    seed(conn);
+    seedViews(conn);
+    const out = await executeAnalyze({ views: true, days: "7", json: true }, conn);
+    const parsed = JSON.parse(out) as {
+      views: { stats: { window: { days: number }; totals: { views: number } } };
+    };
+    expect(parsed.views.stats.window.days).toBe(7);
+    expect(parsed.views.stats.totals.views).toBe(3);
   });
 });

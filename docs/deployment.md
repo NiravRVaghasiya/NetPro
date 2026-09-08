@@ -354,6 +354,27 @@ Operational notes:
   `netpro card --pixel-url <origin>` (the card's CSP is extended with
   `img-src <origin>`).
 
+### Viewer analytics (v2.5 Phase 3)
+
+The query side of tracking is owner-only and cheap: `GET /api/card/views`
+(windowed stats + recent timeline + known-visitor matches), a `views` block
+inside `GET /api/analytics` (opt out per request with `?views=0` to slim
+the payload), a strip on `/dashboard`, and the full tables on
+**Settings → Card** (7/30/90-day windows, show/hide-bots). The CLI mirrors
+it with `netpro card --views` and `netpro analyze --views`.
+
+- **Every surface reads one core composition** (`getViewsOverview`), so the
+  CLI, the API, and the pages can never disagree about a count.
+- **Bots and owner views are excluded by default**, and the excluded counts
+  travel in every payload — "0 views" never silently hides filtered rows.
+- **The window caps at 90 days**, the raw-view retention bound; wider
+  requests clamp (web) or fail validation (CLI/core) rather than
+  under-reporting purged history. (The daily purge job itself lands in
+  Phase 6; until then, old rows simply age past every queryable window.)
+- Measured: **~23 ms for the full stats payload at 10k views on SQLite**
+  (plan budget: 100 ms). No new indexes were needed — Phase 1's five
+  `profile_views` indexes cover the analytics queries.
+
 ### Security headers
 
 Every response carries a Content-Security-Policy, `X-Content-Type-Options`,

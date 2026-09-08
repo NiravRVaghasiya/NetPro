@@ -8,6 +8,7 @@
 // deterministic without frozen timers.
 import type { GraphAnalysisOptions } from "../graph/analysis";
 import type { NetworkGraph } from "../graph/network";
+import type { ViewsOverview, ViewsOverviewOptions } from "../views/analytics";
 
 /** Options accepted by every analytics function. All fields optional. */
 export interface AnalyticsOptions {
@@ -26,6 +27,13 @@ export interface AnalyticsOptions {
   includeGraph?: boolean;
   /** Filters forwarded to the graph analytics (status/relation/confidence/depth). */
   graph?: GraphAnalysisOptions;
+  /**
+   * Include the v2.5 viewer-analytics section (`ViewsOverview`) in the
+   * overview. Default true; the dashboard relies on it, `?views=0` opts out.
+   */
+  includeViews?: boolean;
+  /** Window forwarded to the viewer analytics (days/limit, default 30/5). */
+  views?: ViewsOverviewOptions;
   /**
    * Injected clock for deterministic behavior/tests. Defaults to `new Date()`.
    * All window math uses UTC.
@@ -183,5 +191,12 @@ export interface NetworkOverview {
    * above stay the fallback when no confirmed edges exist yet.
    */
   graph?: NetworkGraph;
+  /**
+   * v2.5 viewer analytics (windowed stats, recent timeline, known-visitor
+   * matches) — present unless `includeViews: false`. The dashboard renders
+   * its "Profile views" strip from this; the settings page calls
+   * `getViewsOverview` directly for its wider window controls.
+   */
+  views?: ViewsOverview;
   generatedAt: string;
 }
