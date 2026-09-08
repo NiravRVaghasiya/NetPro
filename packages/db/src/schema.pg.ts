@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { pgTable, text, integer, real, boolean, timestamp, primaryKey, index } from 'drizzle-orm/pg-core';
 import type { AdapterAccountType } from 'next-auth/adapters';
 
@@ -211,17 +212,56 @@ export const searchIndex = pgTable('search_index', {
 export const profileViews = pgTable('profile_views', {
   id: text('id').primaryKey(),
 
+  // v2.5 Phase 1 privacy hardening (migration `0006`). `viewer_ip` no longer
+  // holds a raw IP: the producer stores HMAC-SHA256(ip + UA) under a salt
+  // that rotates every UTC day (see `packages/core/src/views/privacy.ts`),
+  // truncated to 16 hex chars. Migration `0006` also nulls any legacy raw
+  // value, so no raw IP can survive an upgrade.
   viewerIp: text('viewer_ip'),
   viewerAgent: text('viewer_agent'),
   referrer: text('referrer'),
   resolvedContact: text('resolved_contact').references(() => contacts.id),
+
+  // 24h dedup fingerprint (hash of IP + UA + accept-language under the same
+  // daily salt) — not a cross-session tracker, unusable across days.
+  viewerFingerprint: text('viewer_fingerprint'),
+  // Filtered out of analytics; owner views are excluded from counts.
+  isBot: boolean('is_bot').notNull().default(false),
+  isOwnerView: boolean('is_owner_view').notNull().default(false),
+  // Ephemeral per-view session tag, for de-duping rapid reloads only.
+  sessionId: text('session_id'),
+  // Optional, from the page-lifecycle beacon (Phase 2).
+  durationMs: integer('duration_ms'),
+
+  // Campaign attribution, parsed from the referral query string.
+  utmSource: text('utm_source'),
+  utmMedium: text('utm_medium'),
+  utmCampaign: text('utm_campaign'),
+  // Future-proofing: multiple public cards would each get their own id.
+  viewedCardId: text('viewed_card_id'),
 
   viewedPage: text('viewed_page').notNull(),
   viewedAt: text('viewed_at').notNull().$defaultFn(() => new Date().toISOString()),
 
   country: text('country'),
   city: text('city'),
-});
+}, (t) => ({
+  // v2.5 Phase 1 indexes (migration `0006`): timeline queries, resolved-view
+  // lookups, page filters, the 24h dedup probe, and the analytics fast path
+  // over non-bot views.
+  timeIdx: index('idx_profile_views_time').on(t.viewedAt),
+  resolvedIdx: index('idx_profile_views_resolved')
+    .on(t.resolvedContact)
+    .where(sql`${t.resolvedContact} IS NOT NULL`),
+  pageIdx: index('idx_profile_views_page').on(t.viewedPage),
+  fingerprintTimeIdx: index('idx_profile_views_fingerprint_time').on(
+    t.viewerFingerprint,
+    t.viewedAt,
+  ),
+  nonBotTimeIdx: index('idx_profile_views_is_bot')
+    .on(t.viewedAt)
+    .where(sql`${t.isBot} = false`),
+}));
 
 export const followUps = pgTable('follow_ups', {
   id: text('id').primaryKey(),

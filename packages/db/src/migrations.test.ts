@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import {
@@ -336,9 +337,11 @@ describe("skills migration (v2.0 phase 5)", () => {
     try {
       const journal = JSON.parse(
         readFileSync(join(folder, "meta/_journal.json"), "utf8"),
-      ) as { entries: Array<{ tag: string }> };
-      const upTo0004 = journal.entries.filter((e) => !e.tag.startsWith("0005"));
-      expect(upTo0004.length).toBe(journal.entries.length - 1);
+      ) as { entries: Array<{ idx: number; tag: string }> };
+      // Up to but not including 0005 — later migrations (0006, …) must not
+      // leak into the pre-upgrade fixture.
+      const upTo0004 = journal.entries.filter((e) => e.idx < 5);
+      expect(upTo0004.length).toBe(journal.entries.length - 2);
       mkdirSync(join(temporary, "meta"));
       writeFileSync(
         join(temporary, "meta/_journal.json"),
@@ -392,6 +395,181 @@ describe("skills migration (v2.0 phase 5)", () => {
           .all()
           .filter((r) => (r as { name: string }).name === "skills"),
       ).toHaveLength(1);
+    } finally {
+      sqlite.close();
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("profile views privacy migration (v2.5 phase 1)", () => {
+  it("adds the hardened columns and indexes on a fresh database", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: folder });
+
+      const cols = sqlite
+        .prepare("PRAGMA table_info(profile_views)")
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(cols).toEqual(
+        expect.arrayContaining([
+          // Kept from 0000, now holding a hashed value (never a raw IP).
+          "viewer_ip",
+          "viewer_fingerprint",
+          "is_bot",
+          "is_owner_view",
+          "session_id",
+          "duration_ms",
+          "utm_source",
+          "utm_medium",
+          "utm_campaign",
+          "viewed_card_id",
+        ]),
+      );
+      // The flags are NOT NULL and default false, so an insert that says
+      // nothing about them still yields 0 — analytics filters can rely on it.
+      sqlite
+        .prepare(
+          "INSERT INTO profile_views (id, viewed_page, viewed_at) VALUES (?, ?, ?)",
+        )
+        .run("v1", "/card", "2026-09-08T00:00:00.000Z");
+      expect(
+        sqlite
+          .prepare("SELECT is_bot, is_owner_view FROM profile_views WHERE id = ?")
+          .get("v1"),
+      ).toEqual({ is_bot: 0, is_owner_view: 0 });
+
+      // Typed drizzle round-trip: booleans and the new free-form columns.
+      db.insert(schema.profileViews)
+        .values({
+          id: "v2",
+          viewerIp: "a1b2c3d4e5f60718",
+          viewerFingerprint: "90abcdef12345678",
+          isBot: false,
+          isOwnerView: true,
+          sessionId: "sess-1",
+          durationMs: 4230,
+          utmSource: "linkedin",
+          utmMedium: "social",
+          utmCampaign: "launch",
+          viewedCardId: "default",
+          viewedPage: "/card",
+        })
+        .run();
+      expect(
+        db
+          .select({
+            isBot: schema.profileViews.isBot,
+            isOwnerView: schema.profileViews.isOwnerView,
+            durationMs: schema.profileViews.durationMs,
+            utmCampaign: schema.profileViews.utmCampaign,
+          })
+          .from(schema.profileViews)
+          .where(eq(schema.profileViews.id, "v2"))
+          .get(),
+      ).toEqual({
+        isBot: false,
+        isOwnerView: true,
+        durationMs: 4230,
+        utmCampaign: "launch",
+      });
+
+      const names = sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_profile_views_%'",
+        )
+        .all()
+        .map((r) => (r as { name: string }).name)
+        .sort();
+      expect(names).toEqual(
+        expect.arrayContaining([
+          "idx_profile_views_time",
+          "idx_profile_views_resolved",
+          "idx_profile_views_page",
+          "idx_profile_views_fingerprint_time",
+          "idx_profile_views_is_bot",
+        ]),
+      );
+      // The is_bot index is partial — analytics scans only non-bot rows.
+      const isBotIndex = sqlite
+        .prepare(
+          "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_profile_views_is_bot'",
+        )
+        .get() as { sql: string };
+      expect(isBotIndex.sql).toContain("is_bot");
+      expect(isBotIndex.sql).toContain("WHERE");
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("upgrades a pre-0006 database in place, blanking raw IPs, and is idempotent", () => {
+    const temporary = mkdtempSync(join(tmpdir(), "netpro-migration-0006-"));
+    const sqlite = new Database(":memory:");
+    try {
+      const journal = JSON.parse(
+        readFileSync(join(folder, "meta/_journal.json"), "utf8"),
+      ) as { entries: Array<{ tag: string }> };
+      const upTo0005 = journal.entries.filter((e) => !e.tag.startsWith("0006"));
+      expect(upTo0005.length).toBe(journal.entries.length - 1);
+      mkdirSync(join(temporary, "meta"));
+      writeFileSync(
+        join(temporary, "meta/_journal.json"),
+        JSON.stringify({ ...journal, entries: upTo0005 }),
+      );
+      for (const entry of upTo0005) {
+        copyFileSync(
+          join(folder, `${entry.tag}.sql`),
+          join(temporary, `${entry.tag}.sql`),
+        );
+      }
+
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: temporary });
+      // A legacy row written before the privacy hardening: raw IP, no flags.
+      sqlite
+        .prepare(
+          "INSERT INTO profile_views (id, viewer_ip, viewer_agent, viewed_page, viewed_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(
+          "legacy",
+          "203.0.113.42",
+          "Mozilla/5.0 (legacy)",
+          "/card",
+          "2026-09-01T00:00:00.000Z",
+        );
+
+      migrate(db, { migrationsFolder: folder });
+
+      // The row survives, but its raw IP does not: 0006 blanks legacy values
+      // because the migration cannot hash them without the operator's salt.
+      expect(sqlite.prepare("SELECT id FROM profile_views").all()).toEqual([
+        { id: "legacy" },
+      ]);
+      expect(
+        sqlite.prepare("SELECT viewer_ip, is_bot, is_owner_view FROM profile_views").get(),
+      ).toEqual({ viewer_ip: null, is_bot: 0, is_owner_view: 0 });
+      expect(
+        sqlite.prepare("SELECT count(*) AS n FROM __drizzle_migrations").get(),
+      ).toEqual({ n: journal.entries.length });
+
+      // Re-running is a no-op: no duplicate columns, no double-index errors.
+      migrate(db, { migrationsFolder: folder });
+      expect(
+        sqlite
+          .prepare("PRAGMA table_info(profile_views)")
+          .all()
+          .filter((r) => (r as { name: string }).name === "is_bot"),
+      ).toHaveLength(1);
+      expect(
+        sqlite
+          .prepare(
+            "SELECT count(*) AS n FROM sqlite_master WHERE type = 'index' AND name = 'idx_profile_views_is_bot'",
+          )
+          .get(),
+      ).toEqual({ n: 1 });
     } finally {
       sqlite.close();
       rmSync(temporary, { recursive: true, force: true });

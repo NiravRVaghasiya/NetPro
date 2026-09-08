@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as core from "./index";
 
 describe("@netpro/core module boundaries", () => {
-  it("exposes all ten feature modules", () => {
+  it("exposes every feature module", () => {
     expect(typeof core.search.searchContacts).toBe("function");
     expect(typeof core.enrichment.EnrichmentPipeline).toBe("function");
     // Real since v1.0 Phase 3 (network analytics).
@@ -38,5 +38,13 @@ describe("@netpro/core module boundaries", () => {
     expect(core.events.DISABLED_EVENT_PROVIDER.enabled).toBe(false);
     expect(typeof core.importPipeline.runImport).toBe("function");
     expect(typeof core.exportPipeline.exportContactsCSV).toBe("function");
+    // Real since v2.5 Phase 1 (profile views privacy & retention foundations).
+    expect(typeof core.views.hashViewerIp).toBe("function");
+    expect(typeof core.views.hashViewerFingerprint).toBe("function");
+    expect(typeof core.views.isBotUserAgent).toBe("function");
+    expect(typeof core.views.shouldMarkOwnerView).toBe("function");
+    expect(typeof core.views.purgeExpiredProfileViews).toBe("function");
+    expect(core.views.VIEW_RETENTION_DAYS).toBe(90);
+    expect(core.views.BOT_UA_MARKERS.length).toBeGreaterThan(0);
   });
 });

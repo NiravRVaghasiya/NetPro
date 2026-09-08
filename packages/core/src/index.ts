@@ -11,3 +11,6 @@ export * as graph from './graph';
 export * as skills from './skills';
 // v2.0 Phase 6 — event matcher (attendee import, matching, recommendations).
 export * as events from './events';
+// v2.5 Phase 1 — profile-view privacy foundations: hashing, bot detection,
+// owner-view labeling, retention (see docs/superpowers/plans/2026-09-08-v2.5-implementation-plan.md).
+export * as views from './views';

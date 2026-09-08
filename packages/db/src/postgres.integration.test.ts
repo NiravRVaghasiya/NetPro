@@ -18,7 +18,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client, Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { sql } from 'drizzle-orm';
+import { sql, eq } from 'drizzle-orm';
 import * as schema from './schema.pg';
 import type { PgConn } from './index';
 import {
@@ -170,6 +170,88 @@ describeIfPg('PostgreSQL integration', () => {
     expect(JSON.parse(row!.skills!)).toEqual(['python', 'kubernetes']);
     const untouched = rows.find((r) => r.id === 'pg-roundtrip');
     expect(untouched?.skills).toBeNull();
+  });
+
+  it('adds the v2.5 phase-1 privacy columns and indexes to profile_views (0006)', async () => {
+    const cols = await conn.db.execute<{
+      column_name: string;
+      data_type: string;
+      is_nullable: string;
+      column_default: string | null;
+    }>(
+      sql`SELECT column_name, data_type, is_nullable, column_default
+          FROM information_schema.columns
+          WHERE table_name = 'profile_views'
+          ORDER BY column_name`
+    );
+    const byName = new Map(cols.rows.map((r) => [r.column_name, r]));
+    for (const added of [
+      'viewer_fingerprint',
+      'is_bot',
+      'is_owner_view',
+      'session_id',
+      'duration_ms',
+      'utm_source',
+      'utm_medium',
+      'utm_campaign',
+      'viewed_card_id',
+    ]) {
+      expect(byName.has(added)).toBe(true);
+    }
+    // The flags are NOT NULL booleans defaulting to false on Postgres too.
+    expect(byName.get('is_bot')).toMatchObject({
+      data_type: 'boolean',
+      is_nullable: 'NO',
+      column_default: 'false',
+    });
+    expect(byName.get('is_owner_view')?.data_type).toBe('boolean');
+    expect(byName.get('duration_ms')?.data_type).toBe('integer');
+
+    const indexes = await conn.db.execute<{ indexname: string; indexdef: string }>(
+      sql`SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'profile_views'`
+    );
+    const byIndexName = new Map(indexes.rows.map((r) => [r.indexname, r.indexdef]));
+    for (const expected of [
+      'idx_profile_views_time',
+      'idx_profile_views_resolved',
+      'idx_profile_views_page',
+      'idx_profile_views_fingerprint_time',
+      'idx_profile_views_is_bot',
+    ]) {
+      expect(byIndexName.has(expected)).toBe(true);
+    }
+    // Two partial indexes: resolved contacts only, and non-bot timeline scans.
+    expect(byIndexName.get('idx_profile_views_resolved')).toMatch(/WHERE/i);
+    expect(byIndexName.get('idx_profile_views_is_bot')).toMatch(/WHERE .*is_bot.*= false/i);
+
+    await conn.db.insert(schema.profileViews).values({
+      id: 'pg-view',
+      viewerIp: 'a1b2c3d4e5f60718',
+      viewerFingerprint: '90abcdef12345678',
+      isBot: false,
+      isOwnerView: true,
+      sessionId: 'sess-1',
+      durationMs: 4230,
+      utmSource: 'linkedin',
+      viewedCardId: 'default',
+      viewedPage: '/card',
+    });
+    const rows = await conn.db
+      .select()
+      .from(schema.profileViews)
+      .where(eq(schema.profileViews.id, 'pg-view'));
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+    expect(row).toMatchObject({
+      viewerIp: 'a1b2c3d4e5f60718',
+      isBot: false,
+      isOwnerView: true,
+      durationMs: 4230,
+      utmSource: 'linkedin',
+      viewedCardId: 'default',
+    });
+    // No raw IP ever persisted: the column only ever holds a hex hash.
+    expect(row.viewerIp).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it('stores the profile card as plain JSON text in both dialects', async () => {
