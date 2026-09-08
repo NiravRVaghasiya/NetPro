@@ -68,7 +68,7 @@ function Recommendations({ rows, now }: { rows: EventRecommendation[]; now: Date
   );
 }
 
-function EventTable({ events }: { events: EventSummary[] }) {
+function EventTable({ events, now }: { events: EventSummary[]; now: Date }) {
   if (events.length === 0) {
     return (
       <p style={{ color: '#9ca3af' }}>
@@ -93,7 +93,7 @@ function EventTable({ events }: { events: EventSummary[] }) {
             <td style={{ padding: '0.4rem 0.5rem' }}>
               <Link href={`/events/${encodeURIComponent(e.id)}`}>{e.name}</Link>
             </td>
-            <td style={{ padding: '0.4rem 0.5rem', color: '#374151' }}>{when(e.startsAt, e.endsAt, new Date())}</td>
+            <td style={{ padding: '0.4rem 0.5rem', color: '#374151' }}>{when(e.startsAt, e.endsAt, now)}</td>
             <td style={{ padding: '0.4rem 0.5rem', color: '#6b7280' }}>{e.location ?? '—'}</td>
             <td style={{ padding: '0.4rem 0.5rem' }}>
               {e.attendeeCount === 0 ? (
@@ -167,7 +167,7 @@ export default async function EventsPage({
         </p>
       ) : null}
 
-      <EventTable events={events} />
+      <EventTable events={events} now={now} />
       <Recommendations rows={recommendations} now={now} />
       <AddEventForm />
       <ImportEventsPanel />
