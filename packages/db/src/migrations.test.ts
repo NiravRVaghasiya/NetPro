@@ -338,10 +338,11 @@ describe("skills migration (v2.0 phase 5)", () => {
       const journal = JSON.parse(
         readFileSync(join(folder, "meta/_journal.json"), "utf8"),
       ) as { entries: Array<{ idx: number; tag: string }> };
-      // Up to but not including 0005 — later migrations (0006, …) must not
-      // leak into the pre-upgrade fixture.
+      // Up to but not including 0005 — later migrations (0006, 0007, …)
+      // must not leak into the pre-upgrade fixture. Asserted as explicit
+      // idxs so the next migration cannot break this test again.
       const upTo0004 = journal.entries.filter((e) => e.idx < 5);
-      expect(upTo0004.length).toBe(journal.entries.length - 2);
+      expect(upTo0004.map((e) => e.idx)).toEqual([0, 1, 2, 3, 4]);
       mkdirSync(join(temporary, "meta"));
       writeFileSync(
         join(temporary, "meta/_journal.json"),
@@ -511,9 +512,11 @@ describe("profile views privacy migration (v2.5 phase 1)", () => {
     try {
       const journal = JSON.parse(
         readFileSync(join(folder, "meta/_journal.json"), "utf8"),
-      ) as { entries: Array<{ tag: string }> };
-      const upTo0005 = journal.entries.filter((e) => !e.tag.startsWith("0006"));
-      expect(upTo0005.length).toBe(journal.entries.length - 1);
+      ) as { entries: Array<{ idx: number; tag: string }> };
+      // Idx-based (not tag-prefix): a later migration must not leak into
+      // the pre-upgrade fixture the way 0007 did before this fix.
+      const upTo0005 = journal.entries.filter((e) => e.idx < 6);
+      expect(upTo0005.map((e) => e.idx)).toEqual([0, 1, 2, 3, 4, 5]);
       mkdirSync(join(temporary, "meta"));
       writeFileSync(
         join(temporary, "meta/_journal.json"),
@@ -567,6 +570,159 @@ describe("profile views privacy migration (v2.5 phase 1)", () => {
         sqlite
           .prepare(
             "SELECT count(*) AS n FROM sqlite_master WHERE type = 'index' AND name = 'idx_profile_views_is_bot'",
+          )
+          .get(),
+      ).toEqual({ n: 1 });
+    } finally {
+      sqlite.close();
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("content tracker migration (v2.5 phase 4)", () => {
+  it("creates the content tables, the url_norm unique key and every index", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: folder });
+
+      const tables = sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('content_items','content_metrics','content_mentions')",
+        )
+        .all()
+        .map((r) => (r as { name: string }).name)
+        .sort();
+      expect(tables).toEqual(["content_items", "content_mentions", "content_metrics"]);
+
+      const itemCols = sqlite
+        .prepare("PRAGMA table_info(content_items)")
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(itemCols).toEqual(
+        expect.arrayContaining([
+          "url",
+          "url_norm",
+          "title",
+          "platform",
+          "type",
+          "published_at",
+          "author",
+          "tags",
+          "summary",
+          "source",
+        ]),
+      );
+
+      const names = sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_content_%'",
+        )
+        .all()
+        .map((r) => (r as { name: string }).name)
+        .sort();
+      expect(names).toEqual(
+        expect.arrayContaining([
+          "idx_content_items_platform",
+          "idx_content_items_published",
+          "idx_content_metrics_item_time",
+          "idx_content_metrics_time",
+          "idx_content_mentions_contact",
+          "idx_content_mentions_content",
+        ]),
+      );
+
+      // The dedupe key is genuinely unique: a second row with the same
+      // normalized URL fails at the database, not just in the repository.
+      sqlite
+        .prepare(
+          "INSERT INTO content_items (id, url, url_norm, title, platform, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .run("c1", "https://example.com/a?utm_source=x", "https://example.com/a", "A", "blog", "n", "n");
+      expect(() =>
+        sqlite
+          .prepare(
+            "INSERT INTO content_items (id, url, url_norm, title, platform, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          )
+          .run("c2", "https://example.com/a", "https://example.com/a", "A again", "blog", "n", "n"),
+      ).toThrow(/UNIQUE constraint failed/);
+
+      // Typed drizzle round-trip, including the JSON-mode columns.
+      db.insert(schema.contentMetrics)
+        .values({ id: "m1", contentId: "c1", fetchedAt: "2026-09-08T00:00:00.000Z", views: 7 })
+        .run();
+      db.update(schema.contentItems).set({ tags: ["postgres"] }).run();
+      expect(
+        db.select({ tags: schema.contentItems.tags }).from(schema.contentItems).get(),
+      ).toEqual({ tags: ["postgres"] });
+      expect(
+        db
+          .select({ views: schema.contentMetrics.views })
+          .from(schema.contentMetrics)
+          .where(eq(schema.contentMetrics.id, "m1"))
+          .get(),
+      ).toEqual({ views: 7 });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("upgrades a pre-0007 database in place and is idempotent", () => {
+    const temporary = mkdtempSync(join(tmpdir(), "netpro-migration-0007-"));
+    const sqlite = new Database(":memory:");
+    try {
+      const journal = JSON.parse(
+        readFileSync(join(folder, "meta/_journal.json"), "utf8"),
+      ) as { entries: Array<{ idx: number; tag: string }> };
+      const upTo0006 = journal.entries.filter((e) => e.idx < 7);
+      expect(upTo0006.map((e) => e.idx)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+      mkdirSync(join(temporary, "meta"));
+      writeFileSync(
+        join(temporary, "meta/_journal.json"),
+        JSON.stringify({ ...journal, entries: upTo0006 }),
+      );
+      for (const entry of upTo0006) {
+        copyFileSync(
+          join(folder, `${entry.tag}.sql`),
+          join(temporary, `${entry.tag}.sql`),
+        );
+      }
+
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: temporary });
+      expect(
+        sqlite
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'content_items'")
+          .all(),
+      ).toEqual([]);
+      sqlite
+        .prepare(
+          "INSERT INTO contacts (id, full_name, source, created_at, updated_at) VALUES (?,?,?,?,?)",
+        )
+        .run("legacy", "Ada Lovelace", "test", "n", "n");
+
+      migrate(db, { migrationsFolder: folder });
+
+      // The contact survives and the new tables exist.
+      expect(sqlite.prepare("SELECT full_name FROM contacts").get()).toEqual({
+        full_name: "Ada Lovelace",
+      });
+      expect(
+        sqlite
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'content_items'")
+          .all(),
+      ).toEqual([{ name: "content_items" }]);
+      expect(
+        sqlite.prepare("SELECT count(*) AS n FROM __drizzle_migrations").get(),
+      ).toEqual({ n: journal.entries.length });
+
+      // Re-running is a no-op: no duplicate tables, no double-index errors.
+      migrate(db, { migrationsFolder: folder });
+      expect(
+        sqlite
+          .prepare(
+            "SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'content_items'",
           )
           .get(),
       ).toEqual({ n: 1 });

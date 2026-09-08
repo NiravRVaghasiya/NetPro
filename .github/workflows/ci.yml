@@ -98,6 +98,14 @@ jobs:
       - name: Run core events integration tests against PostgreSQL
         run: npm run test -w @netpro/core -- src/events/postgres.integration.test.ts
 
+      # v2.5 Phase 4: the content tracker reads through raw ANSI SQL
+      # (row-value latest-snapshot comparison, LOWER() tag matching over a
+      # JSON text column) and stores tags/payloads as JSON-mode on SQLite but
+      # plain text on Postgres. This proves the same entry points on a real
+      # server, including the url_norm UNIQUE backstop.
+      - name: Run core content integration tests against PostgreSQL
+        run: npm run test -w @netpro/core -- src/content/postgres.integration.test.ts
+
       # v2.0 Phase 7: the release-cut performance pass. 5k contacts / 20k
       # edges against a real server, timing the core entry points behind the
       # dashboard, /api/search and /api/graph. Skipped locally (no

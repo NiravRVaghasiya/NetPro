@@ -113,6 +113,9 @@ describeIfPg('PostgreSQL integration', () => {
       'profile_cards',
       'events',
       'event_attendees',
+      'content_items',
+      'content_metrics',
+      'content_mentions',
       'user',
       'account',
       'session',
@@ -252,6 +255,103 @@ describeIfPg('PostgreSQL integration', () => {
     });
     // No raw IP ever persisted: the column only ever holds a hex hash.
     expect(row.viewerIp).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('creates the v2.5 phase-4 content tables, unique key and indexes (0007)', async () => {
+    const cols = await conn.db.execute<{ column_name: string; data_type: string }>(
+      sql`SELECT column_name, data_type FROM information_schema.columns
+          WHERE table_name IN ('content_items', 'content_metrics', 'content_mentions')
+          ORDER BY table_name, column_name`
+    );
+    const names = cols.rows.map((r) => r.column_name);
+    for (const expected of [
+      'url',
+      'url_norm',
+      'title',
+      'platform',
+      'type',
+      'published_at',
+      'author',
+      'tags',
+      'summary',
+      'source',
+      'content_id',
+      'fetched_at',
+      'views',
+      'likes',
+      'comments',
+      'shares',
+      'bookmarks',
+      'raw_payload',
+      'contact_id',
+      'context',
+    ]) {
+      expect(names).toContain(expected);
+    }
+    // Metrics are plain integers (nullable — unreported is null, not zero).
+    const views = cols.rows.find((r) => r.column_name === 'views');
+    expect(views?.data_type).toBe('integer');
+
+    // url_norm is UNIQUE: the dedupe key cannot double-count a post.
+    const uniques = await conn.db.execute<{ conname: string }>(
+      sql`SELECT conname FROM pg_constraint
+          WHERE conrelid = 'content_items'::regclass AND contype = 'u'`
+    );
+    expect(uniques.rows.map((r) => r.conname)).toContain('content_items_url_norm_unique');
+
+    const indexes = await conn.db.execute<{ indexname: string }>(
+      sql`SELECT indexname FROM pg_indexes
+          WHERE tablename IN ('content_items', 'content_metrics', 'content_mentions')`
+    );
+    const indexNames = indexes.rows.map((r) => r.indexname);
+    for (const expected of [
+      'idx_content_items_platform',
+      'idx_content_items_published',
+      'idx_content_metrics_item_time',
+      'idx_content_metrics_time',
+      'idx_content_mentions_contact',
+      'idx_content_mentions_content',
+    ]) {
+      expect(indexNames).toContain(expected);
+    }
+
+    // Typed round-trip through the new tables (tags as stringified JSON text).
+    await conn.db.insert(schema.contentItems).values({
+      id: 'pg-content',
+      url: 'https://example.com/pg?utm_source=x',
+      urlNorm: 'https://example.com/pg',
+      title: 'Postgres content',
+      platform: 'blog',
+      tags: JSON.stringify(['postgres']),
+    });
+    await conn.db.insert(schema.contentMetrics).values({
+      id: 'pg-metric',
+      contentId: 'pg-content',
+      fetchedAt: '2026-09-08T00:00:00.000Z',
+      views: 7,
+      rawPayload: JSON.stringify({ page_views: 7 }),
+    });
+    const items = await conn.db
+      .select()
+      .from(schema.contentItems)
+      .where(eq(schema.contentItems.id, 'pg-content'));
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      urlNorm: 'https://example.com/pg',
+      platform: 'blog',
+      source: 'manual',
+    });
+    expect(JSON.parse(items[0]!.tags!)).toEqual(['postgres']);
+    // The unique key bites on a second row with the same normalized URL.
+    await expect(
+      conn.db.insert(schema.contentItems).values({
+        id: 'pg-content-dup',
+        url: 'https://example.com/pg',
+        urlNorm: 'https://example.com/pg',
+        title: 'Duplicate',
+        platform: 'blog',
+      })
+    ).rejects.toThrow();
   });
 
   it('stores the profile card as plain JSON text in both dialects', async () => {

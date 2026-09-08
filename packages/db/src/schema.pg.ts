@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, real, boolean, timestamp, primaryKey, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, real, boolean, timestamp, primaryKey, index, unique } from 'drizzle-orm/pg-core';
 import type { AdapterAccountType } from 'next-auth/adapters';
 
 export const contacts = pgTable('contacts', {
@@ -116,6 +116,72 @@ export const eventAttendees = pgTable('event_attendees', {
 }, (t) => ({
   pk: primaryKey({ columns: [t.eventId, t.contactId] }),
   contactIdx: index('idx_event_attendees_contact').on(t.contactId),
+}));
+
+// v2.5 Phase 4 — content cross-posting tracker (migration `0007`).
+// `url` is the link as given; `url_norm` is the canonical dedupe key
+// (lower-cased host, no fragment, tracking params stripped, sorted query —
+// see `packages/core/src/content/urls.ts`), UNIQUE so a re-import can never
+// double-count the same post.
+export const contentItems = pgTable('content_items', {
+  id: text('id').primaryKey(),
+
+  url: text('url').notNull(),
+  urlNorm: text('url_norm').notNull(),
+  title: text('title').notNull(),
+  platform: text('platform').notNull(),
+  type: text('type'),
+  publishedAt: text('published_at'),
+  author: text('author'),
+  // Plain text on Postgres (stringified in code), JSON-mode on SQLite — the
+  // same portability trade-off as contacts.tags and activity_log.metadata.
+  tags: text('tags'),
+  summary: text('summary'),
+
+  source: text('source').notNull().default('manual'),
+
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+}, (t) => ({
+  urlNormUnique: unique('content_items_url_norm_unique').on(t.urlNorm),
+  platformIdx: index('idx_content_items_platform').on(t.platform),
+  publishedIdx: index('idx_content_items_published').on(t.publishedAt),
+}));
+
+// Time-series engagement snapshots, one row per fetch. Metrics are nullable
+// because a provider may report only some of them (RSS reports none — a
+// manual entry reports whatever the owner typed).
+export const contentMetrics = pgTable('content_metrics', {
+  id: text('id').primaryKey(),
+  contentId: text('content_id').notNull().references(() => contentItems.id, { onDelete: 'cascade' }),
+
+  fetchedAt: text('fetched_at').notNull(),
+  source: text('source').notNull().default('manual'),
+
+  views: integer('views'),
+  likes: integer('likes'),
+  comments: integer('comments'),
+  shares: integer('shares'),
+  bookmarks: integer('bookmarks'),
+
+  rawPayload: text('raw_payload'),
+
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+}, (t) => ({
+  itemTimeIdx: index('idx_content_metrics_item_time').on(t.contentId, t.fetchedAt),
+  timeIdx: index('idx_content_metrics_time').on(t.fetchedAt),
+}));
+
+// Which of your contacts a piece of content involves ("co-authored with Ada",
+// "mentions Bob"). Composite PK: one row per (content, contact) pair.
+export const contentMentions = pgTable('content_mentions', {
+  contentId: text('content_id').notNull().references(() => contentItems.id, { onDelete: 'cascade' }),
+  contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
+  context: text('context'),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.contentId, t.contactId] }),
+  contactIdx: index('idx_content_mentions_contact').on(t.contactId),
+  contentIdx: index('idx_content_mentions_content').on(t.contentId),
 }));
 
 export const enrichments = pgTable('enrichments', {
