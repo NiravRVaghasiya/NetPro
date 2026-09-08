@@ -62,5 +62,12 @@ describe("@netpro/core module boundaries", () => {
     expect(typeof core.views.resolveContactFromToken).toBe("function");
     expect(typeof core.views.findLiveContactId).toBe("function");
     expect(core.views.VIEWED_PAGES).toContain("/card");
+    // Real since v2.5 Phase 3 (viewer analytics surface).
+    expect(typeof core.views.getViewStats).toBe("function");
+    expect(typeof core.views.getRecentViews).toBe("function");
+    expect(typeof core.views.getTopReferrers).toBe("function");
+    expect(typeof core.views.getViewerContactMatches).toBe("function");
+    expect(typeof core.views.getViewsOverview).toBe("function");
+    expect(core.views.VIEWS_MAX_DAYS).toBe(90);
   });
 });

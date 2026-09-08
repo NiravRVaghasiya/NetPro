@@ -23,6 +23,13 @@
 //   * `beacon.ts` — header extraction (IP/geo/DNT), the `viewed_page`
 //     allowlist, dedup, `recordView` (the actual producer), and signed
 //     `?v=` contact-resolution tokens.
+//
+// Phase 3 adds the query side on top of the same table:
+//
+//   * `analytics.ts` — windowed stats, the recent timeline, top referrers
+//     and known-visitor matches. Bots and owner views are excluded unless
+//     opted in; the excluded counts are always reported alongside.
+export * from './analytics';
 export * from './beacon';
 export * from './bots';
 export * from './owner';

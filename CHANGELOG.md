@@ -85,6 +85,61 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
   consumer) and no new runtime dependencies — `node:crypto`, `fetch`, and
   `sendBeacon` only.
 
+### Added — v2.5 Phase 3: Viewer analytics surface (CLI + web + API)
+
+- **Core `@netpro/core/views` analytics** (`views/analytics.ts`): the query
+  side of `profile_views`, one composition (`getViewsOverview` → `{ stats,
+  recent, matches }`) that every surface shares so the CLI, the API, and the
+  dashboard can never disagree.
+  - `getViewStats` — windowed totals (views, unique viewers, resolved
+    contacts, avg read duration), a zero-filled daily series, and
+    referrer / country / page breakdowns. Uniqueness is
+    `COUNT(DISTINCT COALESCE(viewer_fingerprint, viewer_ip, session_id))`,
+    so DNT minimal rows (no fingerprint by design) and IP-less views still
+    count sanely; referrers fold to hosts in JS (`blog.example/a` +
+    `/post/2` → one `blog.example` bucket) because SQL cannot parse hosts
+    portably.
+  - `getRecentViews` — the newest-first timeline with resolved live
+    contacts (a view attributed to a since-deleted contact renders
+    unattributed) and limit/offset pagination.
+  - `getTopReferrers` — the cheap single-query ranking the dashboard uses
+    without paying for the full payload.
+  - `getViewerContactMatches` — views attributed to known contacts via a
+    signed `?v=` link, newest first; bots and owner views stay excluded
+    even here (a crawler following a signed link is not a visit).
+  - **Privacy rules enforced in the core, not trusted to callers:** bots
+    and owner views are excluded unless explicitly opted in, and the
+    excluded counts ride along in every payload; `days` is capped at the
+    90-day retention window (asking for more would silently under-report
+    purged history, so it is a `ViewsError` instead); future-stamped rows
+    fall outside every window.
+  - Portable SQL on both dialects (`viewed_at` is ISO text everywhere, so
+    day bucketing is `substr(viewed_at, 1, 10)`); **~23 ms for the full
+    stats payload at 10k views on SQLite**, against the plan's 100 ms
+    budget.
+- **CLI:** `netpro card --views [--days 30] [--limit 10] [--include-bots]
+  [--include-owner-views] [--json]` (summary + per-day bars + referrers +
+  recent + known visitors; generation flags are refused in this mode, and
+  generation stays offline — `--input` is now validated in code instead of
+  by Commander so the two modes can have different requirements) and
+  `netpro analyze --views` (the fifth mutually exclusive section flag;
+  `--days` doubles as the views window here, default 30). The full
+  `analyze` report and `--json` carry a `views` block too, and both text
+  renderers share one `renderViewsSection`.
+- **Web:** owner-only `GET /api/card/views?days=&limit=&offset=` (lenient
+  params in the house style — garbage falls back, out-of-range clamps,
+  the effective window echoed in `stats.window`; the proxy keeps it
+  private while the beacons stay public, with a regression test that
+  `/api/card/views` does not prefix-match public `/api/card/view`);
+  `GET /api/analytics` gains the `views` block with a `?views=0` opt-out;
+  `/dashboard` gains a "Profile views" strip (totals, server-rendered
+  SVG sparkline, top referrers, recent views with contact links,
+  onboarding empty state); `/settings/card` gains the analytics section
+  (7/30/90-day links, show/hide-bots toggle, stat cards, per-day table,
+  referrer/country tables, recent timeline, known visitors — tables, no
+  chart library, no client JS).
+- No database migration and no new runtime dependencies.
+
 ## [2.0.0] - 2026-09-08
 
 ### Added — v2.0 Phase 6: Event matcher

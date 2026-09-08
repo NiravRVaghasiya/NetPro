@@ -140,6 +140,25 @@ describe("GET /api/analytics", () => {
     expect(body.metrics).toBeDefined();
   });
 
+  it("includes the viewer-analytics section by default, omitted with ?views=0 (v2.5 phase 3)", async () => {
+    const res = await get("/api/analytics");
+    const body = (await res.json()) as {
+      views?: {
+        stats: { window: { days: number }; totals: { views: number }; series: unknown[] };
+        recent: { limit: number };
+      };
+    };
+    expect(body.views?.stats.window.days).toBe(30);
+    expect(body.views?.stats.totals.views).toBe(0);
+    expect(body.views?.stats.series).toHaveLength(30);
+    expect(body.views?.recent.limit).toBe(5);
+
+    const slim = await get("/api/analytics?views=0");
+    const slimBody = (await slim.json()) as { views?: unknown; graph: unknown };
+    expect(slimBody.views).toBeUndefined();
+    expect(slimBody.graph).toBeDefined();
+  });
+
   it("accepts the dormancy window via ?days=", async () => {
     const res = await get("/api/analytics?days=150");
     const body = (await res.json()) as {

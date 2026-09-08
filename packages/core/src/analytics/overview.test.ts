@@ -82,3 +82,54 @@ describe('getNetworkOverview.graph', () => {
     fresh.sqlite.close();
   });
 });
+
+describe('getNetworkOverview.views (v2.5 Phase 3)', () => {
+  it('includes the viewer-analytics section by default, sharing the overview clock', async () => {
+    const o = await getNetworkOverview(fixture.conn, { now: NOW });
+    expect(o.views).toBeDefined();
+    expect(o.views!.stats.window).toMatchObject({ days: 30, until: NOW.toISOString() });
+    expect(o.views!.recent.limit).toBe(5);
+    expect(o.views!.stats.series).toHaveLength(30);
+  });
+
+  it('counts profile views written through the hardened schema', async () => {
+    fixture.conn.db
+      .insert(fixture.conn.schema.profileViews)
+      .values({
+        id: 'ov-1',
+        viewerIp: '0123456789abcdef',
+        viewerFingerprint: 'fedcba9876543210',
+        isBot: false,
+        isOwnerView: false,
+        sessionId: 'sess-ov-1',
+        viewedPage: '/card',
+        viewedAt: NOW.toISOString(),
+        referrer: 'https://blog.example/hello',
+        country: 'GB',
+      })
+      .run();
+    try {
+      const o = await getNetworkOverview(fixture.conn, { now: NOW });
+      expect(o.views!.stats.totals.views).toBe(1);
+      expect(o.views!.stats.byReferrer).toEqual([{ value: 'blog.example', count: 1, share: 1 }]);
+      expect(o.views!.recent.total).toBe(1);
+    } finally {
+      fixture.sqlite.exec("DELETE FROM profile_views WHERE id = 'ov-1';");
+    }
+  });
+
+  it('is omitted with includeViews: false (cheap overview for API clients)', async () => {
+    const o = await getNetworkOverview(fixture.conn, { now: NOW, includeViews: false });
+    expect(o.views).toBeUndefined();
+    expect(o.graph).toBeDefined();
+    expect(o.metrics.totalContacts).toBe(3);
+  });
+
+  it('forwards the views window without touching the other sections', async () => {
+    const o = await getNetworkOverview(fixture.conn, { now: NOW, views: { days: 7, limit: 3 } });
+    expect(o.views!.stats.window.days).toBe(7);
+    expect(o.views!.stats.series).toHaveLength(7);
+    expect(o.views!.recent.limit).toBe(3);
+    expect(o.metrics.totalContacts).toBe(3);
+  });
+});

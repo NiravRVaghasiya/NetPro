@@ -5,6 +5,7 @@ import {
   type NetworkGraph,
   type NetworkOverview,
 } from "@netpro/core/src/analytics";
+import type { ViewsOverview } from "@netpro/core/src/views";
 import { listFollowUps } from "@netpro/core/src/crm";
 
 // ─── small presentational helpers (pure, no client JS) ──────────────────────
@@ -243,6 +244,115 @@ function GrowthChart({ overview }: { overview: NetworkOverview }) {
   );
 }
 
+/** v2.5 Phase 3 — compact daily-views sparkline, server-rendered SVG like GrowthChart. */
+function ViewsSparkline({ views }: { views: ViewsOverview }) {
+  const series = views.stats.series;
+  const max = Math.max(...series.map((p) => p.views), 1);
+  const width = 320;
+  const height = 48;
+  const slot = width / series.length;
+  const barWidth = Math.max(2, Math.min(10, slot * 0.7));
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      aria-label={`Profile views per day, last ${series.length} days`}
+      style={{ width: "100%", maxWidth: 320, height: "auto", display: "block" }}
+    >
+      {series.map((p, i) => {
+        const h = Math.max(p.views > 0 ? 3 : 0, (p.views / max) * (height - 4));
+        const x = i * slot + (slot - barWidth) / 2;
+        return (
+          <rect
+            key={p.date}
+            x={x}
+            y={height - h}
+            width={barWidth}
+            height={h}
+            rx={1}
+            fill="#10b981"
+          >
+            <title>{`${p.date}: ${p.views} views`}</title>
+          </rect>
+        );
+      })}
+    </svg>
+  );
+}
+
+/** v2.5 Phase 3 — "Profile views" strip: totals, sparkline, referrers, recent. */
+function ProfileViewsSection({ views }: { views: ViewsOverview | undefined }) {
+  if (!views) return null;
+  const { stats, recent, matches } = views;
+  if (stats.totals.views === 0) {
+    return (
+      <section style={{ marginTop: "1.5rem" }}>
+        <h2>Profile views</h2>
+        <p style={{ color: "#9ca3af" }}>
+          No views in the last {stats.window.days} days yet.{" "}
+          <Link href="/settings/card">Publish your card</Link> and share the
+          link — views appear here.
+        </p>
+      </section>
+    );
+  }
+
+  const known =
+    matches.total === 0
+      ? "no known visitors yet"
+      : `${matches.total} known-visitor view${matches.total === 1 ? "" : "s"}`;
+  return (
+    <section style={{ marginTop: "1.5rem" }}>
+      <h2>Profile views</h2>
+      <p style={{ color: "#6b7280", margin: "0.25rem 0" }}>
+        {stats.totals.views} view{stats.totals.views === 1 ? "" : "s"} ·{" "}
+        {stats.totals.uniqueViewers} unique viewer
+        {stats.totals.uniqueViewers === 1 ? "" : "s"} · {known} (last{" "}
+        {stats.window.days} days) · <Link href="/settings/card">all analytics</Link>
+      </p>
+      <div style={{ display: "flex", gap: "2rem", flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 260px" }}>
+          <ViewsSparkline views={views} />
+          {stats.byReferrer.length > 0 ? (
+            <>
+              <h3>Top referrers</h3>
+              <ul>
+                {stats.byReferrer.map((r) => (
+                  <li key={r.value}>
+                    {r.value} — {r.count} ({Math.round(r.share * 100)}%)
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </div>
+        <div style={{ flex: "1 1 260px" }}>
+          <h3>Recent views</h3>
+          {recent.views.length === 0 ? (
+            <p style={{ color: "#9ca3af" }}>None in this window.</p>
+          ) : (
+            <ul>
+              {recent.views.map((v) => (
+                <li key={v.id}>
+                  {v.viewedAt.slice(0, 10)} · {v.viewedPage} ·{" "}
+                  {v.resolvedContact ? (
+                    <Link href={`/contacts/${v.resolvedContact.id}`}>
+                      {v.resolvedContact.fullName}
+                    </Link>
+                  ) : (
+                    <span style={{ color: "#6b7280" }}>anonymous</span>
+                  )}
+                  {v.country ? ` · ${v.country}` : ""}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ─── page ────────────────────────────────────────────────────────────────────
 
 export default async function DashboardPage() {
@@ -357,6 +467,8 @@ export default async function DashboardPage() {
       </section>
 
       <NetworkGraphSection graph={overview.graph} />
+
+      <ProfileViewsSection views={overview.views} />
 
       <section style={{ marginTop: "1.5rem" }}>
         <h2>Dormant ties</h2>

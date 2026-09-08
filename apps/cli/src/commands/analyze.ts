@@ -7,6 +7,7 @@ import {
   type TopValue,
 } from "@netpro/core/src/analytics";
 import type { NetworkGraph } from "@netpro/core/src/graph";
+import type { ViewsOverview } from "@netpro/core/src/views";
 
 export interface AnalyzeCommandOptions {
   // Commander stores hyphenated long flags under camelCase keys
@@ -16,6 +17,12 @@ export interface AnalyzeCommandOptions {
   clusters?: boolean;
   networkScore?: boolean;
   graph?: boolean;
+  // v2.5 Phase 3 — the viewer-analytics section. `--days` doubles as the
+  // views window here (default 30, max 90); the include flags opt filtered
+  // rows back in.
+  views?: boolean;
+  includeBots?: boolean;
+  includeOwnerViews?: boolean;
   limit?: string;
   json?: boolean;
 }
@@ -42,21 +49,40 @@ export function toAnalyzeOptions(
   };
 }
 
-/** The four section flags are mutually exclusive; absent all → full report. */
+/** The five section flags are mutually exclusive; absent all → full report. */
 export function selectedSection(
   opts: AnalyzeCommandOptions,
-): "score" | "dormant" | "clusters" | "graph" | "full" {
-  const sections = [opts.networkScore, opts.dormant, opts.clusters, opts.graph].filter(Boolean);
+): "score" | "dormant" | "clusters" | "graph" | "views" | "full" {
+  const sections = [opts.networkScore, opts.dormant, opts.clusters, opts.graph, opts.views].filter(Boolean);
   if (sections.length > 1) {
     throw new Error(
-      "--network-score, --dormant, --clusters, and --graph are mutually exclusive — pick one, or omit all for the full report",
+      "--network-score, --dormant, --clusters, --graph, and --views are mutually exclusive — pick one, or omit all for the full report",
     );
   }
   if (opts.networkScore) return "score";
   if (opts.dormant) return "dormant";
   if (opts.clusters) return "clusters";
   if (opts.graph) return "graph";
+  if (opts.views) return "views";
   return "full";
+}
+
+/**
+ * The views window for `--views`: `--days` doubles as the window here
+ * (default 30). The core validates the 1–90 retention bound and reports it.
+ */
+export function toViewsOptions(opts: AnalyzeCommandOptions): {
+  days: number;
+  limit: number;
+  includeBots: boolean;
+  includeOwnerViews: boolean;
+} {
+  return {
+    days: parseNumber(opts.days, "days") ?? 30,
+    limit: parseNumber(opts.limit, "limit") ?? 10,
+    includeBots: opts.includeBots ?? false,
+    includeOwnerViews: opts.includeOwnerViews ?? false,
+  };
 }
 
 function pct(share: number): string {
@@ -186,18 +212,136 @@ export function renderGraphSection(graph: NetworkGraph | undefined): string[] {
   return lines;
 }
 
+/** One stored referrer → its host for compact display (`null` → direct). */
+function referrerHost(referrer: string | null): string {
+  if (!referrer) return "direct";
+  try {
+    const host = new URL(referrer).host.toLowerCase();
+    return host || referrer;
+  } catch {
+    return referrer;
+  }
+}
+
+/** v2.5 Phase 3 — the viewer-analytics strip in text form (shared with `netpro card --views`). */
+export function renderViewsSection(views: ViewsOverview | undefined, days: number): string[] {
+  if (!views) return [];
+  const { stats, recent, matches } = views;
+  const t = stats.totals;
+  if (t.views === 0) {
+    const lines = [`Profile views (last ${days} days):`, "  No views yet — publish your card and share the link; views appear here."];
+    if (stats.excluded.bots > 0 || stats.excluded.ownerViews > 0) {
+      lines.push(`  (${excludedNote(stats.excluded.bots, stats.excluded.ownerViews)} — nothing from real visitors.)`);
+    }
+    return lines;
+  }
+
+  const visitors =
+    matches.total === 0
+      ? "no known visitors yet"
+      : `${matches.total} known-visitor view${matches.total === 1 ? "" : "s"}`;
+  const lines = [
+    `Profile views (last ${days} days):`,
+    `  ${t.views} view${t.views === 1 ? "" : "s"} · ${t.uniqueViewers} unique viewer${t.uniqueViewers === 1 ? "" : "s"} · ${visitors}`,
+  ];
+  if (stats.excluded.bots > 0 || stats.excluded.ownerViews > 0) {
+    lines.push(`  ${excludedNote(stats.excluded.bots, stats.excluded.ownerViews)} (use --include-bots / --include-owner-views to count them)`);
+  }
+  if (t.avgDurationMs !== null) {
+    lines.push(`  Avg read duration: ${formatDuration(t.avgDurationMs)}`);
+  }
+
+  const active = stats.series.filter((p) => p.views > 0);
+  if (active.length > 0) {
+    const max = Math.max(...active.map((p) => p.views));
+    const width = 20;
+    lines.push("", "Views per day:");
+    for (const p of active) {
+      const bar = "█".repeat(Math.max(1, Math.round((p.views / max) * width)));
+      lines.push(`  ${p.date} │ ${bar} ${p.views}`);
+    }
+  }
+
+  if (stats.byReferrer.length > 0) {
+    lines.push(
+      "",
+      "Top referrers:",
+      ...stats.byReferrer.map((r) => `  ${r.value}  ${r.count} (${pct(r.share)})`),
+    );
+  }
+  if (stats.byCountry.length > 0) {
+    lines.push(
+      "",
+      "Top countries:",
+      ...stats.byCountry.map((r) => `  ${r.value}  ${r.count} (${pct(r.share)})`),
+    );
+  }
+
+  lines.push("", `Recent views (showing ${recent.views.length} of ${recent.total}):`);
+  for (const v of recent.views) {
+    const who = v.resolvedContact ? v.resolvedContact.fullName : "anonymous";
+    const where = [v.country, referrerHost(v.referrer)].filter((s) => s && s !== "direct");
+    lines.push(
+      `  ${v.viewedAt.slice(0, 16).replace("T", " ")}  ${v.viewedPage}  ${who}${where.length > 0 ? `  (${where.join(" · ")})` : ""}`,
+    );
+  }
+
+  if (matches.matches.length > 0) {
+    lines.push("", `Known visitors (${matches.total} view${matches.total === 1 ? "" : "s"}):`);
+    for (const m of matches.matches) {
+      const meta = m.contact.company ? ` (${m.contact.company})` : "";
+      lines.push(`  ${m.contact.fullName}${meta} — ${m.viewedAt.slice(0, 10)} via ${referrerHost(m.referrer)}`);
+    }
+    if (matches.total > matches.matches.length) {
+      lines.push(`  …and ${matches.total - matches.matches.length} more (raise --limit to see them)`);
+    }
+  }
+  return lines;
+}
+
+function excludedNote(bots: number, ownerViews: number): string {
+  const parts: string[] = [];
+  if (bots > 0) parts.push(`${bots} bot view${bots === 1 ? "" : "s"} excluded`);
+  if (ownerViews > 0) parts.push(`${ownerViews} owner view${ownerViews === 1 ? "" : "s"} excluded`);
+  return parts.join(" · ");
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
 export async function executeAnalyze(
   options: AnalyzeCommandOptions,
   conn: SqliteConn | PgConn,
 ): Promise<string> {
   const analyticsOptions = toAnalyzeOptions(options);
-  const overview = await getNetworkOverview(conn, analyticsOptions);
+  const section = selectedSection(options);
+
+  // Every section reads the same overview payload. `--views` applies the
+  // requested window to its views block so text and `--json` always agree;
+  // the full report keeps the default 30-day block (its `--days` is the
+  // dormancy window — reusing it here would break `analyze --days 365`,
+  // which is valid today and must stay valid).
+  const overview = await getNetworkOverview(conn, {
+    ...analyticsOptions,
+    views:
+      section === "views"
+        ? toViewsOptions(options)
+        : options.includeBots || options.includeOwnerViews
+          ? { includeBots: options.includeBots, includeOwnerViews: options.includeOwnerViews }
+          : undefined,
+  });
 
   if (options.json) {
     return JSON.stringify(overview, null, 2);
   }
 
-  const section = selectedSection(options);
+  if (section === "views") {
+    return renderViewsSection(overview.views, toViewsOptions(options).days).join("\n");
+  }
 
   if (section === "score") {
     return scoreLine(overview.score).join("\n");
@@ -231,6 +375,8 @@ export async function executeAnalyze(
     "",
     ...renderGraphSection(overview.graph),
     "",
+    ...renderViewsSection(overview.views, 30),
+    "",
     ...renderDormantSection(overview, analyticsOptions.dormantDays),
   ];
   return lines.filter((l) => l !== "").join("\n").replace(/\n{3,}/g, "\n\n");
@@ -239,11 +385,14 @@ export async function executeAnalyze(
 export function registerAnalyzeCommand(program: Command): void {
   program
     .command("analyze")
-    .description("Analyze your network: score, growth, diversity, clusters, dormant ties, graph")
-    .option("--days <n>", "Dormancy window in days (default 90)", "90")
+    .description("Analyze your network: score, growth, diversity, clusters, dormant ties, graph, views")
+    .option("--days <n>", "Dormancy window in days (default 90; the views window, default 30, with --views)")
     .option("--dormant", "Show only the dormant-ties section")
     .option("--clusters", "Show only the clusters section")
     .option("--graph", "Show only the graph-analytics section (v2.0)")
+    .option("--views", "Show only the profile-views section (v2.5)")
+    .option("--include-bots", "Count bot views too (views output)")
+    .option("--include-owner-views", "Count your own views too (views output)")
     .option("--network-score", "Print just the network score and its factors")
     .option("--limit <n>", "Max rows per list (default 10)", "10")
     .option("--json", "Print the full overview as JSON")

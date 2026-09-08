@@ -8,6 +8,7 @@
 import { CrmError } from '@netpro/core/src/crm';
 import { GraphError } from '@netpro/core/src/graph';
 import { EventError } from '@netpro/core/src/events';
+import { ViewsError } from '@netpro/core/src/views';
 
 /** Interactions cap at 5000 chars of content; 16 KiB of JSON is generous headroom. */
 export const MAX_CRM_BODY_BYTES = 16 * 1024;
@@ -88,8 +89,8 @@ function concat(chunks: Uint8Array[]): Uint8Array {
   return out;
 }
 
-/** The three core modules share one error-code vocabulary — so should HTTP. */
-type ErrorCode = CrmError['code'] | GraphError['code'] | EventError['code'];
+/** The core modules share one error-code vocabulary — so should HTTP. */
+type ErrorCode = CrmError['code'] | GraphError['code'] | EventError['code'] | ViewsError['code'];
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
   invalid_input: 400,
@@ -106,7 +107,12 @@ export function crmErrorResponse(error: unknown): Response {
   if (error instanceof CrmRequestError) {
     return crmJson({ error: error.message }, error.status);
   }
-  if (error instanceof CrmError || error instanceof GraphError || error instanceof EventError) {
+  if (
+    error instanceof CrmError ||
+    error instanceof GraphError ||
+    error instanceof EventError ||
+    error instanceof ViewsError
+  ) {
     return crmJson({ error: error.message, code: error.code }, STATUS_BY_CODE[error.code]);
   }
   return crmJson({ error: 'Unable to process the request. Please try again.' }, 500);
