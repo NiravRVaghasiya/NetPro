@@ -140,6 +140,64 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
   chart library, no client JS).
 - No database migration and no new runtime dependencies.
 
+### Added — v2.5 Phase 4: Content tracker data model & provider interface
+
+- **Migration `0007` (both dialects):** three new tables for the
+  cross-posting tracker. `content_items` (`url` as given, `url_norm`
+  UNIQUE canonical key, `title`, whitelisted `platform`, nullable `type`,
+  `published_at`, `author`, JSON `tags`, `summary`, `source`), append-only
+  `content_metrics` snapshots (`fetched_at`, `source`, nullable
+  views/likes/comments/shares/bookmarks — `null` means unreported, never
+  zero — plus an optional JSON `raw_payload`), and `content_mentions`
+  linking content to contacts with a free-text `context` (composite PK).
+  Indexes: `idx_content_items_platform`, `idx_content_items_published`
+  (`published_at DESC`), `idx_content_metrics_item_time`
+  (`(content_id, fetched_at DESC)`), `idx_content_metrics_time`, and both
+  `content_mentions` directions.
+- **New `@netpro/core/content` module** (`core.content`), dependency-free
+  except the already-present `papaparse`:
+  - `urls.ts` — the one URL canonicalizer: absolute http(s) only,
+    lower-cased host, default ports dropped, fragment dropped, trailing
+    slashes stripped, `utm_*`/ad-click params stripped with survivors
+    sorted (scheme is identity — http and https stay distinct);
+    host-suffix platform detection and strict platform parsing.
+  - `parse.ts` — alias-tolerant CSV reader (per-row errors/warnings, bad
+    dates warn + import undated, unknown types warn + null, 1,000-row
+    cap) and a dependency-free RSS 2.0/Atom reader (CDATA, entities,
+    `rel="alternate"` links, categories→tags, RFC 2822 dates, untitled
+    entries fall back to the link, link-less entries skipped with a
+    warning), plus `fetchFeedText` — the module's only network call,
+    with injectable fetch, timeout, and byte caps.
+  - `providers.ts` — the `ContentProvider` seam: `manual` (always works,
+    hence no `fetchMetrics`) and `rss` (parses, never reports metrics)
+    built in; `devto`/`twitter`/`github` as disabled stubs whose
+    `fetchMetrics` throws `not_configured` naming the key that would
+    enable it (`DEVTO_API_KEY`, `TWITTER_BEARER_TOKEN`, `GITHUB_TOKEN`).
+    Routing is most-specific-first with `manual` as the eternal fallback.
+  - `repository.ts` — strict `addContentItem` (`conflict` on dup) and
+    idempotent `upsertContentItem` (re-imports report `existing` and
+    never overwrite owner edits), filtered/paginated `listContentItems`
+    (platform, case-insensitive tag, days window, query — `lower()` both
+    sides so SQLite and Postgres agree), id-or-URL `resolveContentRef`,
+    `getContentItem` detail payload, explicit-children-first
+    `deleteContentItem`, append-only `recordMetrics` (≥1 metric
+    required, backdating allowed, payload must be JSON-serializable),
+    oldest-first `getContentMetricsSeries`, three-query
+    `getContentOverview` (windowed totals, top 5 by latest views,
+    platform breakdown, `excludedUndated` stated), `importContent`
+    (CSV/feed/`rows`, overrides, `--dry-run` semantics), idempotent
+    mentions (`add`/`remove`/`listContentMentions`/`listContactContent`,
+    live contacts only), and `contentStatus`.
+  - Reads are portable raw SQL (row-value latest-snapshot comparison,
+    `ESCAPE '\\'` LIKE, `(published_at IS NULL)` ordering); writes go
+    through Drizzle with JSON stringified on Postgres only.
+- No CLI/web surface yet — `netpro content`, `/content` and
+  `/api/content` ship in Phase 5 on top of these exact functions.
+- Incidental hardening: the 0005/0006 upgrade fixtures asserted
+  journal-relative lengths, so adding 0007 broke them (and the 0006
+  tag-prefix filter leaked the new migration into its pre-upgrade
+  fixture); all three now assert explicit migration idxs.
+
 ## [2.0.0] - 2026-09-08
 
 ### Added — v2.0 Phase 6: Event matcher

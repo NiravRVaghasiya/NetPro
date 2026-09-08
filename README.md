@@ -184,7 +184,7 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   CI also pins the promise that **no `pgvector` extension is required** —
   embeddings are portable JSON, so a managed Postgres works as-is.
 
-- **v2.5 — “The Observer”: Phases 1–3 shipped.** Migration `0006` and the
+- **v2.5 — “The Observer”: Phases 1–4 shipped.** Migration `0006` and the
   `@netpro/core/views` module made the producer-less `profile_views` table
   trustworthy and privacy-preserving — daily-salted HMAC viewer hashing (no
   raw IPs ever stored; legacy values blanked on upgrade), a vendored bot
@@ -202,8 +202,15 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   `netpro card --views` and `netpro analyze --views`, the owner-only
   `GET /api/card/views` and the `views` block of `GET /api/analytics`
   (`?views=0` opts out), a “Profile views” strip on `/dashboard`, and an
-  analytics section on `/settings/card`. The content tracker lands in
-  Phases 4–5 per the
+  analytics section on `/settings/card`. Phase 4 added the content
+  tracker's data model: migration `0007` (`content_items` with a UNIQUE
+  normalized-URL dedupe key, append-only `content_metrics` snapshots,
+  `content_mentions`), the `@netpro/core/content` module (URL
+  canonicalization, alias-tolerant CSV + dependency-free RSS/Atom import,
+  metrics snapshots, mentions, windowed overviews), and the provider seam
+  (`manual` + `rss` built in; `devto`/`twitter`/`github` as disabled,
+  self-explaining stubs). The content surface (`netpro content`,
+  `/content`, `/api/content`) lands in Phase 5 per the
   [v2.5 implementation plan](docs/superpowers/plans/2026-09-08-v2.5-implementation-plan.md).
 
 **Deferred from v2.0 (deliberate, not forgotten):** live event discovery
@@ -252,7 +259,7 @@ for the draft-only campaign decisions.
 - `apps/web` — Next.js app (App Router), Auth.js v5 with GitHub OAuth
 - `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|reindex|outreach|analyze|path|track|edge|campaign|export|card|migrate|skills|events`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
-- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths), the Phase 3 pathfinder surface (ranking, first-ask, per-contact graph position), the v2.0 skills taxonomy/gap analyzer, the Phase 6 event matcher (CSV import, attendee matching, recommendations), and the v2.5 profile-view beacon + viewer analytics (privacy-hardened ingestion, windowed stats, timelines, known-visitor matches)
+- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths), the Phase 3 pathfinder surface (ranking, first-ask, per-contact graph position), the v2.0 skills taxonomy/gap analyzer, the Phase 6 event matcher (CSV import, attendee matching, recommendations), the v2.5 profile-view beacon + viewer analytics (privacy-hardened ingestion, windowed stats, timelines, known-visitor matches), and the v2.5 content tracker data model (URL identity, CSV/feed import, metrics snapshots, mentions, provider interface)
 - `packages/ui` — shared React components
 - `packages/config` — shared ESLint and Tailwind configs
 
