@@ -5,6 +5,34 @@ All notable changes to NetPro are documented here. The format is based on
 the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint.md)
 (`vX.Y` milestones, published as `X.Y.0` npm/GitHub versions).
 
+## [Unreleased] — v2.5 (The Observer)
+
+### Added — v2.5 Phase 1: Profile views data model & privacy hardening
+
+- Migration `0006` (both dialects) hardens the scaffold's producer-less
+  `profile_views` table so Phase 2's beacon and Phase 3's analytics can
+  trust it. New columns: `viewer_fingerprint` (24h dedup hash of
+  IP + UA + accept-language), `is_bot` and `is_owner_view` (NOT NULL,
+  default false), `session_id`, `duration_ms`, `utm_source` / `utm_medium` /
+  `utm_campaign`, `viewed_card_id`. `viewer_ip` now stores only a 16-hex
+  daily-salted HMAC — never a raw IP — and the migration **blanks legacy raw
+  values** in place, because an upgrade cannot hash them without the
+  operator's salt.
+- Indexes: `idx_profile_views_time` (`viewed_at DESC`),
+  `idx_profile_views_resolved` (partial, resolved contacts only),
+  `idx_profile_views_page`, `idx_profile_views_fingerprint_time`, and
+  `idx_profile_views_is_bot` (partial `viewed_at WHERE is_bot = false`).
+- New `@netpro/core/views` module (`core.views`): daily-salted HMAC-SHA256
+  hashing (`hashViewerIp`, `hashViewerFingerprint`, salt rotation per UTC
+  day — no cross-day correlation possible), a vendored bot deny-list with a
+  token backstop (`isBotUserAgent`), owner-view labeling via authenticated
+  session or same-day same-IP heuristic (`shouldMarkOwnerView` — labels
+  only, never blocks), and the 90-day raw-view retention purge
+  (`purgeExpiredProfileViews`, default `VIEW_RETENTION_DAYS = 90`, to be
+  scheduled with per-run `activity_log` logging in Phase 6).
+- No new runtime dependencies (`node:crypto` only), no CLI/web surface yet —
+  the beacon and analytics UI ship in Phases 2–3.
+
 ## [2.0.0] - 2026-09-08
 
 ### Added — v2.0 Phase 6: Event matcher
