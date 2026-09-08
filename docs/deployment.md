@@ -321,6 +321,39 @@ and not incremental — that is a deliberate simplicity/size trade.
   re-measure against your own database with
   `NETPRO_TEST_DATABASE_URL=… npm run test -w @netpro/core -- src/postgres.perf.test.ts`.
 
+### Profile view tracking (v2.5 Phase 2)
+
+The public profile card sends one anonymous view beacon per visit
+(`GET /api/card/pixel.gif` for non-JS clients, `POST /api/card/view` from
+browsers that measure duration). Both endpoints are public, CORS-open
+(`*`), and answer 200 in every failure mode — a broken or hostile beacon
+request must never break the visitor's page.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `NETPRO_VIEW_SALT` | `NEXTAUTH_SECRET`, then a built-in constant | Base salt for the daily-salted HMAC viewer hashes (`viewer_ip`, `viewer_fingerprint`). Set your own on a fresh install; the hashes are never reversible, and changing the salt later does not break anything — it only resets the 5-minute / 1-hour de-duplication windows and the owner-view lookback. |
+| `NETPRO_DISABLE_VIEWS` | *(unset)* | `true` → the beacons keep answering exactly as usual (GIF 200, `{ counted: false, reason: "disabled" }`) but write no rows. The rest of the card, and the settings panel (which says "Disabled"), keep working. |
+
+Operational notes:
+
+- **Rate limiting is in-memory** (60 requests/minute per salted IP hash,
+  per server process). On Vercel/serverless with multiple instances the
+  limit applies per instance — that is the documented, bounded behaviour
+  from the plan (no Redis). Overflow still gets the GIF, just not a row.
+- **IP and geo come from your platform.** The beacon reads the first
+  `X-Forwarded-For` entry (or `X-Real-Ip`) and Vercel/Cloudflare geo
+  headers; NetPro never runs a geo lookup and never stores or logs a raw IP
+  — only the 16-hex daily salted HMAC.
+- **De-duplication:** the same visitor fingerprint within 5 minutes, or the
+  same IP hash + page within 1 hour, is recorded once. Tab-refresh storms
+  and double beacons do not inflate counts.
+- **`DNT: 1` / `Sec-GPC: 1`** requests are still counted (respect, not
+  refuse) but stored in minimal mode: page, time and bot flag only.
+- Embed snippets on a blog or portfolio come from **Settings → Card →
+  Tracking** on your instance's origin; HTML cards can opt into a pixel via
+  `netpro card --pixel-url <origin>` (the card's CSP is extended with
+  `img-src <origin>`).
+
 ### Security headers
 
 Every response carries a Content-Security-Policy, `X-Content-Type-Options`,

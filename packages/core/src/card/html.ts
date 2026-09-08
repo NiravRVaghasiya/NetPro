@@ -18,10 +18,43 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/** Offline artifact: no JS, tracking pixels, remote fonts, database, or hosting required. */
-export function renderProfileCardHtml(input: ProfileCard): string {
+/**
+ * Optional extras for the standalone HTML card.
+ *
+ * `pixelUrl` is the one opt-in exception to "no tracking pixels": when the
+ * owner passes their NetPro instance's pixel URL
+ * (`netpro card --generate --pixel-url https://net.example/api/card/pixel.gif?p=blog`),
+ * a 1×1 pixel is embedded so the offline card feeds the owner's view
+ * analytics. It is off by default, must be an absolute http(s) URL, and the
+ * page's CSP is widened to exactly that origin and nothing else.
+ */
+export interface ProfileCardHtmlOptions {
+  pixelUrl?: string;
+}
+
+function resolvePixelUrl(value: string): { src: string; origin: string } {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new RangeError('pixel URL must be an absolute http(s) URL.');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new RangeError('pixel URL must be an absolute http(s) URL.');
+  }
+  return { src: url.toString(), origin: url.origin };
+}
+
+/** Offline artifact: no JS, tracking pixels, remote fonts, database, or hosting required — the pixel is opt-in via `options.pixelUrl`. */
+export function renderProfileCardHtml(
+  input: ProfileCard,
+  options: ProfileCardHtmlOptions = {},
+): string {
   const profile = validateProfileCard(input);
   const e = escapeHtml;
+  const pixel = options.pixelUrl ? resolvePixelUrl(options.pixelUrl) : null;
+  // Template already carries the separating `;` after `default-src 'none'`.
+  const imgDirective = pixel ? ` img-src ${pixel.origin}` : '';
   const occupation = [profile.role, profile.company]
     .filter(Boolean)
     .join(" at ");
@@ -36,7 +69,7 @@ export function renderProfileCardHtml(input: ProfileCard): string {
 <meta name="description" content="${e(profileDescription(profile))}">
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex, nofollow">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none';${imgDirective} style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
 <title>${e(profile.fullName)} — Networking card</title>
 <style>${PROFILE_CARD_CSS}
 body{margin:0;padding:48px 20px;background:#f3f5ef;min-height:100vh;box-sizing:border-box}main{max-width:600px;margin:auto}.credit{text-align:center;font:12px/1.7 system-ui,sans-serif;color:#627366;margin:24px 0}
@@ -60,5 +93,5 @@ ${profile.email ? `<a href="${e(emailHref)}">Say hello ↗</a>` : ""}
 ${profile.email || profile.phone ? `<div class="np-card-contact">${profile.email ? `<a href="${e(emailHref)}">${e(profile.email)}</a>` : ""}${profile.phone ? `<a href="${e(profilePhoneHref(profile.phone))}">${e(profile.phone)}</a>` : ""}</div>` : ""}
 </footer></article>
 <p class="credit">Your network, owned by you. Made with NetPro.</p>
-</main></body></html>\n`;
+</main>${pixel ? `\n<img src="${pixel.src}" width="1" height="1" alt="" aria-hidden="true" style="position:absolute;left:-9999px">` : ""}</body></html>\n`;
 }

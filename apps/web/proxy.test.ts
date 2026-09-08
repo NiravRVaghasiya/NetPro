@@ -28,14 +28,20 @@ describe("proxy route boundaries", () => {
   it("does not read sessions or create auth cookies for public visitors", () => {
     run("/card");
     run("/card/vcard");
+    run("/api/card/pixel.gif");
+    run("/api/card/view");
     expect(sessionRead).not.toHaveBeenCalled();
   });
-  it.each(["/card", "/card/vcard", "/api/auth/callback/github", "/api/health"])(
-    "leaves %s public",
-    (path) => {
-      expect(run(path).status).toBe(200);
-    },
-  );
+  it.each([
+    "/card",
+    "/card/vcard",
+    "/api/auth/callback/github",
+    "/api/health",
+    "/api/card/pixel.gif",
+    "/api/card/view",
+  ])("leaves %s public", (path) => {
+    expect(run(path).status).toBe(200);
+  });
 
   it.each([
     "/api/card",
@@ -44,6 +50,14 @@ describe("proxy route boundaries", () => {
     "/api/healthcheck",
   ])("requires auth for %s, without loose public-prefix matches", (path) => {
     expect(run(path).status).toBe(401);
+  });
+
+  it("keeps the owner card API private even though the two beacon paths under it are public (v2.5 phase 2)", () => {
+    expect(run("/api/card").status).toBe(401);
+    expect(run("/api/card/anything-else").status).toBe(401);
+    expect(run("/api/card/pixel.gif").status).toBe(200);
+    expect(run("/api/card/view").status).toBe(200);
+    expect(run("/api/card/pixel.gif", true).status).toBe(200);
   });
 
   it.each(["/graph", "/graph/some-contact-id"])("redirects %s to login when signed out (v2.0 Phase 3)", (path) => {

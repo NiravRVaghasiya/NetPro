@@ -183,13 +183,19 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   CI also pins the promise that **no `pgvector` extension is required** —
   embeddings are portable JSON, so a managed Postgres works as-is.
 
-- **v2.5 — “The Observer” has begun (Phase 1 shipped):** migration `0006`
-  and the `@netpro/core/views` module made the producer-less `profile_views`
-  table trustworthy and privacy-preserving — daily-salted HMAC viewer
-  hashing (no raw IPs ever stored; legacy values blanked on upgrade), a
-  vendored bot deny-list, owner-view labeling, dedup/filter indexes, and the
-  90-day raw-view retention purge. The tracking beacon and the viewer
-  analytics surface land in Phases 2–3 per the
+- **v2.5 — “The Observer”: Phases 1–2 shipped.** Migration `0006` and the
+  `@netpro/core/views` module made the producer-less `profile_views` table
+  trustworthy and privacy-preserving — daily-salted HMAC viewer hashing (no
+  raw IPs ever stored; legacy values blanked on upgrade), a vendored bot
+  deny-list, owner-view labeling, dedup/filter indexes, and the 90-day
+  raw-view retention purge. Phase 2 wired the producer: the public tracking
+  beacon (`GET /api/card/pixel.gif`, `POST /api/card/view`) ingests views
+  into `profile_views` with rate limiting, allowlisted pages,
+  sanitized referrers/UTM, DNT/GPC minimal mode, 5-min/1-h de-duplication,
+  and signed `?v=` contact-resolution tokens — plus a settings panel with a
+  copy-paste embed snippet and an opt-in pixel for HTML cards
+  (`netpro card --pixel-url`). The viewer analytics surface lands in
+  Phase 3 per the
   [v2.5 implementation plan](docs/superpowers/plans/2026-09-08-v2.5-implementation-plan.md).
 
 **Deferred from v2.0 (deliberate, not forgotten):** live event discovery

@@ -78,6 +78,33 @@ describe("netpro card", () => {
     expect(() => executeCard({ input })).toThrow(/32 KiB/);
   });
 
+  it("embeds the view pixel only when --pixel-url is passed (v2.5 phase 2)", () => {
+    const plain = executeCard({ input }).content;
+    expect(plain).not.toContain('<img');
+
+    const withPixel = executeCard({
+      input,
+      pixelUrl: "https://net.example/api/card/pixel.gif?p=blog",
+    }).content;
+    expect(withPixel).toContain(
+      '<img src="https://net.example/api/card/pixel.gif?p=blog" width="1" height="1" alt=""',
+    );
+    // The offline CSP stays locked down, widened to exactly that origin.
+    expect(withPixel).toContain("img-src https://net.example");
+    expect(withPixel).toContain("default-src 'none'");
+  });
+
+  it.each([
+    [{ pixelUrl: "https://net.example/api/card/pixel.gif?p=blog", format: "vcard" }, /HTML cards/],
+    [{ pixelUrl: "not a url" }, /absolute http/],
+    [{ pixelUrl: "javascript:alert(1)" }, /absolute http/],
+  ])(
+    "rejects unsafe or misplaced pixel URLs: %j",
+    (options, error) => {
+      expect(() => executeCard({ input, ...options })).toThrow(error);
+    },
+  );
+
   it("wires flags to real generation through Commander", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     await createProgram().parseAsync([

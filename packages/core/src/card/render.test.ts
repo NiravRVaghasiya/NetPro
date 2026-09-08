@@ -16,6 +16,22 @@ const profile = validateProfileCard({
 });
 
 describe("standalone profile HTML", () => {
+  it("embeds the view pixel only when explicitly requested", () => {
+    const html = renderProfileCardHtml(profile, {
+      pixelUrl: "https://net.example/api/card/pixel.gif?p=blog",
+    });
+    expect(html).toContain(
+      '<img src="https://net.example/api/card/pixel.gif?p=blog" width="1" height="1" alt="" aria-hidden="true"',
+    );
+    expect(html).toContain('default-src \'none\'; img-src https://net.example');
+    expect(() =>
+      renderProfileCardHtml(profile, { pixelUrl: "javascript:alert(1)" }),
+    ).toThrow(/absolute http/);
+    expect(() => renderProfileCardHtml(profile, { pixelUrl: "/relative" })).toThrow(
+      /absolute http/,
+    );
+  });
+
   it("is a complete offline page with contact actions and a downloadable vCard", () => {
     const html = renderProfileCardHtml(profile);
     expect(html).toContain("<!doctype html>");
