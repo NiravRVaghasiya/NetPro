@@ -46,5 +46,21 @@ describe("@netpro/core module boundaries", () => {
     expect(typeof core.views.purgeExpiredProfileViews).toBe("function");
     expect(core.views.VIEW_RETENTION_DAYS).toBe(90);
     expect(core.views.BOT_UA_MARKERS.length).toBeGreaterThan(0);
+    // Real since v2.5 Phase 2 (tracking beacon & ingestion pipeline).
+    expect(typeof core.views.parseReferrer).toBe("function");
+    expect(typeof core.views.parseUtm).toBe("function");
+    expect(typeof core.views.mergeUtm).toBe("function");
+    expect(typeof core.views.createRateLimiter).toBe("function");
+    expect(core.views.BEACON_RATE_LIMIT.limit).toBe(60);
+    expect(typeof core.views.extractViewerIp).toBe("function");
+    expect(typeof core.views.extractViewerGeo).toBe("function");
+    expect(typeof core.views.isDntRequest).toBe("function");
+    expect(typeof core.views.normalizeViewedPage).toBe("function");
+    expect(typeof core.views.shouldCountView).toBe("function");
+    expect(typeof core.views.recordView).toBe("function");
+    expect(typeof core.views.createContactViewToken).toBe("function");
+    expect(typeof core.views.resolveContactFromToken).toBe("function");
+    expect(typeof core.views.findLiveContactId).toBe("function");
+    expect(core.views.VIEWED_PAGES).toContain("/card");
   });
 });

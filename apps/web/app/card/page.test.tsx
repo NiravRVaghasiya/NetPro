@@ -13,6 +13,9 @@ const fixture = await vi.hoisted(async () => {
   return createTestSqliteConn();
 });
 vi.mock("@/lib/db", () => ({ conn: fixture.conn }));
+// The page reads the tracking flag through @/lib/beacon, which imports the
+// real auth module; mock it so next-auth never loads in the test graph.
+vi.mock("@/lib/auth", () => ({ auth: vi.fn() }));
 vi.mock("next/server", () => ({ connection: vi.fn(async () => {}) }));
 vi.mock("next/navigation", () => ({
   notFound: () => {
@@ -99,6 +102,43 @@ describe("public card boundary", () => {
     expect(
       fixture.sqlite.prepare("SELECT count(*) AS n FROM profile_views").get(),
     ).toEqual({ n: 0 });
+  });
+
+  it("serves exactly one view beacon per visit, disabled by env (v2.5 phase 2)", async () => {
+    await publishProfileCard(conn, profile);
+    const html = renderToStaticMarkup(await PublicCardPage());
+    // No-JS visitors get the pixel; JS visitors get the pagehide beacon.
+    expect(html).toContain("/api/card/pixel.gif?p=/card");
+    expect(html).toContain("pagehide");
+    expect(html).toContain("sendBeacon");
+    // The token slot is inert by default.
+    expect(html).toContain("window.__NETPRO_VIEW_TOKEN__=null");
+
+    // A personalized ?v= link passes the (charset-validated) token through.
+    const tokenized = renderToStaticMarkup(
+      await PublicCardPage({ searchParams: Promise.resolve({ v: "abc-DEF_123" }) }),
+    );
+    expect(tokenized).toContain("v=abc-DEF_123");
+    expect(tokenized).toContain("window.__NETPRO_VIEW_TOKEN__=\"abc-DEF_123\"");
+
+    // Anything outside the base64url charset is dropped, never rendered raw.
+    const evil = renderToStaticMarkup(
+      await PublicCardPage({
+        searchParams: Promise.resolve({ v: 'a</script><script>alert(1)' }),
+      }),
+    );
+    expect(evil).not.toContain("v=a<");
+    expect(evil).not.toContain("<script>alert");
+    expect(evil).toContain("window.__NETPRO_VIEW_TOKEN__=null");
+
+    process.env.NETPRO_DISABLE_VIEWS = "true";
+    try {
+      const disabled = renderToStaticMarkup(await PublicCardPage());
+      expect(disabled).not.toContain("pixel.gif");
+      expect(disabled).not.toContain("sendBeacon");
+    } finally {
+      delete process.env.NETPRO_DISABLE_VIEWS;
+    }
   });
 
   it("escapes React content and refuses unsafe preview links", () => {

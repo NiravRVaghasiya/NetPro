@@ -33,6 +33,58 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
 - No new runtime dependencies (`node:crypto` only), no CLI/web surface yet —
   the beacon and analytics UI ship in Phases 2–3.
 
+### Added — v2.5 Phase 2: Tracking beacon & ingestion pipeline
+
+- **`profile_views` finally has a producer.** Two public beacon endpoints,
+  both added to the edge proxy's `PUBLIC_ROUTES` (no session read at the
+  edge, no cookies, no third parties):
+  - `GET /api/card/pixel.gif` — a 1×1 GIF, always 200 and always
+    `Cache-Control: no-store, no-cache, private`, even when rate-limited
+    (429) or tracking is disabled. Params: `p` (page), `r` (referrer),
+    `v` (signed contact token).
+  - `POST /api/card/view` — JSON body (page, referrer, `durationMs`,
+    `viewToken`) for browsers that can measure visit duration; `OPTIONS`
+    answers 204 with CORS `*` so cross-origin embeds work. The body is
+    capped at 8 KiB by streaming — oversize, non-JSON, and badly-shaped
+    payloads get 415/400 before any parsing work.
+- **The `/card` page sends exactly one beacon per visit:** a `<noscript>`
+  pixel for non-JS clients, and in JS browsers a `pagehide`
+  `navigator.sendBeacon` (with a `fetch` keepalive fallback) carrying the
+  visit duration and the `?v=` token. Sending both would dedupe the second
+  one away and lose the duration — so the page splits by capability
+  (deviation from the plan, documented in the progress doc).
+- **Ingestion hardening** (all in `@netpro/core/views` + `apps/web/lib/beacon.ts`):
+  in-memory token-bucket rate limit of 60/min per salted IP hash (429
+  beyond that, still the GIF); `viewed_page` snapped to an allowlist
+  (`p=../../etc/passwd` → `/card`); referrer sanitized and capped at 200
+  chars with its query string stripped; UTM merged from the beacon URL and
+  the referrer, each field capped; geo from platform headers only
+  (Vercel/Cloudflare), never a lookup; user-agent capped at 500 chars;
+  `DNT: 1` / `Sec-GPC: 1` → minimal mode (the view is still counted, but
+  geo, UA, referrer, UTM, duration and token resolution are dropped);
+  dedup — same fingerprint within 5 min or same IP hash + page within 1 h
+  is skipped with a reason instead of a row; `durationMs` clamped to one
+  hour; the raw IP never touches the database or logs (daily-salted 16-hex
+  HMAC only).
+- **Signed `?v=` contact-resolution tokens:** `base64url(contactId|exp|HMAC-SHA256(NEXTAUTH_SECRET, contactId|exp))`,
+  30-day cap, timing-safe comparison, and the referenced contact must
+  still exist — otherwise `resolved_contact` is `null`, never an error. No
+  path from IP or email to a contact.
+- **Settings surface:** the card settings page gains a tracking panel with
+  a copy-paste pixel snippet for blog/portfolio embeds and a disabled state
+  when tracking is turned off.
+- **Card HTML opt-in pixel:** `netpro card --pixel-url <origin>` renders an
+  `<img>` view beacon for HTML cards and extends the card's CSP with
+  `img-src <origin>` (default cards stay image-free); the URL must be
+  absolute http(s), and the vCard command refuses the flag.
+- **Operator controls:** `NETPRO_VIEW_SALT` (salt for the daily viewer
+  hashes; falls back to `NEXTAUTH_SECRET`) and
+  `NETPRO_DISABLE_VIEWS=true` (endpoints keep answering normally but write
+  nothing).
+- No database migration (Phase 1's `profile_views` is exactly the
+  consumer) and no new runtime dependencies — `node:crypto`, `fetch`, and
+  `sendBeacon` only.
+
 ## [2.0.0] - 2026-09-08
 
 ### Added — v2.0 Phase 6: Event matcher

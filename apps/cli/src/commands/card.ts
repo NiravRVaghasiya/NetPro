@@ -11,6 +11,7 @@ export interface CardCommandOptions {
   input?: string;
   output?: string;
   format?: string;
+  pixelUrl?: string;
 }
 
 export function executeCard(options: CardCommandOptions): {
@@ -32,9 +33,12 @@ export function executeCard(options: CardCommandOptions): {
   if (file.size > MAX_PROFILE_BYTES)
     throw new Error("Profile JSON must be 32 KiB or smaller.");
   const profile = parseProfileCardJson(readFileSync(options.input, "utf8"));
+  if (options.pixelUrl && format !== "html") {
+    throw new Error("--pixel-url only applies to HTML cards.");
+  }
   const content =
     format === "html"
-      ? renderProfileCardHtml(profile)
+      ? renderProfileCardHtml(profile, { pixelUrl: options.pixelUrl })
       : renderProfileVCard(profile);
   if (options.output) {
     writeFileSync(options.output, content, "utf8");
@@ -61,6 +65,10 @@ export function registerCardCommand(program: Command): void {
       "Profile JSON from /settings/card or your own file",
     )
     .option("--format <format>", "html or vcard", "html")
+    .option(
+      "--pixel-url <url>",
+      "Embed your NetPro view pixel (e.g. https://net.example/api/card/pixel.gif?p=blog) in the HTML card",
+    )
     .option("--output <path>", "Write to a file instead of stdout")
     .action((options: CardCommandOptions) => {
       try {

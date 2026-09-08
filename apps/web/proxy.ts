@@ -35,7 +35,19 @@ const PROTECTED_ROUTES = [
   "/settings",
   "/import",
 ];
-const PUBLIC_ROUTES = ["/login", "/card", "/api/auth", "/api/health"];
+// The profile-view beacons (v2.5 Phase 2) are public ON PURPOSE — they
+// serve anonymous card visitors and the owner's cross-origin embeds. They
+// never read contact data, never set cookies, and rate-limit in memory.
+// `/api/card` itself stays owner-only: only these two exact paths are
+// public.
+const PUBLIC_ROUTES = [
+  "/login",
+  "/card",
+  "/api/auth",
+  "/api/health",
+  "/api/card/pixel.gif",
+  "/api/card/view",
+];
 
 function within(path: string, route: string): boolean {
   return path === route || path.startsWith(`${route}/`);
