@@ -1,7 +1,8 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { conn } from '@/lib/db';
 import { requireAuth } from '@/lib/authz';
 import { crmJson, crmErrorResponse } from '@/lib/crm-request';
-import { acceptInviteByToken } from '@netpro/core/workspaces';
+import { acceptInviteByToken } from '@netpro/core/src/workspaces';
 
 export async function POST(request: Request): Promise<Response> {
   try {
@@ -15,9 +16,9 @@ export async function POST(request: Request): Promise<Response> {
 
     const result = await acceptInviteByToken(conn, token, userId, secret);
     return crmJson({ ok: true, workspaceId: result.workspaceId, role: result.role });
-  } catch (error: any) {
-    if (error?.status === 401) return crmJson({ error: 'Unauthorized' }, 401);
-    if (error?.status === 403) return crmJson({ error: error.message }, 403);
+  } catch (error: unknown) {
+    if ((error as any)?.status === 401) return crmJson({ error: 'Unauthorized' }, 401);
+    if ((error as any)?.status === 403) return crmJson({ error: (error as Error).message }, 403);
     return crmErrorResponse(error);
   }
 }

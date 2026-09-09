@@ -1,18 +1,18 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { conn } from '@/lib/db';
 import { requireMembership } from '@/lib/authz';
 import { crmJson, crmErrorResponse } from '@/lib/crm-request';
-import { getWorkspaceMembers, addMember, removeMember, updateMemberRole } from '@netpro/core/workspaces';
-import { assertCanRemoveMember, assertCanChangeRole } from '@netpro/core/workspaces';
-import { isOwnerGitHubId } from '@/lib/owner';
+import { getWorkspaceMembers, addMember, removeMember, updateMemberRole } from '@netpro/core/src/workspaces';
+import { assertCanRemoveMember, assertCanChangeRole } from '@netpro/core/src/workspaces';
 
 export async function GET(): Promise<Response> {
   try {
     const ctx = await requireMembership('viewer');
     const members = await getWorkspaceMembers(conn, ctx.workspaceId);
     return crmJson({ members });
-  } catch (error: any) {
-    if (error?.status === 401) return crmJson({ error: 'Unauthorized' }, 401);
-    if (error?.status === 403) return crmJson({ error: error.message }, 403);
+  } catch (error: unknown) {
+    if ((error as any)?.status === 401) return crmJson({ error: 'Unauthorized' }, 401);
+    if ((error as any)?.status === 403) return crmJson({ error: (error as Error).message }, 403);
     return crmErrorResponse(error);
   }
 }
@@ -34,9 +34,9 @@ export async function POST(request: Request): Promise<Response> {
 
     const member = await addMember(conn, { workspaceId: ctx.workspaceId, userId, role: role as any });
     return crmJson({ member }, 201);
-  } catch (error: any) {
-    if (error?.status === 401) return crmJson({ error: 'Unauthorized' }, 401);
-    if (error?.status === 403) return crmJson({ error: error.message }, 403);
+  } catch (error: unknown) {
+    if ((error as any)?.status === 401) return crmJson({ error: 'Unauthorized' }, 401);
+    if ((error as any)?.status === 403) return crmJson({ error: (error as Error).message }, 403);
     return crmErrorResponse(error);
   }
 }
@@ -53,9 +53,9 @@ export async function PATCH(request: Request): Promise<Response> {
 
     const member = await updateMemberRole(conn, ctx.workspaceId, userId, role as any);
     return crmJson({ member });
-  } catch (error: any) {
-    if (error?.status === 401) return crmJson({ error: 'Unauthorized' }, 401);
-    if (error?.status === 403) return crmJson({ error: error.message }, 403);
+  } catch (error: unknown) {
+    if ((error as any)?.status === 401) return crmJson({ error: 'Unauthorized' }, 401);
+    if ((error as any)?.status === 403) return crmJson({ error: (error as Error).message }, 403);
     return crmErrorResponse(error);
   }
 }
@@ -73,9 +73,9 @@ export async function DELETE(request: Request): Promise<Response> {
 
     await removeMember(conn, ctx.workspaceId, userId);
     return crmJson({ ok: true });
-  } catch (error: any) {
-    if (error?.status === 401) return crmJson({ error: 'Unauthorized' }, 401);
-    if (error?.status === 403) return crmJson({ error: error.message }, 403);
+  } catch (error: unknown) {
+    if ((error as any)?.status === 401) return crmJson({ error: 'Unauthorized' }, 401);
+    if ((error as any)?.status === 403) return crmJson({ error: (error as Error).message }, 403);
     return crmErrorResponse(error);
   }
 }

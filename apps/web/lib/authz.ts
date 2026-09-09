@@ -1,11 +1,12 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // apps/web/lib/authz.ts
 // v3.0 Phase 1 — authorization helpers for workspace-scoped routes.
 // Every owner-only route now also checks workspace membership and role.
 
 import { auth } from './auth';
 import { getMembershipForUser } from './workspaces';
-import type { WorkspaceRole } from '@netpro/core/workspaces';
-import { canAtLeast } from '@netpro/core/workspaces';
+import type { WorkspaceRole } from '@netpro/core/src/workspaces';
+import { canAtLeast } from '@netpro/core/src/workspaces';
 
 export interface AuthContext {
   userId: string;

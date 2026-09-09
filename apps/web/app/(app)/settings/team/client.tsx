@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import { useState } from 'react';
@@ -31,7 +32,7 @@ interface Props {
   invites: Invite[];
 }
 
-export default function TeamClient({ workspaceId, currentUserId, currentRole, members: initialMembers, invites: initialInvites }: Props) {
+export default function TeamClient({ workspaceId: _workspaceId, currentUserId, currentRole, members: initialMembers, invites: initialInvites }: Props) {
   const [members, setMembers] = useState(initialMembers);
   const [invites, setInvites] = useState(initialInvites);
   const [newRole, setNewRole] = useState('member');
@@ -55,8 +56,8 @@ export default function TeamClient({ workspaceId, currentUserId, currentRole, me
         setLastInvite({ token: data.token, url: data.url });
         setInvites((prev) => [...prev, data.invite]);
       }
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError((e as Error).message);
     } finally {
       setCreating(false);
     }
@@ -72,8 +73,8 @@ export default function TeamClient({ workspaceId, currentUserId, currentRole, me
       } else {
         setInvites((prev) => prev.map((inv) => (inv.id === id ? { ...inv, revokedAt: new Date().toISOString() } : inv)));
       }
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError((e as Error).message);
     }
   }
 
@@ -91,8 +92,8 @@ export default function TeamClient({ workspaceId, currentUserId, currentRole, me
       } else {
         setMembers((prev) => prev.map((m) => (m.userId === userId ? { ...m, role: data.member.role } : m)));
       }
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError((e as Error).message);
     }
   }
 
@@ -107,8 +108,8 @@ export default function TeamClient({ workspaceId, currentUserId, currentRole, me
       } else {
         setMembers((prev) => prev.filter((m) => m.userId !== userId));
       }
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError((e as Error).message);
     }
   }
 

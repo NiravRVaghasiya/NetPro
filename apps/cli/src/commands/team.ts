@@ -9,9 +9,8 @@ import {
   addMember,
   removeMember,
   updateMemberRole,
-  getWorkspaceById,
   listWorkspaces,
-} from '@netpro/core/workspaces';
+} from '@netpro/core/src/workspaces';
 
 function getConn() {
   return createDb();

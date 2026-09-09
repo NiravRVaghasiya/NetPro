@@ -1,11 +1,11 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // apps/web/lib/workspaces.ts
 // v3.0 Phase 1 — workspace membership resolution (Node runtime, uses DB).
 // This file is NOT edge-safe — it imports @netpro/db and core.
 
 import { eq, and } from 'drizzle-orm';
 import { conn } from './db';
-import { isOwnerGitHubId } from './owner';
-import type { WorkspaceRole } from '@netpro/core/workspaces';
+import type { WorkspaceRole } from '@netpro/core/src/workspaces';
 
 export interface Membership {
   workspaceId: string;
@@ -65,7 +65,7 @@ export async function getMembershipForUser(userId: string): Promise<Membership |
   if (all.length === 0) return null;
   // Prefer bootstrap workspace
   const bootstrap = all.find((m) => m.workspaceId === 'default');
-  return bootstrap ?? all[0];
+  return bootstrap ?? all[0] ?? null;
 }
 
 export async function ensureBootstrapWorkspaceExists(): Promise<void> {

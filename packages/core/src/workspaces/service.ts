@@ -3,7 +3,6 @@
 // role hierarchy, and break-glass owner protection.
 
 import type { PgConn, SqliteConn } from '@netpro/db';
-import { eq } from 'drizzle-orm';
 import {
   WorkspaceError,
   type WorkspaceRole,
@@ -18,7 +17,6 @@ import {
   addMember,
   getInviteByToken,
   acceptInvite as acceptInviteRow,
-  getWorkspaceById,
 } from './repository';
 import { verifyInviteToken, isInviteExpired } from './tokens';
 

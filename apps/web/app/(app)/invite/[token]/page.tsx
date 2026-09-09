@@ -1,11 +1,12 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // v3.0 Phase 1 — invite acceptance page.
 // Accessible to any authenticated GitHub user (even without membership).
 // Shows invite validity and allows acceptance, then redirects to dashboard.
 
 import { auth } from '@/lib/auth';
 import { conn } from '@/lib/db';
-import { getInviteByToken } from '@netpro/core/workspaces';
-import { verifyInviteToken, isInviteExpired } from '@netpro/core/workspaces';
+import { getInviteByToken } from '@netpro/core/src/workspaces';
+import { verifyInviteToken, isInviteExpired } from '@netpro/core/src/workspaces';
 import { getMembershipForUser } from '@/lib/workspaces';
 import InviteClient from './client';
 
@@ -60,8 +61,8 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
           };
         }
       }
-    } catch (e: any) {
-      errorMessage = e.message || 'Invalid invite token.';
+    } catch (e: unknown) {
+      errorMessage = (e as Error).message || 'Invalid invite token.';
     }
   }
 

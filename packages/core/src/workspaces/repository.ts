@@ -4,7 +4,7 @@
 // Every data mutation stamps workspace_id; reads are explicitly scoped in Phase 2,
 // but this module already enforces workspace isolation.
 
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import type { PgConn, SqliteConn } from '@netpro/db';
 import {
   WorkspaceError,
@@ -150,7 +150,7 @@ export async function createWorkspace(
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.toLowerCase().includes('unique') || msg.toLowerCase().includes('duplicate')) {
-      throw new WorkspaceError('conflict', `Workspace slug \"${slug}\" already exists.`);
+      throw new WorkspaceError('conflict', `Workspace slug "${slug}" already exists.`);
     }
     throw e;
   }

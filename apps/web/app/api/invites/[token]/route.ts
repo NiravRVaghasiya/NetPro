@@ -1,7 +1,8 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { conn } from '@/lib/db';
 import { crmJson, crmErrorResponse } from '@/lib/crm-request';
-import { getInviteByToken } from '@netpro/core/workspaces';
-import { verifyInviteToken, isInviteExpired } from '@netpro/core/workspaces';
+import { getInviteByToken } from '@netpro/core/src/workspaces';
+import { verifyInviteToken, isInviteExpired } from '@netpro/core/src/workspaces';
 
 export async function GET(_request: Request, { params }: { params: Promise<{ token: string }> }): Promise<Response> {
   try {
@@ -13,8 +14,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
     // Verify signature first
     try {
       verifyInviteToken(token, secret);
-    } catch (e: any) {
-      return crmJson({ error: e.message, valid: false }, 400);
+    } catch (e: unknown) {
+      return crmJson({ error: (e as Error).message, valid: false }, 400);
     }
 
     const invite = await getInviteByToken(conn, token);

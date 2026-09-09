@@ -3,11 +3,9 @@ import { createTestSqliteConn } from '@netpro/db/src/testing';
 import {
   ensureBootstrapWorkspace,
   getWorkspaceById,
-  getWorkspaceBySlug,
   listWorkspaces,
   createWorkspace,
   getWorkspaceMembers,
-  getMember,
   addMember,
   updateMemberRole,
   removeMember,
@@ -123,12 +121,12 @@ describe('workspaces data model (Phase 1)', () => {
   it('invite lifecycle: accept and revoke', async () => {
     await ensureBootstrapWorkspace(fixture.conn);
     const secret = 'test-secret-1234567890-1234567890';
-    const { invite, rawToken } = await createInvite(fixture.conn, {
+    const { invite } = await createInvite(fixture.conn, {
       workspaceId: 'default',
       secret,
     });
 
-    let invites = await listInvites(fixture.conn, 'default');
+    const invites = await listInvites(fixture.conn, 'default');
     expect(invites.length).toBe(1);
     expect(invites[0]!.acceptedAt).toBeNull();
 

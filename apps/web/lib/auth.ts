@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // apps/web/lib/auth.ts
 // v3.0 Phase 1 — multi-user auth with workspaces.
 // The edge-safe auth.config.ts allows any GitHub account to get a JWT;

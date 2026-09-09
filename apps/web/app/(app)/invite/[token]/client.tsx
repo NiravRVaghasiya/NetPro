@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import { useState } from 'react';
@@ -32,8 +33,8 @@ export default function InviteClient({ token, status, inviteInfo, errorMessage }
           window.location.href = '/dashboard';
         }, 1000);
       }
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }

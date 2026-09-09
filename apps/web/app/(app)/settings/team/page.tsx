@@ -1,10 +1,11 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // v3.0 Phase 1 — team admin page (owner/admin).
 // Lists members, invites, and allows invite generation / revocation.
 // For v3.0 single-workspace UI, this is the only workspace management surface.
 
 import { conn } from '@/lib/db';
 import { requireMembership } from '@/lib/authz';
-import { getWorkspaceMembers, listInvites } from '@netpro/core/workspaces';
+import { getWorkspaceMembers, listInvites } from '@netpro/core/src/workspaces';
 import TeamClient from './client';
 
 export const metadata = {
