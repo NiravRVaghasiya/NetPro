@@ -560,6 +560,13 @@ never supply its own `workspace_id`. Web CRM API routes
   which talks to the database directly), every query resolves to the bootstrap
   `default` workspace — identical behavior to v2.5. Operator-grade CLI commands
   can address any workspace once a `--workspace` selection is added.
+- **Workspace default:** migration `0011_workspace_default` backfills any rows
+  whose `workspace_id` is `NULL` into the bootstrap workspace (both dialects)
+  and, on PostgreSQL, attaches a DB-level `DEFAULT 'default'` to `workspace_id`
+  on every data table. Phase 1's `0008` added the column as *nullable* with no
+  default, so a new Postgres insert that omitted `workspace_id` produced NULL —
+  which the scoped queries then hid. This migration closes that gap so a fresh
+  or upgrading single-owner install keeps seeing its own data.
 - **Authorship:** migration `0010_authorship` adds `created_by_user` to
   `interactions` and `follow_ups` (both dialects) plus author indexes. Existing
   rows are left `NULL`; new writes record the workspace user id.
