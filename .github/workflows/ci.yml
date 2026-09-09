@@ -87,6 +87,9 @@ jobs:
       # dialect-specific SQL in packages/core. SQLite covers it in-memory;
       # this runs the same `searchContacts` entry point against a real server
       # so tsvector/GIN/to_tsquery are proven, not just typechecked.
+      - name: Run vault integration tests against PostgreSQL
+        run: npm run test -w @netpro/core -- src/crypto/postgres.integration.test.ts
+
       - name: Run core search integration tests against PostgreSQL
         run: npm run test -w @netpro/core -- src/search/postgres.integration.test.ts
 

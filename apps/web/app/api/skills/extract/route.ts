@@ -1,3 +1,6 @@
+import { privateAiProvider } from '@/lib/provider-privacy';
+import { providerEnvironment, vaultErrorResponse } from '@/lib/vault';
+import { VaultError } from '@netpro/core/src/crypto';
 // POST /api/skills/extract  { mode?, contact?, dryRun?, limit? }
 // GET  /api/skills/extract  → coverage counts
 // v2.0 Phase 5 — (re)derive and store skills for the owner's contacts.
@@ -11,16 +14,17 @@ import { extractSkillsBatch, skillsStatus } from '@netpro/core/src/skills';
 import { crmErrorResponse, crmJson, readCrmJson } from '@/lib/crm-request';
 import { extractModeParam, resolveOptionalContact } from '@/lib/skills-request';
 
-/** Read AI credentials from the server environment (host-configured BYO key). */
-function credentialsFromEnv(explicitProvider?: string) {
-  const provider = explicitProvider ?? process.env.AI_PROVIDER;
+/** Resolve personal/workspace vault credentials, falling back to server env. */
+async function credentialsFromEnv(explicitProvider?: string) {
+  const env = await providerEnvironment(['outreach.openai', 'outreach.anthropic']);
+  const provider = explicitProvider ?? env.AI_PROVIDER;
   const model =
-    process.env.AI_MODEL ?? (provider === 'anthropic' ? process.env.ANTHROPIC_MODEL : process.env.OPENAI_MODEL);
+    env.AI_MODEL ?? (provider === 'anthropic' ? env.ANTHROPIC_MODEL : env.OPENAI_MODEL);
   return {
     provider,
-    openaiKey: process.env.OPENAI_API_KEY ?? null,
-    anthropicKey: process.env.ANTHROPIC_API_KEY ?? null,
-    openaiBaseUrl: process.env.OPENAI_BASE_URL ?? null,
+    openaiKey: env.OPENAI_API_KEY ?? null,
+    anthropicKey: env.ANTHROPIC_API_KEY ?? null,
+    openaiBaseUrl: env.OPENAI_BASE_URL ?? null,
     model: model || undefined,
   };
 }
@@ -29,6 +33,7 @@ export async function GET(): Promise<Response> {
   try {
     return crmJson(await skillsStatus(conn));
   } catch (error) {
+    if (error instanceof VaultError || (typeof error === 'object' && error !== null && 'status' in error)) return vaultErrorResponse(error);
     return crmErrorResponse(error);
   }
 }
@@ -56,8 +61,8 @@ export async function POST(request: Request): Promise<Response> {
       if (explicit && explicit !== 'openai' && explicit !== 'anthropic') {
         return crmJson({ error: 'Invalid provider — expected "openai" or "anthropic".' }, 400);
       }
-      const credentials = credentialsFromEnv(explicit || undefined);
-      provider = resolveAiProvider(credentials);
+      const credentials = await credentialsFromEnv(explicit || undefined);
+      provider = privateAiProvider(resolveAiProvider(credentials));
       model = credentials.model;
     }
 
@@ -71,6 +76,7 @@ export async function POST(request: Request): Promise<Response> {
     });
     return crmJson(summary);
   } catch (error) {
+    if (error instanceof VaultError || (typeof error === 'object' && error !== null && 'status' in error)) return vaultErrorResponse(error);
     if (error instanceof AiProviderError) {
       if (error.code === 'not_configured') {
         return crmJson({ error: error.message, code: 'ai_not_configured' }, 500);

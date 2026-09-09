@@ -23,3 +23,5 @@ export * as content from './content';
 export * as retention from './retention';
 // v3.0 Phase 1 — workspaces data model & multi-user auth.
 export * as workspaces from './workspaces';
+
+export * as vault from './crypto';
