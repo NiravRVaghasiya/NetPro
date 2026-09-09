@@ -1,3 +1,4 @@
+import { providerEnvironment, providerStatusEnvironment } from '@/lib/vault';
 import Link from "next/link";
 import { conn } from "@/lib/db";
 import {
@@ -73,7 +74,8 @@ export default async function SearchPage({
   // below reports what actually ran.
   const requestedMode = one(sp.mode);
   const mode = isSearchMode(requestedMode) ? requestedMode : undefined;
-  const semanticAvailable = semanticSearchAvailable();
+  const embeddingEnv = mode === 'hybrid' ? await providerEnvironment(['embeddings.openai', 'outreach.openai']) : await providerStatusEnvironment(['embeddings.openai', 'outreach.openai']);
+  const semanticAvailable = semanticSearchAvailable(embeddingEnv);
 
   const options: SearchContactsOptions = {
     query: one(sp.q),
@@ -92,7 +94,7 @@ export default async function SearchPage({
   const results = await searchContacts(
     conn,
     options,
-    mode === "hybrid" ? { embedder: searchEmbedder() } : {},
+    mode === "hybrid" ? { embedder: searchEmbedder(embeddingEnv) } : {},
   );
   const activeSort = options.sort ?? "relevance";
 

@@ -77,6 +77,7 @@ export default function SettingsPage() {
   return (
     <div style={{ maxWidth: 720 }}>
       <h1>Settings</h1>
+      <p className="my-5"><Link href="/settings/keys" className="text-emerald-800 underline">Manage encrypted provider keys →</Link></p>
       <section className="my-5 rounded-xl border border-slate-200 p-5">
         <h2 className="text-base font-semibold text-[#183c30]">
           Your profile card

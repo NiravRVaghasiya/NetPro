@@ -1,3 +1,4 @@
+import { privateEmbedder } from './provider-privacy';
 // apps/web/lib/search-config.ts
 //
 // Server-side resolution of the hybrid-search feature gate (v2.0 Phase 4).
@@ -42,5 +43,5 @@ export function semanticSearchAvailable(
 export function searchEmbedder(
   env: Record<string, string | undefined> = process.env,
 ): EmbeddingProvider | null {
-  return createEmbeddingProvider(searchEmbeddingsConfig(env));
+  return privateEmbedder(createEmbeddingProvider(searchEmbeddingsConfig(env)));
 }

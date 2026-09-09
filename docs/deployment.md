@@ -490,3 +490,60 @@ your provider's pooled connection string.
 
 **Data disappeared after a redeploy.** You were running SQLite on an ephemeral
 filesystem. Move to Postgres; NetPro now refuses this configuration on Vercel.
+
+## Encrypted web provider keys (v3.0 Phase 4)
+
+Set `ENCRYPTION_MASTER_KEY` to a cryptographically random secret of at least
+32 characters (`openssl rand -hex 32`), then open **Settings → Provider keys**.
+Store the master in your deployment secret manager, separately from database
+backups. It must be identical on all web replicas. No new runtime dependency
+or external vault service is required.
+
+- **Personal** keys belong to the authenticated user in the active workspace;
+  members, admins, and owners can save/remove their own keys. Viewers can see
+  masked status but cannot modify keys.
+- **Workspace** keys are shared for provider use; only admins/owners can
+  save/remove them. Other users' personal credentials are never listed.
+- Resolution is **personal vault → workspace vault → server environment**.
+  This applies to outreach, AI skills extraction, enrichment, and hybrid-search
+  embeddings. Model/base-URL/provider switches remain operator env settings;
+  embeddings still require `EMBEDDINGS_PROVIDER=openai` and an indexed corpus.
+  `embeddings.openai` maps to `EMBEDDINGS_API_KEY`, with the existing
+  `OPENAI_API_KEY` fallback (including the resolved `outreach.openai` slot).
+- Credentials are encrypted with AES-256-GCM, random 96-bit IVs, and a
+  SHA-256-derived key bound to the workspace, nullable user, and provider slot.
+  Moving ciphertext to another principal or slot fails authentication.
+  Management responses return only slot, principal, final four characters,
+  update time, and last-used time, never ciphertext or plaintext. A submitted
+  value must be at least eight characters so its four-character mask cannot
+  expose the whole key.
+- `last_used_at` means **resolved for a provider operation**, not proof of a
+  successful external API call. Capability/status rendering never decrypts
+  a key or updates its usage timestamp.
+- If the master is absent/short, management is read-only and providers use env
+  credentials only. Existing ciphertext is retained, not deleted. A configured
+  but wrong master (or damaged ciphertext) fails closed: restore the correct
+  master or overwrite the affected slot. It does **not** silently charge the
+  env credential instead.
+- Back up the master securely. There is no automatic rotation/re-encryption
+  command in this phase: keep the existing master, or replace every vault
+  credential when changing it. Losing both the master and the original provider
+  keys makes recovery impossible. Plaintext is not recoverable from the UI.
+- CLI keys remain in the encrypted local `~/.netpro` keychain: **CLI is you;
+  web is shared**. The new web vault does not change CLI keychain behavior.
+- Reserved `content.devto`, `content.twitter`, and `content.github` slots can be
+  stored, but their existing content adapters are disabled stubs; saving a key
+  does not enable fetching. Core also accepts `plugin.<id>` slots for the
+  forthcoming plugin runtime; the current UI lists built-in slots only.
+
+Migration `0009_key_vault` is additive on SQLite and PostgreSQL. Two partial
+unique indexes enforce one key per personal slot and one per workspace slot
+(SQL `UNIQUE` on a nullable user alone would allow duplicate shared keys).
+Deleting a workspace or Auth.js user cascades to its vault rows. Deleting a
+workspace membership alone retains that user's encrypted personal rows for
+possible rejoining; revoked users cannot access the authenticated vault API.
+
+**Scope boundary:** this phase scopes the vault, not the rest of the CRM.
+Phase 2's application-wide query scoping and per-user GDPR export/deletion are
+still pending. Do not treat this feature as certification of multi-tenant
+isolation for existing contact/search/analytics routes.

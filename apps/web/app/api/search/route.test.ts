@@ -1,3 +1,4 @@
+vi.mock('@/lib/authz', () => ({ requireMembership: async () => ({ workspaceId: 'default', userId: 'test-user', role: 'member' }) }));
 import { describe, it, expect, vi } from "vitest";
 
 // v2.0 Phase 4 moved this onto the migrated fixture: the keyword arm needs the

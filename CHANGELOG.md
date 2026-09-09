@@ -5,6 +5,21 @@ All notable changes to NetPro are documented here. The format is based on
 the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint.md)
 (`vX.Y` milestones, published as `X.Y.0` npm/GitHub versions).
 
+## [Unreleased] — v3.0 platform work
+
+### Added — Phase 4: encrypted web key vault
+
+- Personal and workspace provider credentials in `/settings/keys`, encrypted
+  at rest with AES-256-GCM and principal/slot-bound key derivation.
+- Scoped management API with masked-only responses, bounded request bodies,
+  member/admin write floors, and read-only env fallback without a master key.
+- Vault-first credentials for outreach, AI skills, enrichment, and semantic
+  search; CLI keychain behavior remains unchanged.
+- Dual-dialect migration `0009_key_vault`, partial unique indexes for nullable
+  workspace principals, and adversarial SQLite/API + live-Postgres CI coverage.
+- Phase 4 follows Phase 1 as the roadmap's independent prerequisite for
+  plugins. Phase 2's global tenancy work and the v3.0 release remain pending.
+
 ## [2.5.0] - 2026-09-09 — v2.5 (The Observer)
 
 NetPro can now *observe*: who looked at your card, and how your cross-posted

@@ -1,3 +1,4 @@
+vi.mock('@/lib/authz', () => ({ requireMembership: async () => ({ workspaceId: 'default', userId: 'test-user', role: 'member' }) }));
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fixture = await vi.hoisted(async () => {
@@ -144,7 +145,7 @@ describe('POST /api/skills/extract', () => {
     vi.stubEnv('OPENAI_API_KEY', 'sk-test');
     complete.mockRejectedValue(new Error('rate limited'));
     const body = await (await post({ mode: 'ai', contact: 'a' })).json();
-    expect(body.aiErrors).toEqual([{ contactId: 'a', error: 'rate limited' }]);
+    expect(body.aiErrors).toEqual([{ contactId: 'a', error: 'upstream_error: AI provider request failed. Check credentials and provider availability.' }]);
     expect(body.changes[0].after).toEqual(['python', 'aws', 'kubernetes']);
   });
 });

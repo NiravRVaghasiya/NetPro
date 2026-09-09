@@ -1,3 +1,5 @@
+import { providerEnvironment, vaultErrorResponse } from '@/lib/vault';
+import { VaultError } from '@netpro/core/src/crypto';
 import { NextResponse } from "next/server";
 import { conn } from "@/lib/db";
 import {
@@ -81,10 +83,11 @@ export async function GET(request: Request) {
     const results = await searchContacts(
       conn,
       options,
-      mode === "hybrid" ? { embedder: searchEmbedder() } : {},
+      mode === "hybrid" ? { embedder: searchEmbedder(await providerEnvironment(['embeddings.openai', 'outreach.openai'])) } : {},
     );
     return NextResponse.json(results);
   } catch (error) {
+    if (error instanceof VaultError || (typeof error === 'object' && error !== null && 'status' in error)) return vaultErrorResponse(error);
     return NextResponse.json(
       { error: (error as Error).message },
       { status: 500 },

@@ -1,3 +1,5 @@
+import { privateEnrichmentProvider } from '@/lib/provider-privacy';
+import { providerEnvironment, vaultErrorResponse } from '@/lib/vault';
 import { NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import type { SqliteConn, PgConn } from '@netpro/db';
@@ -19,11 +21,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Provide either { contactId } or { all: true }' }, { status: 400 });
   }
 
+  let env: NodeJS.ProcessEnv;
+  try { env = await providerEnvironment(['enrichment.hunter', 'enrichment.pdl', 'enrichment.clearbit']); }
+  catch (error) { return vaultErrorResponse(error); }
   const providers = [
-    createHunterProvider(process.env.HUNTER_API_KEY ?? null),
-    createPDLProvider(process.env.PDL_API_KEY ?? null),
-    createClearbitProvider(process.env.CLEARBIT_API_KEY ?? null),
-  ];
+    createHunterProvider(env.HUNTER_API_KEY ?? null),
+    createPDLProvider(env.PDL_API_KEY ?? null),
+    createClearbitProvider(env.CLEARBIT_API_KEY ?? null),
+  ].map(privateEnrichmentProvider);
 
   const rows = await selectContacts(conn, contactId);
   const enrichableContacts: EnrichableContact[] = rows.map((c) => ({

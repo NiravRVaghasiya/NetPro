@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, real, boolean, timestamp, primaryKey, index, unique } from 'drizzle-orm/pg-core';
+import { pgTable, uniqueIndex, text, integer, real, boolean, timestamp, primaryKey, index, unique } from 'drizzle-orm/pg-core';
 import type { AdapterAccountType } from 'next-auth/adapters';
 
 // v3.0 Phase 1 — workspaces data model (migration 0008). Single-owner installs
@@ -504,3 +504,19 @@ export const profileCards = pgTable('profile_cards', {
 }, (t) => ({
   workspaceIdx: index('idx_profile_cards_workspace').on(t.workspaceId),
 }));
+
+// Separate partial indexes make the nullable workspace principal truly unique.
+export const keyVault = pgTable('key_vault', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  keyName: text('key_name').notNull(),
+  ciphertext: text('ciphertext').notNull(),
+  lastFour: text('last_four').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  lastUsedAt: text('last_used_at'),
+}, (t) => [
+  uniqueIndex('key_vault_personal_unique').on(t.workspaceId, t.userId, t.keyName).where(sql`${t.userId} IS NOT NULL`),
+  uniqueIndex('key_vault_workspace_unique').on(t.workspaceId, t.keyName).where(sql`${t.userId} IS NULL`),
+]);

@@ -1,3 +1,6 @@
+import { privateAiProvider } from '@/lib/provider-privacy';
+import { providerEnvironment, vaultErrorResponse } from '@/lib/vault';
+import { VaultError } from '@netpro/core/src/crypto';
 import { NextResponse } from "next/server";
 import { conn } from "@/lib/db";
 import {
@@ -49,19 +52,20 @@ function str(value: unknown, max: number, field: string): string | undefined {
   return trimmed || undefined;
 }
 
-/** Read AI credentials from the server environment (host-configured BYO key). */
-function credentialsFromEnv(explicitProvider?: string) {
-  const provider = explicitProvider ?? process.env.AI_PROVIDER;
+/** Resolve personal/workspace vault credentials, falling back to server env. */
+async function credentialsFromEnv(explicitProvider?: string) {
+  const env = await providerEnvironment(['outreach.openai', 'outreach.anthropic']);
+  const provider = explicitProvider ?? env.AI_PROVIDER;
   const model =
-    process.env.AI_MODEL ??
+    env.AI_MODEL ??
     (provider === "anthropic"
-      ? process.env.ANTHROPIC_MODEL
-      : process.env.OPENAI_MODEL);
+      ? env.ANTHROPIC_MODEL
+      : env.OPENAI_MODEL);
   return {
     provider,
-    openaiKey: process.env.OPENAI_API_KEY ?? null,
-    anthropicKey: process.env.ANTHROPIC_API_KEY ?? null,
-    openaiBaseUrl: process.env.OPENAI_BASE_URL ?? null,
+    openaiKey: env.OPENAI_API_KEY ?? null,
+    anthropicKey: env.ANTHROPIC_API_KEY ?? null,
+    openaiBaseUrl: env.OPENAI_BASE_URL ?? null,
     model: model || undefined,
   };
 }
@@ -144,10 +148,11 @@ export async function POST(request: Request) {
       model,
     });
 
-    const aiProvider = resolveAiProvider(credentialsFromEnv(provider));
+    const aiProvider = privateAiProvider(resolveAiProvider(await credentialsFromEnv(provider)));
     const draft = await composeOutreachMessage(input, { provider: aiProvider });
     return NextResponse.json(draft);
   } catch (error) {
+    if (error instanceof VaultError || (typeof error === 'object' && error !== null && 'status' in error)) return vaultErrorResponse(error);
     if (error instanceof AiProviderError) {
       if (error.code === "not_configured") {
         return NextResponse.json(
