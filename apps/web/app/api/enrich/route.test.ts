@@ -20,7 +20,8 @@ vi.mock('@/lib/db', () => {
     CREATE TABLE enrichments (
       id TEXT PRIMARY KEY, contact_id TEXT NOT NULL, provider TEXT NOT NULL,
       data_type TEXT NOT NULL, raw_payload TEXT, confidence REAL,
-      fetched_at TEXT NOT NULL, expires_at TEXT, stale INTEGER DEFAULT 0
+      fetched_at TEXT NOT NULL, expires_at TEXT, stale INTEGER DEFAULT 0,
+      workspace_id TEXT DEFAULT 'default'
     );
   `);
   db.insert(schema.contacts).values({

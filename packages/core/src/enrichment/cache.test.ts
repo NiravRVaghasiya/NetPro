@@ -39,7 +39,8 @@ function createTestConn(): SqliteConn {
       confidence REAL,
       fetched_at TEXT NOT NULL,
       expires_at TEXT,
-      stale INTEGER DEFAULT 0
+      stale INTEGER DEFAULT 0,
+      workspace_id TEXT DEFAULT 'default'
     );
   `);
   return { dialect: 'sqlite', db, schema };
