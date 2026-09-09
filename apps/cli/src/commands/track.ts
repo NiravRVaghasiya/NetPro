@@ -177,7 +177,7 @@ export function renderInteractionLine(
   const direction = i.direction
     ? ` ${i.direction === "outbound" ? "→" : "←"}`
     : "";
-  const author = (i as any).createdByUser ? ` · by ${(i as any).createdByUser.slice(0, 8)}` : "";
+  const author = (i as { createdByUser?: string | null }).createdByUser ? ` · by ${((i as { createdByUser?: string | null }).createdByUser as string).slice(0, 8)}` : "";
   return `  ${utcDay(i.occurredAt)} (${relativeDay(i.occurredAt, now)}) · ${i.type}${direction} · ${i.contactName}${author}${detail ? ` — "${detail}"` : ""}`;
 }
 

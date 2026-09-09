@@ -150,7 +150,7 @@ export default async function ContactDetailPage({
                     : " ← inbound"
                   : ""}
                 {i.channel ? ` · ${i.channel}` : ""}
-                {(i as any).createdByUser ? ` · by ${(i as any).createdByUser.slice(0, 8)}` : ""}
+                {(i as { createdByUser?: string | null }).createdByUser ? ` · by ${((i as { createdByUser?: string | null }).createdByUser as string).slice(0, 8)}` : ""}
                 {i.subject ? ` · “${i.subject}”` : ""}
                 {i.content ? (
                   <div style={{ color: "#475569" }}>{i.content}</div>

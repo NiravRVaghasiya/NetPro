@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestSqliteConn } from '@netpro/db/src/testing';
 import { createTwoWorkspaceFixture, seedWorkspaceContact } from './scope-guard';
 import type { TwoWorkspaceFixture } from './scope-guard';
-import { addMember, getWorkspaceMembers } from './repository';
 import {
   assertCanChangeRole,
   assertCanRemoveMember,

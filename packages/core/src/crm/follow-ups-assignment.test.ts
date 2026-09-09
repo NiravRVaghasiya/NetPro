@@ -77,7 +77,7 @@ describe('follow-up assignment (Phase 3)', () => {
     const actions = fixture.sqlite
       .prepare('SELECT action FROM activity_log ORDER BY rowid')
       .all()
-      .map((r) => (r as any).action);
+      .map((r) => (r as { action: string }).action);
     expect(actions).toContain('followup.assigned');
   });
 

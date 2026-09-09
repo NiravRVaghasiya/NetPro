@@ -149,7 +149,7 @@ export async function createFollowUp(
   if (!contact) {
     throw new CrmError(
       'not_found',
-      `No contact with id \"${input.contactId.trim()}\". Find the right id with \"netpro search\".`
+      `No contact with id "${input.contactId.trim()}". Find the right id with "netpro search".`
     );
   }
 
@@ -544,9 +544,9 @@ async function requirePending(
   scope?: WorkspaceScope
 ): Promise<FollowUpDbRow> {
   const row = await selectById(conn, id, scope);
-  if (!row) throw new CrmError('not_found', `No follow-up with id \"${id}\".`);
+  if (!row) throw new CrmError('not_found', `No follow-up with id "${id}".`);
   if ((row.status ?? 'pending') !== 'pending') {
-    throw new CrmError('conflict', `Follow-up \"${id}\" is already ${row.status}.`);
+    throw new CrmError('conflict', `Follow-up "${id}" is already ${row.status}.`);
   }
   return row;
 }
@@ -814,13 +814,13 @@ export async function resolveFollowUpId(
   if (matches.length > 1) {
     throw new CrmError(
       'invalid_input',
-      `Follow-up prefix \"${trimmed}\" is ambiguous — ${matches.length} pending follow-ups match: ` +
+      `Follow-up prefix "${trimmed}" is ambiguous — ${matches.length} pending follow-ups match: ` +
         `${matches.map((m) => m.id).join(', ')}. Use a longer prefix or the full id.`
     );
   }
   throw new CrmError(
     'not_found',
-    `No pending follow-up matches \"${trimmed}\". List them with \"netpro track list\".`
+    `No pending follow-up matches "${trimmed}". List them with "netpro track list".`
   );
 }
 
@@ -859,10 +859,9 @@ export async function assignFollowUp(
   conn: SqliteConn | PgConn,
   id: string,
   assignedTo: string | null,
-  opts: CrmOptions = {},
+  _opts: CrmOptions = {},
   scope?: WorkspaceScope
 ): Promise<FollowUpRow> {
-  const now = resolveNow(opts);
   const row = await requirePending(conn, id, scope);
   const trimmed = assignedTo ? assignedTo.trim() || null : null;
 
@@ -914,10 +913,10 @@ export async function unassignFollowUpsForUser(
   const uid = userId.trim();
   if (!uid) return 0;
   const resolved = scope ? scope : undefined;
+  // eslint-disable-next-line no-useless-assignment
   let updated = 0;
   if (conn.dialect === 'sqlite') {
     const f = conn.schema.followUps;
-    // Count before
     const toReassign = await conn.db
       .select({ id: f.id })
       .from(f)
