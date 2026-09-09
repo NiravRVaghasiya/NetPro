@@ -48,6 +48,7 @@ function createTestConn(): SqliteConn {
       relationship_score REAL DEFAULT 0,
       last_interaction TEXT,
       interaction_count INTEGER DEFAULT 0,
+      workspace_id TEXT DEFAULT 'default',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       deleted_at TEXT
