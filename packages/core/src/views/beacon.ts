@@ -281,6 +281,15 @@ export async function recordView(conn: Conn, input: RecordViewInput): Promise<Re
   // One round trip covers both dedup rules: the probe only ever needs rows
   // inside the longer (1h) window, and the fingerprint rule re-checks its
   // shorter window in JS.
+  //
+  // The nullable parameters are wrapped in `CAST(… AS text)` on purpose.
+  // Their only predicate is `IS NOT NULL`, from which Postgres cannot infer
+  // a parameter type ("could not determine data type of parameter $2") —
+  // the query fails server-side on every ingest. SQLite does not type-check
+  // bind parameters, so every hermetic test passed while both beacons were
+  // broken on Postgres deployments. The Docker smoke caught it at the
+  // release gate (v2.5 Phase 7); the CAST is ANSI and a no-op semantically:
+  // CAST(NULL AS text) IS NULL, CAST(value AS text) IS the value.
   const sinceIso = new Date(
     now.getTime() - DEDUP_IP_PAGE_WINDOW_MS,
   ).toISOString();
@@ -290,9 +299,9 @@ export async function recordView(conn: Conn, input: RecordViewInput): Promise<Re
         FROM profile_views
         WHERE viewed_at >= ${sinceIso}
           AND (
-            (${fingerprint} IS NOT NULL AND viewer_fingerprint = ${fingerprint})
+            (CAST(${fingerprint} AS text) IS NOT NULL AND viewer_fingerprint = ${fingerprint})
             OR
-            (${ipHash} IS NOT NULL AND viewer_ip = ${ipHash} AND viewed_page = ${viewedPage})
+            (CAST(${ipHash} AS text) IS NOT NULL AND viewer_ip = ${ipHash} AND viewed_page = ${viewedPage})
           )`,
   );
   const verdict = shouldCountView({

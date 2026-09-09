@@ -5,7 +5,7 @@ describe('CLI root program', () => {
   it('is named netpro with a version', () => {
     const program = createProgram();
     expect(program.name()).toBe('netpro');
-    expect(program.version()).toBe('2.0.0');
+    expect(program.version()).toBe('2.5.0');
   });
 
   it('registers all eighteen top-level commands', () => {

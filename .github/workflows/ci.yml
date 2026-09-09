@@ -106,11 +106,23 @@ jobs:
       - name: Run core content integration tests against PostgreSQL
         run: npm run test -w @netpro/core -- src/content/postgres.integration.test.ts
 
-      # v2.0 Phase 7: the release-cut performance pass. 5k contacts / 20k
-      # edges against a real server, timing the core entry points behind the
-      # dashboard, /api/search and /api/graph. Skipped locally (no
-      # NETPRO_TEST_DATABASE_URL), so `npm test` stays hermetic.
-      - name: Run the v2.0 performance pass against PostgreSQL
+      # v2.5 Phase 7: the view-beacon ingest path against a real server. The
+      # dedup probe's nullable parameters are only used inside IS NOT NULL,
+      # which Postgres cannot type — the Docker smoke caught the resulting
+      # 500 at the release gate after every hermetic test had passed on
+      # SQLite. This suite runs recordView (dedup, privacy, owner/bot
+      # labeling, token resolution) on live Postgres so that can't regress.
+      - name: Run core views integration tests against PostgreSQL
+        run: npm run test -w @netpro/core -- src/views/postgres.integration.test.ts
+
+      # v2.0 Phase 7: the release-cut performance pass, extended in v2.5
+      # Phase 7. 5k contacts / 20k edges plus the Observer fixture — 10k
+      # profile views, 1k content items, 5k metric snapshots — timing the
+      # core entry points behind the dashboard (views + content blocks
+      # included), /api/search, /api/graph, /api/card/views and /api/content.
+      # Skipped locally (no NETPRO_TEST_DATABASE_URL), so `npm test` stays
+      # hermetic.
+      - name: Run the release performance pass against PostgreSQL
         run: npm run test -w @netpro/core -- src/postgres.perf.test.ts
 
       - name: Verify the migration CLI against a real database
@@ -223,6 +235,22 @@ jobs:
             code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3000${path}")"
             [ "$code" = "401" ] || { echo "::error::${path} expected 401, got $code"; exit 1; }
           done
+          # v2.5 Phase 7: the analytics and content surfaces joined the
+          # owner-only boundary; the beacons stay public but must behave like
+          # it (no 401, no Set-Cookie, nosniff) in a production build.
+          for path in /api/analytics /api/card/views /api/content /api/content/anything /api/content/anything/metrics /api/content/anything/mentions; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3000${path}")"
+            [ "$code" = "401" ] || { echo "::error::${path} expected 401, got $code"; exit 1; }
+          done
+          pixel="$(curl -s -D - -o /dev/null http://127.0.0.1:3000/api/card/pixel.gif)"
+          echo "$pixel" | head -1 | grep -q ' 200 ' || { echo "::error::pixel.gif expected 200, got: $(echo "$pixel" | head -1)"; exit 1; }
+          echo "$pixel" | grep -qi 'cache-control:.*no-store' || { echo "::error::pixel.gif missing no-store"; exit 1; }
+          echo "$pixel" | grep -qi 'x-content-type-options: nosniff' || { echo "::error::pixel.gif missing nosniff"; exit 1; }
+          if echo "$pixel" | grep -qi '^set-cookie:'; then echo "::error::pixel.gif set a cookie"; exit 1; fi
+          preflight="$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS http://127.0.0.1:3000/api/card/view)"
+          [ "$preflight" = "204" ] || { echo "::error::/api/card/view OPTIONS expected 204, got $preflight"; exit 1; }
+          beacon="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"page":"/card"}' http://127.0.0.1:3000/api/card/view)"
+          [ "$beacon" = "200" ] || { echo "::error::/api/card/view beacon expected 200, got $beacon"; exit 1; }
           card="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/card)"
           [ "$card" = "404" ] || { echo "::error::/card expected 404, got $card"; exit 1; }
 

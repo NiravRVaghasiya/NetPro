@@ -320,6 +320,15 @@ and not incremental — that is a deliberate simplicity/size trade.
   [Phase 7 progress doc](superpowers/plans/2026-09-08-v2.0-phase7-release-progress.md);
   re-measure against your own database with
   `NETPRO_TEST_DATABASE_URL=… npm run test -w @netpro/core -- src/postgres.perf.test.ts`.
+- Re-measured with the v2.5 Observer fixture (v2.5 Phase 7): the same
+  database carrying **10k profile views + 1k content items + 5k engagement
+  snapshots** on PostgreSQL 18.4 gave ~485 ms for the full dashboard payload
+  (graph + views + content blocks included), ~67 ms with those three
+  sections off, ~16 ms for the views overview behind `GET /api/card/views`,
+  ~5 ms for the content list behind `GET /api/content` and ~41 ms for its
+  overview query — all inside the plan's 500/100/100 ms budgets, no new
+  indexes needed. Medians of 3 runs from the same perf pass; see the
+  [v2.5 Phase 7 progress doc](superpowers/plans/2026-09-09-v2.5-phase7-release-progress.md).
 
 ### Profile view tracking (v2.5 Phase 2)
 
