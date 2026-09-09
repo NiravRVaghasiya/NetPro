@@ -48,6 +48,7 @@ function createTestConn(): SqliteConn {
       relationship_score REAL DEFAULT 0,
       last_interaction TEXT,
       interaction_count INTEGER DEFAULT 0,
+      workspace_id TEXT DEFAULT 'default',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       deleted_at TEXT
@@ -55,7 +56,8 @@ function createTestConn(): SqliteConn {
     CREATE TABLE enrichments (
       id TEXT PRIMARY KEY, contact_id TEXT NOT NULL, provider TEXT NOT NULL,
       data_type TEXT NOT NULL, raw_payload TEXT, confidence REAL,
-      fetched_at TEXT NOT NULL, expires_at TEXT, stale INTEGER DEFAULT 0
+      fetched_at TEXT NOT NULL, expires_at TEXT, stale INTEGER DEFAULT 0,
+      workspace_id TEXT DEFAULT 'default'
     );
   `);
   return { dialect: 'sqlite', db, schema };

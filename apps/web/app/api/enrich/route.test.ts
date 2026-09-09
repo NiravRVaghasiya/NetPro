@@ -15,12 +15,13 @@ vi.mock('@/lib/db', () => {
       linkedin_url TEXT, github_url TEXT, twitter_url TEXT, website_url TEXT,
       source TEXT NOT NULL, source_id TEXT, tags TEXT, custom_fields TEXT, notes TEXT, skills TEXT,
       relationship_score REAL DEFAULT 0, last_interaction TEXT, interaction_count INTEGER DEFAULT 0,
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
+      workspace_id TEXT DEFAULT 'default', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
     );
     CREATE TABLE enrichments (
       id TEXT PRIMARY KEY, contact_id TEXT NOT NULL, provider TEXT NOT NULL,
       data_type TEXT NOT NULL, raw_payload TEXT, confidence REAL,
-      fetched_at TEXT NOT NULL, expires_at TEXT, stale INTEGER DEFAULT 0
+      fetched_at TEXT NOT NULL, expires_at TEXT, stale INTEGER DEFAULT 0,
+      workspace_id TEXT DEFAULT 'default'
     );
   `);
   db.insert(schema.contacts).values({

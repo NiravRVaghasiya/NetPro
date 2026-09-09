@@ -14,6 +14,11 @@
 // the better-sqlite3 native addon. Keeping that discipline means the boundary
 // does no database IO per request, which matters more on serverless than it
 // did on a long-lived server.
+//
+// v3.0 Phase 1 — /invite is a protected route accessible to any authenticated
+// GitHub user (even without workspace membership) so invitees can accept
+// their invite after signing in. Other protected routes enforce membership
+// in server components via requireScope().
 import {
   NextResponse,
   type NextRequest,
@@ -35,6 +40,7 @@ const PROTECTED_ROUTES = [
   "/content",
   "/settings",
   "/import",
+  "/invite",
 ];
 // The profile-view beacons (v2.5 Phase 2) are public ON PURPOSE — they
 // serve anonymous card visitors and the owner's cross-origin embeds. They

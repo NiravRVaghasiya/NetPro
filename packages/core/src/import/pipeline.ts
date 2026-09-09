@@ -145,6 +145,7 @@ async function insertContact(conn: SqliteConn | PgConn, normalized: NormalizedCo
   const now = new Date().toISOString();
   const values = {
     id: randomUUID(),
+    workspaceId: 'default',
     fullName: normalized.fullName,
     firstName: normalized.firstName,
     lastName: normalized.lastName,

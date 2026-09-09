@@ -2,8 +2,51 @@ import { sql } from 'drizzle-orm';
 import { pgTable, text, integer, real, boolean, timestamp, primaryKey, index, unique } from 'drizzle-orm/pg-core';
 import type { AdapterAccountType } from 'next-auth/adapters';
 
+// v3.0 Phase 1 — workspaces data model (migration 0008). Single-owner installs
+// get a bootstrap workspace `default`; multi-member installs share it until
+// multi-workspace UI lands in v3.x. Every data table gains `workspace_id`
+// (nullable in SQL, backfilled to `default`, thereafter always written).
+export const workspaces = pgTable('workspaces', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  slug: text('slug').notNull(),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+}, (t) => ({
+  slugUnique: unique('workspaces_slug_unique').on(t.slug),
+}));
+
+export const workspaceMembers = pgTable('workspace_members', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  role: text('role').notNull().default('member'),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+}, (t) => ({
+  workspaceUserUnique: unique('workspace_members_workspace_user_unique').on(t.workspaceId, t.userId),
+  workspaceIdx: index('idx_workspace_members_workspace').on(t.workspaceId),
+  userIdx: index('idx_workspace_members_user').on(t.userId),
+}));
+
+export const workspaceInvites = pgTable('workspace_invites', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  token: text('token').notNull(),
+  role: text('role').notNull().default('member'),
+  expiresAt: text('expires_at').notNull(),
+  createdBy: text('created_by'),
+  acceptedAt: text('accepted_at'),
+  revokedAt: text('revoked_at'),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+}, (t) => ({
+  tokenUnique: unique('workspace_invites_token_unique').on(t.token),
+  workspaceIdx: index('idx_workspace_invites_workspace').on(t.workspaceId),
+  expiresIdx: index('idx_workspace_invites_expires').on(t.expiresAt),
+}));
+
 export const contacts = pgTable('contacts', {
   id: text('id').primaryKey(),
+
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
 
   fullName: text('full_name').notNull(),
   firstName: text('first_name'),
@@ -50,10 +93,13 @@ export const contacts = pgTable('contacts', {
   // and last-touch recency scans. Index plan from the DB & Pipeline Deep Dive.
   relationshipScoreIdx: index('idx_contacts_relationship_score').on(t.relationshipScore),
   lastInteractionIdx: index('idx_contacts_last_interaction').on(t.lastInteraction),
+  workspaceIdx: index('idx_contacts_workspace').on(t.workspaceId),
+  workspaceUpdatedIdx: index('idx_contacts_workspace_updated').on(t.workspaceId, t.updatedAt),
 }));
 
 export const interactions = pgTable('interactions', {
   id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
   contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
 
   type: text('type').notNull(),
@@ -71,10 +117,13 @@ export const interactions = pgTable('interactions', {
   // Per-contact history (timeline, score recompute) and campaign stats.
   contactIdx: index('idx_interactions_contact').on(t.contactId, t.occurredAt),
   campaignIdx: index('idx_interactions_campaign').on(t.campaignId),
+  workspaceIdx: index('idx_interactions_workspace').on(t.workspaceId),
+  workspaceContactIdx: index('idx_interactions_workspace_contact').on(t.workspaceId, t.contactId),
 }));
 
 export const edges = pgTable('edges', {
   id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
   sourceId: text('source_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
   targetId: text('target_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
 
@@ -95,27 +144,33 @@ export const edges = pgTable('edges', {
   relationIdx: index('idx_edges_relation').on(t.relation),
   confidenceIdx: index('idx_edges_confidence').on(t.confidence),
   statusIdx: index('idx_edges_status').on(t.status),
+  workspaceIdx: index('idx_edges_workspace').on(t.workspaceId),
 }));
 
 export const events = pgTable('events', {
   id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   location: text('location'),
   startsAt: text('starts_at'),
   endsAt: text('ends_at'),
   source: text('source').notNull().default('manual'),
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (t) => ({
+  workspaceIdx: index('idx_events_workspace').on(t.workspaceId),
+}));
 
 export const eventAttendees = pgTable('event_attendees', {
   eventId: text('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
   contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
   role: text('role'),
   attended: boolean('attended').default(true),
   discoveredAt: text('discovered_at').notNull().$defaultFn(() => new Date().toISOString()),
 }, (t) => ({
   pk: primaryKey({ columns: [t.eventId, t.contactId] }),
   contactIdx: index('idx_event_attendees_contact').on(t.contactId),
+  workspaceIdx: index('idx_event_attendees_workspace').on(t.workspaceId),
 }));
 
 // v2.5 Phase 4 — content cross-posting tracker (migration `0007`).
@@ -125,6 +180,8 @@ export const eventAttendees = pgTable('event_attendees', {
 // double-count the same post.
 export const contentItems = pgTable('content_items', {
   id: text('id').primaryKey(),
+
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
 
   url: text('url').notNull(),
   urlNorm: text('url_norm').notNull(),
@@ -146,6 +203,7 @@ export const contentItems = pgTable('content_items', {
   urlNormUnique: unique('content_items_url_norm_unique').on(t.urlNorm),
   platformIdx: index('idx_content_items_platform').on(t.platform),
   publishedIdx: index('idx_content_items_published').on(t.publishedAt),
+  workspaceIdx: index('idx_content_items_workspace').on(t.workspaceId),
 }));
 
 // Time-series engagement snapshots, one row per fetch. Metrics are nullable
@@ -153,6 +211,7 @@ export const contentItems = pgTable('content_items', {
 // manual entry reports whatever the owner typed).
 export const contentMetrics = pgTable('content_metrics', {
   id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
   contentId: text('content_id').notNull().references(() => contentItems.id, { onDelete: 'cascade' }),
 
   fetchedAt: text('fetched_at').notNull(),
@@ -170,22 +229,26 @@ export const contentMetrics = pgTable('content_metrics', {
 }, (t) => ({
   itemTimeIdx: index('idx_content_metrics_item_time').on(t.contentId, t.fetchedAt),
   timeIdx: index('idx_content_metrics_time').on(t.fetchedAt),
+  workspaceIdx: index('idx_content_metrics_workspace').on(t.workspaceId),
 }));
 
-// Which of your contacts a piece of content involves ("co-authored with Ada",
-// "mentions Bob"). Composite PK: one row per (content, contact) pair.
+// Which of your contacts a piece of content involves (\"co-authored with Ada\",
+// \"mentions Bob\"). Composite PK: one row per (content, contact) pair.
 export const contentMentions = pgTable('content_mentions', {
   contentId: text('content_id').notNull().references(() => contentItems.id, { onDelete: 'cascade' }),
   contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
   context: text('context'),
 }, (t) => ({
   pk: primaryKey({ columns: [t.contentId, t.contactId] }),
   contactIdx: index('idx_content_mentions_contact').on(t.contactId),
   contentIdx: index('idx_content_mentions_content').on(t.contentId),
+  workspaceIdx: index('idx_content_mentions_workspace').on(t.workspaceId),
 }));
 
 export const enrichments = pgTable('enrichments', {
   id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
   contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
 
   provider: text('provider').notNull(),
@@ -196,10 +259,14 @@ export const enrichments = pgTable('enrichments', {
   fetchedAt: text('fetched_at').notNull().$defaultFn(() => new Date().toISOString()),
   expiresAt: text('expires_at'),
   stale: boolean('stale').default(false),
-});
+}, (t) => ({
+  workspaceIdx: index('idx_enrichments_workspace').on(t.workspaceId),
+}));
 
 export const campaigns = pgTable('campaigns', {
   id: text('id').primaryKey(),
+
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
 
   name: text('name').notNull(),
   description: text('description'),
@@ -223,10 +290,12 @@ export const campaigns = pgTable('campaigns', {
   updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
 }, (t) => ({
   statusIdx: index('idx_campaigns_status').on(t.status),
+  workspaceIdx: index('idx_campaigns_workspace').on(t.workspaceId),
 }));
 
 export const campaignRecipients = pgTable('campaign_recipients', {
   id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
   campaignId: text('campaign_id').notNull().references(() => campaigns.id, { onDelete: 'cascade' }),
   contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
 
@@ -245,10 +314,13 @@ export const campaignRecipients = pgTable('campaign_recipients', {
   // Campaign detail views (per-status) and the drip schedule.
   statusIdx: index('idx_campaign_recipients_status').on(t.campaignId, t.status),
   scheduledIdx: index('idx_campaign_recipients_scheduled').on(t.scheduledAt),
+  workspaceIdx: index('idx_campaign_recipients_workspace').on(t.workspaceId),
 }));
 
 export const searchIndex = pgTable('search_index', {
   contactId: text('contact_id').primaryKey().references(() => contacts.id, { onDelete: 'cascade' }),
+
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
 
   searchText: text('search_text').notNull(),
 
@@ -273,10 +345,13 @@ export const searchIndex = pgTable('search_index', {
   updatedAt: text('updated_at').notNull(),
 }, (t) => ({
   updatedAtIdx: index('idx_search_index_updated_at').on(t.updatedAt),
+  workspaceIdx: index('idx_search_index_workspace').on(t.workspaceId),
 }));
 
 export const profileViews = pgTable('profile_views', {
   id: text('id').primaryKey(),
+
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
 
   // v2.5 Phase 1 privacy hardening (migration `0006`). `viewer_ip` no longer
   // holds a raw IP: the producer stores HMAC-SHA256(ip + UA) under a salt
@@ -327,10 +402,13 @@ export const profileViews = pgTable('profile_views', {
   nonBotTimeIdx: index('idx_profile_views_is_bot')
     .on(t.viewedAt)
     .where(sql`${t.isBot} = false`),
+  workspaceIdx: index('idx_profile_views_workspace').on(t.workspaceId),
+  workspaceTimeIdx: index('idx_profile_views_workspace_time').on(t.workspaceId, t.viewedAt),
 }));
 
 export const followUps = pgTable('follow_ups', {
   id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
   contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
 
   reason: text('reason'),
@@ -348,10 +426,14 @@ export const followUps = pgTable('follow_ups', {
   // Due lists and per-contact pending lookups.
   dueIdx: index('idx_followups_due').on(t.dueAt),
   contactIdx: index('idx_followups_contact').on(t.contactId),
+  workspaceIdx: index('idx_followups_workspace').on(t.workspaceId),
+  workspaceStatusDueIdx: index('idx_followups_workspace_status_due').on(t.workspaceId, t.status, t.dueAt),
 }));
 
 export const activityLog = pgTable('activity_log', {
   id: text('id').primaryKey(),
+
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
 
   action: text('action').notNull(),
   entityType: text('entity_type'),
@@ -359,7 +441,10 @@ export const activityLog = pgTable('activity_log', {
   metadata: text('metadata'),
 
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (t) => ({
+  workspaceIdx: index('idx_activity_log_workspace').on(t.workspaceId),
+  workspaceTimeIdx: index('idx_activity_log_workspace_time').on(t.workspaceId, t.createdAt),
+}));
 
 export const users = pgTable('user', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -411,8 +496,11 @@ export const verificationTokens = pgTable(
 // snapshots are separate so private edits never change the live card implicitly.
 export const profileCards = pgTable('profile_cards', {
   id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
   draft: text('draft').notNull(),
   published: text('published'),
   publishedAt: text('published_at'),
   updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (t) => ({
+  workspaceIdx: index('idx_profile_cards_workspace').on(t.workspaceId),
+}));

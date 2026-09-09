@@ -7,8 +7,13 @@
 // bundle, and the build will fail with a "Module not found" error tracing
 // through "Edge Middleware". See docs/superpowers/plans/2026-08-30-v0.1-alpha-scaffold.md,
 // Task 10 Step 6.
+//
+// v3.0 Phase 1: auth is now multi-user via workspaces. The edge-safe config
+// allows any GitHub account to get a JWT; the Node-runtime `auth.ts` layer
+// enforces membership / break-glass owner checks against the database.
+// The proxy only checks that a session exists; deeper role floors happen
+// in server components via `requireScope()`.
 import type { NextAuthConfig } from "next-auth";
-import { isOwnerGitHubId } from "./owner";
 import { resolveTrustHost } from "./trust-host";
 
 const trustHost = resolveTrustHost();
@@ -29,10 +34,9 @@ export const authConfig = {
   },
   callbacks: {
     async signIn({ account }) {
-      return (
-        account?.provider === "github" &&
-        isOwnerGitHubId(account.providerAccountId)
-      );
+      // Edge-safe: allow any GitHub account to obtain a session; membership
+      // is enforced in the Node-runtime auth.ts callback which can access DB.
+      return account?.provider === "github";
     },
     async jwt({ token, user, account }) {
       if (account) {
@@ -40,11 +44,12 @@ export const authConfig = {
         token.githubId = account.providerAccountId;
       }
       if (user?.id) token.userId = user.id;
-      // Re-check every read, not only sign-in: configuration changes revoke
-      // old owners, and pre-upgrade JWTs cannot bypass the single-owner gate.
-      // Never accept identity fields from the client-controlled session update.
+      // Minimal edge-safe validation: require githubId + userId.
+      // Break-glass owner and workspace membership are verified in Node
+      // runtime (auth.ts) where DB is available.
       if (
-        !isOwnerGitHubId(token.githubId) ||
+        typeof token.githubId !== "string" ||
+        !token.githubId ||
         typeof token.userId !== "string" ||
         !token.userId
       )
