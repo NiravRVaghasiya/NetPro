@@ -5,7 +5,15 @@ All notable changes to NetPro are documented here. The format is based on
 the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint.md)
 (`vX.Y` milestones, published as `X.Y.0` npm/GitHub versions).
 
-## [Unreleased] — v2.5 (The Observer)
+## [2.5.0] - 2026-09-09 — v2.5 (The Observer)
+
+NetPro can now *observe*: who looked at your card, and how your cross-posted
+content performs — without becoming a tracker itself. Everything below was
+built to a privacy budget the code enforces, not a policy page: the raw IP
+never reaches the database, the logs, or a backup; viewer hashes rotate daily
+so nothing correlates across days; DNT/GPC requests get minimal rows; bots
+and your own views never inflate the numbers; and both high-volume tables
+purge themselves on a documented schedule.
 
 ### Added — v2.5 Phase 1: Profile views data model & privacy hardening
 
@@ -294,6 +302,76 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
   disabled stubs) and the retention section (windows, cadence, concurrency
   notes, knobs); `.env.example` documents both.
 - No database migration and no new runtime dependencies.
+
+### Added — v2.5 Phase 7: Release readiness & the `2.5.0` cut
+
+- **The live-PostgreSQL performance pass now measures the Observer.** On top
+  of the v2.0 fixture (5k contacts / 20k edges), the same release-gate
+  database carries **10k profile views, 1k content items and 5k engagement
+  snapshots**, and the pass times what those endpoints actually cost on a
+  real query planner: full dashboard payload (graph + views + content
+  included) **~485 ms** (budget 500 ms), the dashboard without its three
+  heavy sections **~67 ms**, the views overview behind
+  `GET /api/card/views` **~16 ms** (budget 100 ms), the content list behind
+  `GET /api/content` **~5 ms** and its "At a glance" overview **~41 ms**
+  (budget 100 ms). The pass also asserts correctness on the live planner —
+  exact windowed view totals (bots and owner views excluded), distinct
+  resolved contacts, zero-filled 30-day series, and `withMetrics` on the
+  content overview — because the views module previously had no dedicated
+  live-Postgres suite. Measured on PostgreSQL 18.4, medians of 3 runs;
+  recorded in the
+  [Phase 7 progress doc](docs/superpowers/plans/2026-09-09-v2.5-phase7-release-progress.md)
+  and `docs/deployment.md`. The Phase 6 hermetic SQLite budget test is
+  unchanged and still runs in every `npm test`.
+- **CI's Docker smoke covers the new boundary.** The owner-only routes added
+  since v2.0 (`/api/analytics`, `/api/card/views`, `/api/content` and its
+  sub-routes) must answer 401 in a real production build, while the public
+  beacons must behave like public surfaces: `GET /api/card/pixel.gif`
+  answers 200 with `Cache-Control: no-store` and
+  `X-Content-Type-Options: nosniff` and never sets a cookie;
+  `POST /api/card/view` accepts a minimal beacon (200) and its CORS
+  preflight answers 204 — in the image, not only in unit tests.
+
+### Changed — v2.5
+
+- Version bump `2.0.0` → `2.5.0` across every workspace package, the
+  internal `@netpro/*` ranges, the lockfile, and the CLI
+  (`netpro --version` now reports `2.5.0`, asserted by test) — the
+  three-part edit every cut in this repo has been (versions, internal
+  ranges, lockfile), done so `npm ci` keeps resolving the workspace
+  packages. No migration, no dependency changes.
+- `docs/deployment.md` now records the v2.5 live-Postgres latencies beside
+  the v2.0 graph numbers, so the two release gates are readable in one
+  place; the settings tracking panel already promised the same retention
+  horizons the purge job enforces (Phase 6).
+
+### Deferred — v2.5 deliberately does not ship
+
+- **Cross-day viewer tracking of any kind.** Viewer hashes are HMACs under a
+  salt that rotates every UTC day; the fingerprint column exists only to
+  dedupe a 24-hour window, and retention deletes the raw rows after 90 days.
+  A persistent viewer identifier would be trivial to add and is exactly what
+  this milestone refuses to be. Raw IPs are never stored, logged, or
+  shipped to a third party — and the upgrade blanks any legacy raw values
+  migration `0006` found.
+- **Contact resolution from IP, email, or user agent.** The only path from a
+  view to a known contact is the owner's own signed `?v=` link (HMAC,
+  30-day cap, contact must still exist). "Who viewed your profile" shows you
+  who you *sent the link to* — it never deanonymizes strangers.
+- **Platform metric integrations.** `devto` / `twitter` / `github` content
+  providers ship as disabled, self-explaining stubs that name the env key
+  which would enable them (`DEVTO_API_KEY`, `TWITTER_BEARER_TOKEN`,
+  `GITHUB_TOKEN`). Manual snapshots and RSS/Atom parsing are the shipped
+  producers; no provider is ever called automatically — fetching is an
+  explicit CLI/API action, and there is no background fetch cron.
+- **A views analytics cookie, third-party script, or off-site beacon.** The
+  pixel is first-party, cookieless, and the ingest endpoints set no cookies;
+  the embed snippet is one `<img>` plus an optional inline `sendBeacon`,
+  both pointed at the operator's own origin.
+- Carried over from v2.0 (unchanged): live event discovery providers, a
+  native `pgvector` column + ANN index, AI skills extraction by default,
+  graph caching, SMTP delivery, and per-user encrypted web key storage /
+  the `$EDITOR` draft-review loop.
 
 ## [2.0.0] - 2026-09-08
 

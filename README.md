@@ -4,11 +4,11 @@
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FNiravRVaghasiya%2FNetPro&env=DB_DIALECT,DATABASE_URL,NEXTAUTH_SECRET,GITHUB_CLIENT_ID,GITHUB_CLIENT_SECRET,NETPRO_OWNER_GITHUB_ID&envDescription=NetPro%20needs%20a%20Postgres%20URL%2C%20an%20auth%20secret%2C%20a%20GitHub%20OAuth%20app%2C%20and%20your%20numeric%20GitHub%20user%20ID&envLink=https%3A%2F%2Fgithub.com%2FNiravRVaghasiya%2FNetPro%2Fblob%2Fmaster%2Fdocs%2Fdeployment.md&project-name=netpro&repository-name=netpro)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Release: v1.5.0](https://img.shields.io/badge/Release-v1.5.0-2ea44f)](https://github.com/NiravRVaghasiya/NetPro/releases)
+[![Release: v2.5.0](https://img.shields.io/badge/Release-v2.5.0-2ea44f)](https://github.com/NiravRVaghasiya/NetPro/releases)
 [![Changelog](https://img.shields.io/badge/Changelog-CHANGELOG.md-8A2BE2)](CHANGELOG.md)
 
-**v1.0 (Phases 1–6), v1.5 (Phases 7–8), and v2.0 Phases 1–3 are
-implemented** on top of the v0.1-alpha scaffold:
+**v1.0 (Phases 1–6), v1.5 (Phases 7–8), v2.0 "The Strategist", and v2.5
+"The Observer" are implemented** on top of the v0.1-alpha scaffold:
 
 - **Phase 1 — Import, Enrichment & Export:** LinkedIn CSV import with
   dedup/merge, three-provider contact enrichment (Hunter.io, People Data Labs,
@@ -98,13 +98,17 @@ implemented** on top of the v0.1-alpha scaffold:
 > See [owner authentication setup](docs/getting-started.md#configure-owner-sign-in).
 
 The full monorepo (CLI + web, dual-dialect Drizzle database, GitHub OAuth via
-Auth.js) builds, lints, typechecks, and tests successfully — **1346 tests**,
-plus 38 more in live PostgreSQL suites that run in CI against a real database
-(including a performance pass at 5k contacts / 20k edges). **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
+Auth.js) builds, lints, typechecks, and tests successfully — **1546 tests**,
+plus 48 more in live PostgreSQL suites that run in CI against a real database
+(including a performance pass at 5k contacts / 20k edges / 10k views / 1k
+content items). **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
 reminders, and batch campaigns are implemented, and per-contact relationship
 scoring now has a producer (interaction logging). **v2.0 — "The Strategist" is
 complete** — shipped as `v2.0.0` on 2026-09-08 (see the [v2.0 implementation
-plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
+plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)) — **and
+v2.5 — "The Observer" is complete**, shipped as `v2.5.0` on 2026-09-09
+(see the [v2.5 implementation
+plan](docs/superpowers/plans/2026-09-08-v2.5-implementation-plan.md)):
 
 - **Phase 1 — Edge provenance (shipped):** `edges` gained `source`,
   `confidence`, `status` + indexes, plus `netpro edge`, CSV mutuals as
@@ -184,9 +188,10 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   CI also pins the promise that **no `pgvector` extension is required** —
   embeddings are portable JSON, so a managed Postgres works as-is.
 
-- **v2.5 — “The Observer”: Phases 1–6 shipped.** Migration `0006` and the
-  `@netpro/core/views` module made the producer-less `profile_views` table
-  trustworthy and privacy-preserving — daily-salted HMAC viewer hashing (no
+- **v2.5 — “The Observer”: complete, shipped as `v2.5.0` on 2026-09-09.**
+  Migration `0006` and the `@netpro/core/views` module made the
+  producer-less `profile_views` table trustworthy and privacy-preserving —
+  daily-salted HMAC viewer hashing (no
   raw IPs ever stored; legacy values blanked on upgrade), a vendored bot
   deny-list, owner-view labeling, dedup/filter indexes, and the 90-day
   raw-view retention purge. Phase 2 wired the producer: the public tracking
@@ -230,6 +235,20 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   metrics (~53 ms dashboard / ~10 ms views / ~2 ms content on SQLite) and
   ship as hermetic budget tests — see the
   [v2.5 implementation plan](docs/superpowers/plans/2026-09-08-v2.5-implementation-plan.md).
+- **Phase 7 — Release readiness & the `v2.5.0` cut (shipped):** workspace
+  versions moved to `2.5.0`; the CHANGELOG closed out with explicit privacy
+  notes and a **Deferred** list (what The Observer deliberately is not:
+  cross-day tracking, stranger deanonymization, platform metric
+  integrations, third-party scripts); and the **release performance pass
+  against a real PostgreSQL server** was extended with the Observer fixture —
+  5k contacts / 20k edges plus 10k views / 1k content items / 5k metric
+  snapshots — recording **~485 ms** for the full dashboard payload,
+  **~16 ms** for the views overview and **~5 ms** for the content list
+  (medians, PostgreSQL 18.4, recorded in the
+  [Phase 7 progress doc](docs/superpowers/plans/2026-09-09-v2.5-phase7-release-progress.md)).
+  CI's Docker smoke now also proves the new boundary in a production build:
+  the analytics/content routes answer 401, the beacons stay public,
+  cookieless, and `no-store`/`nosniff`.
 
 **Deferred from v2.0 (deliberate, not forgotten):** live event discovery
 providers (the `EventDiscoveryProvider` interface ships, disabled); a native
@@ -238,6 +257,14 @@ default (opt-in per run); real SMTP delivery for campaigns (NetPro drafts
 today, a human sends); per-user encrypted web key storage and the `$EDITOR`
 draft-review loop — the last two documented in the
 [Phase 4 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase4-ai-outreach-design.md).
+
+**Deferred from v2.5 (privacy by omission, on purpose):** no cross-day viewer
+tracking (daily-salted hashes, 90-day raw-row purge), no contact resolution
+from IP/email/user-agent (only the owner's signed `?v=` links), no platform
+metric integrations beyond the disabled provider stubs (`manual` + `rss`
+ship; devto/twitter/github name the key that would enable them), and no
+cookies, third-party scripts, or off-site beacons anywhere in the observer
+features — see the CHANGELOG's v2.5 Deferred section.
 
 > **Analytics scope note:** the clustering story is **two-section** and, since
 > v2.0 Phase 3, graph-native end to end: attribute clusters (normalized
