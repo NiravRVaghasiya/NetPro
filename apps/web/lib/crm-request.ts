@@ -10,6 +10,7 @@ import { GraphError } from '@netpro/core/src/graph';
 import { EventError } from '@netpro/core/src/events';
 import { ViewsError } from '@netpro/core/src/views';
 import { ContentError } from '@netpro/core/src/content';
+import { WorkspaceError } from '@netpro/core/src/workspaces';
 
 /** Interactions cap at 5000 chars of content; 16 KiB of JSON is generous headroom. */
 export const MAX_CRM_BODY_BYTES = 16 * 1024;
@@ -96,13 +97,16 @@ type ErrorCode =
   | GraphError['code']
   | EventError['code']
   | ViewsError['code']
-  | ContentError['code'];
+  | ContentError['code']
+  | WorkspaceError['code'];
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
   invalid_input: 400,
   not_found: 404,
   conflict: 409,
   not_configured: 400,
+  unauthorized: 401,
+  forbidden: 403,
 };
 
 /**
@@ -119,9 +123,10 @@ export function crmErrorResponse(error: unknown): Response {
     error instanceof GraphError ||
     error instanceof EventError ||
     error instanceof ViewsError ||
-    error instanceof ContentError
+    error instanceof ContentError ||
+    error instanceof WorkspaceError
   ) {
-    return crmJson({ error: error.message, code: error.code }, STATUS_BY_CODE[error.code]);
+    return crmJson({ error: error.message, code: error.code }, STATUS_BY_CODE[error.code as ErrorCode]);
   }
   return crmJson({ error: 'Unable to process the request. Please try again.' }, 500);
 }

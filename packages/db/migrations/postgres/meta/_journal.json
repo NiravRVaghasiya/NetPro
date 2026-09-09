@@ -57,6 +57,13 @@
       "when": 1789142400000,
       "tag": "0007_content_tracker",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789228800000,
+      "tag": "0008_workspaces",
+      "breakpoints": true
     }
   ]
 }

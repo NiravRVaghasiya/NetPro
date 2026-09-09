@@ -188,6 +188,7 @@ export async function createCampaign(
 
   const row = {
     id: randomUUID(),
+    workspaceId: 'default',
     name,
     description,
     status: 'draft' as const,
@@ -307,6 +308,7 @@ export async function addRecipients(
   if (fresh.length > 0) {
     const rows = fresh.map((contactId) => ({
       id: randomUUID(),
+      workspaceId: 'default',
       campaignId,
       contactId,
       status: 'pending' as const,

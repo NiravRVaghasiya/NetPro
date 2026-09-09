@@ -26,6 +26,7 @@ export async function writeActivityLog(
 ): Promise<void> {
   const row = {
     id: randomUUID(),
+    workspaceId: 'default',
     action: entry.action,
     entityType: entry.entityType ?? null,
     entityId: entry.entityId ?? null,

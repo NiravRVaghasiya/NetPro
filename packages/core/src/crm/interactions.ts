@@ -47,6 +47,7 @@ export interface LogInteractionInput {
 
 export interface InteractionRow {
   id: string;
+  workspaceId?: string;
   contactId: string;
   type: string;
   direction: string | null;
@@ -295,6 +296,7 @@ export async function logInteraction(
 
   const interaction: InteractionRow = {
     id: randomUUID(),
+    workspaceId: 'default',
     contactId: contact.id,
     type: normalized.type,
     direction: normalized.direction,

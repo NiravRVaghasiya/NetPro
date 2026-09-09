@@ -156,6 +156,7 @@ export async function createFollowUp(
 
   const row = {
     id: randomUUID(),
+    workspaceId: 'default',
     contactId: contact.id,
     reason,
     dueAt,

@@ -36,6 +36,7 @@ export default async function AppLayout({
         <Link href="/import">Import</Link>
         <Link href="/settings/card">Profile card</Link>
         <Link href="/settings">Settings</Link>
+        <Link href="/settings/team">Team</Link>
         <form
           action={async () => {
             "use server";

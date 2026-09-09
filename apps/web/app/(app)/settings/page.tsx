@@ -28,7 +28,7 @@ function integrationsFromEnv(env: NodeJS.ProcessEnv): Integration[] {
         env.NETPRO_OWNER_GITHUB_ID,
       ),
       envVars: ["NETPRO_OWNER_GITHUB_ID"],
-      hint: "Required numeric GitHub account ID. All other accounts are denied access.",
+      hint: "Required numeric GitHub account ID. All other accounts are denied access (break-glass owner in v3.0).",
     },
     {
       name: "GitHub OAuth (sign-in)",
@@ -90,6 +90,18 @@ export default function SettingsPage() {
           className="text-sm font-medium text-emerald-800 underline underline-offset-4"
         >
           Edit profile card →
+        </Link>
+      </section>
+      <section className="my-5 rounded-xl border border-slate-200 p-5">
+        <h2 className="text-base font-semibold text-[#183c30]">Team</h2>
+        <p className="my-2 text-sm leading-6 text-slate-500">
+          Manage workspace members and invites. v3.0 Phase 1 introduces multi-user workspaces with roles (owner/admin/member/viewer).
+        </p>
+        <Link
+          href="/settings/team"
+          className="text-sm font-medium text-emerald-800 underline underline-offset-4"
+        >
+          Manage team →
         </Link>
       </section>
       <p style={{ color: "#555" }}>

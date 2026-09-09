@@ -732,3 +732,143 @@ describe("content tracker migration (v2.5 phase 4)", () => {
     }
   });
 });
+
+describe("workspaces migration (v3.0 phase 1)", () => {
+  it("creates workspaces, members, invites tables and adds workspace_id to all data tables", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: folder });
+
+      const tables = sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('workspaces','workspace_members','workspace_invites')",
+        )
+        .all()
+        .map((r) => (r as { name: string }).name)
+        .sort();
+      expect(tables).toEqual(["workspace_invites", "workspace_members", "workspaces"]);
+
+      // Bootstrap workspace exists
+      const ws = sqlite.prepare("SELECT id, slug FROM workspaces WHERE id = 'default'").get() as
+        | { id: string; slug: string }
+        | undefined;
+      expect(ws).toEqual({ id: "default", slug: "default" });
+
+      // Every data table has workspace_id
+      const dataTables = [
+        "contacts",
+        "interactions",
+        "edges",
+        "events",
+        "event_attendees",
+        "content_items",
+        "content_metrics",
+        "content_mentions",
+        "enrichments",
+        "campaigns",
+        "campaign_recipients",
+        "search_index",
+        "profile_views",
+        "follow_ups",
+        "activity_log",
+        "profile_cards",
+      ];
+      for (const table of dataTables) {
+        const cols = sqlite
+          .prepare(`PRAGMA table_info(${table})`)
+          .all()
+          .map((r) => (r as { name: string }).name);
+        expect(cols).toContain("workspace_id");
+      }
+
+      // Composite indexes exist
+      const idxNames = sqlite
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%workspace%'")
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(idxNames).toEqual(
+        expect.arrayContaining([
+          "idx_contacts_workspace",
+          "idx_contacts_workspace_updated",
+          "idx_interactions_workspace",
+          "idx_profile_views_workspace_time",
+          "idx_followups_workspace_status_due",
+          "idx_activity_log_workspace_time",
+        ]),
+      );
+
+      // Unique constraints
+      const uniqueIdx = sqlite
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE '%unique%'")
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(uniqueIdx).toEqual(
+        expect.arrayContaining([
+          "workspaces_slug_unique",
+          "workspace_members_workspace_user_unique",
+          "workspace_invites_token_unique",
+        ]),
+      );
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("upgrades a pre-0008 database in place, backfilling workspace_id, and is idempotent", () => {
+    const temporary = mkdtempSync(join(tmpdir(), "netpro-migration-0008-"));
+    const sqlite = new Database(":memory:");
+    try {
+      const journal = JSON.parse(
+        readFileSync(join(folder, "meta/_journal.json"), "utf8"),
+      ) as { entries: Array<{ idx: number; tag: string }> };
+      const upTo0007 = journal.entries.filter((e) => e.idx < 8);
+      expect(upTo0007.map((e) => e.idx)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+      mkdirSync(join(temporary, "meta"));
+      writeFileSync(
+        join(temporary, "meta/_journal.json"),
+        JSON.stringify({ ...journal, entries: upTo0007 }),
+      );
+      for (const entry of upTo0007) {
+        copyFileSync(
+          join(folder, `${entry.tag}.sql`),
+          join(temporary, `${entry.tag}.sql`),
+        );
+      }
+
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: temporary });
+      expect(
+        sqlite
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspaces'")
+          .all(),
+      ).toEqual([]);
+      sqlite
+        .prepare(
+          "INSERT INTO contacts (id, full_name, source, created_at, updated_at) VALUES (?,?,?,?,?)",
+        )
+        .run("legacy", "Ada Lovelace", "test", "n", "n");
+
+      migrate(db, { migrationsFolder: folder });
+
+      // Legacy contact backfilled to default workspace
+      expect(sqlite.prepare("SELECT workspace_id FROM contacts WHERE id = 'legacy'").get()).toEqual({
+        workspace_id: "default",
+      });
+      expect(
+        sqlite.prepare("SELECT count(*) AS n FROM __drizzle_migrations").get(),
+      ).toEqual({ n: journal.entries.length });
+
+      // Re-running is idempotent
+      migrate(db, { migrationsFolder: folder });
+      expect(
+        sqlite
+          .prepare("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'workspaces'")
+          .get(),
+      ).toEqual({ n: 1 });
+    } finally {
+      sqlite.close();
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  });
+});

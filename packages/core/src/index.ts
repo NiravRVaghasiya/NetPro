@@ -21,3 +21,5 @@ export * as content from './content';
 // and `content_metrics` (365 d, latest per item kept), at most one run per
 // 24 h, audited in `activity_log`.
 export * as retention from './retention';
+// v3.0 Phase 1 — workspaces data model & multi-user auth.
+export * as workspaces from './workspaces';
