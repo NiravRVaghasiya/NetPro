@@ -159,6 +159,34 @@ describe("GET /api/analytics", () => {
     expect(slimBody.graph).toBeDefined();
   });
 
+  it("includes the content overview by default, omitted with ?content=0 (v2.5 phase 6)", async () => {
+    const { upsertContentItem } = await import("@netpro/core/src/content");
+    await upsertContentItem(
+      fixture.conn,
+      { url: "https://example.dev/blog/api", title: "API post", platform: "blog" },
+      { now: new Date("2026-09-06T12:00:00.000Z") },
+    );
+    try {
+      const res = await get("/api/analytics");
+      const body = (await res.json()) as {
+        content?: { days: number | null; items: number; top: unknown[] };
+        views: unknown;
+      };
+      expect(body.content).toMatchObject({ days: null, items: 1 });
+      expect(body.views).toBeDefined(); // other sections untouched
+
+      const slim = await get("/api/analytics?content=0");
+      const slimBody = (await slim.json()) as { content?: unknown; views: unknown };
+      expect(slimBody.content).toBeUndefined();
+      expect(slimBody.views).toBeDefined();
+    } finally {
+      fixture.sqlite
+        .exec(
+          "DELETE FROM content_mentions; DELETE FROM content_metrics; DELETE FROM content_items;",
+        );
+    }
+  });
+
   it("accepts the dormancy window via ?days=", async () => {
     const res = await get("/api/analytics?days=150");
     const body = (await res.json()) as {

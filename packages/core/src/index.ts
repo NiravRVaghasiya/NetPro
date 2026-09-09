@@ -17,3 +17,7 @@ export * as views from './views';
 // v2.5 Phase 4 — content cross-posting tracker: data model, URL identity,
 // CSV/feed import, metrics snapshots, mentions, provider interface.
 export * as content from './content';
+// v2.5 Phase 6 — the daily retention purge: bounds `profile_views` (90 d)
+// and `content_metrics` (365 d, latest per item kept), at most one run per
+// 24 h, audited in `activity_log`.
+export * as retention from './retention';

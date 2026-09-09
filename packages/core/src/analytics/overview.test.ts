@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestSqliteConn } from '@netpro/db/src/testing';
 import { addEdge } from '../graph/edges';
+import { recordMetrics, upsertContentItem } from '../content/repository';
 import { getNetworkOverview } from './overview';
 
 const fixture = createTestSqliteConn();
@@ -131,5 +132,42 @@ describe('getNetworkOverview.views (v2.5 Phase 3)', () => {
     expect(o.views!.stats.series).toHaveLength(7);
     expect(o.views!.recent.limit).toBe(3);
     expect(o.metrics.totalContacts).toBe(3);
+  });
+});
+
+describe('getNetworkOverview.content (v2.5 Phase 6)', () => {
+  function cleanContent(): void {
+    fixture.sqlite.exec(
+      'DELETE FROM content_mentions; DELETE FROM content_metrics; DELETE FROM content_items;'
+    );
+  }
+
+  it('includes the all-time content overview by default, sharing the overview clock', async () => {
+    cleanContent();
+    const { item } = await upsertContentItem(
+      fixture.conn,
+      { url: 'https://example.dev/blog/one', title: 'First post', platform: 'blog' },
+      { now: NOW },
+    );
+    await recordMetrics(fixture.conn, { contentId: item.id, views: 42 }, { now: NOW });
+    try {
+      const o = await getNetworkOverview(fixture.conn, { now: NOW });
+      expect(o.content).toMatchObject({ days: null, items: 1, withMetrics: 1, totalViews: 42 });
+      expect(o.content!.top).toHaveLength(1);
+      expect(o.views).toBeDefined(); // other sections untouched
+    } finally {
+      cleanContent();
+    }
+  });
+
+  it('is omitted with includeContent: false (cheap overview for API clients)', async () => {
+    const o = await getNetworkOverview(fixture.conn, { now: NOW, includeContent: false });
+    expect(o.content).toBeUndefined();
+    expect(o.views).toBeDefined();
+  });
+
+  it('reports an empty (but present) overview when nothing is tracked', async () => {
+    const o = await getNetworkOverview(fixture.conn, { now: NOW });
+    expect(o.content).toMatchObject({ items: 0, withMetrics: 0, top: [], byPlatform: [] });
   });
 });

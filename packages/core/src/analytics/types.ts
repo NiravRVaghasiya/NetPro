@@ -8,6 +8,7 @@
 // deterministic without frozen timers.
 import type { GraphAnalysisOptions } from "../graph/analysis";
 import type { NetworkGraph } from "../graph/network";
+import type { ContentOverview } from "../content/repository";
 import type { ViewsOverview, ViewsOverviewOptions } from "../views/analytics";
 
 /** Options accepted by every analytics function. All fields optional. */
@@ -34,6 +35,12 @@ export interface AnalyticsOptions {
   includeViews?: boolean;
   /** Window forwarded to the viewer analytics (days/limit, default 30/5). */
   views?: ViewsOverviewOptions;
+  /**
+   * Include the v2.5 content-tracker section (`ContentOverview`, all-time)
+   * in the overview. Default true; the dashboard relies on it, `?content=0`
+   * opts out to keep the payload small (v2.5 Phase 6).
+   */
+  includeContent?: boolean;
   /**
    * Injected clock for deterministic behavior/tests. Defaults to `new Date()`.
    * All window math uses UTC.
@@ -198,5 +205,13 @@ export interface NetworkOverview {
    * `getViewsOverview` directly for its wider window controls.
    */
   views?: ViewsOverview;
+  /**
+   * v2.5 content-tracker overview (all-time totals, top pieces by
+   * latest-known views, platform breakdown) — present unless
+   * `includeContent: false` (v2.5 Phase 6 folded it into the shared
+   * payload so the dashboard's "Content" strip reads the same source as
+   * `GET /api/analytics`).
+   */
+  content?: ContentOverview;
   generatedAt: string;
 }

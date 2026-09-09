@@ -175,11 +175,14 @@ describe('/dashboard Profile views (v2.5 phase 3)', () => {
   });
 });
 
-describe('/dashboard Content strip (v2.5 Phase 5)', () => {
-  it('renders nothing until content is tracked', async () => {
+describe('/dashboard Content strip (v2.5 Phase 5 + 6)', () => {
+  it('shows the "Add your first content" onboarding step until content is tracked', async () => {
     insertContacts();
     const html = await render();
-    expect(html).not.toContain('<h2>Content</h2>');
+    expect(html).toContain('<h2>Content</h2>');
+    expect(html).toContain('No content tracked yet');
+    expect(html).toContain('Add your first content');
+    expect(html).toContain('href="/content"');
     expect(html).not.toContain('latest-known views');
   });
 

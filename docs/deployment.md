@@ -369,11 +369,63 @@ it with `netpro card --views` and `netpro analyze --views`.
   travel in every payload — "0 views" never silently hides filtered rows.
 - **The window caps at 90 days**, the raw-view retention bound; wider
   requests clamp (web) or fail validation (CLI/core) rather than
-  under-reporting purged history. (The daily purge job itself lands in
-  Phase 6; until then, old rows simply age past every queryable window.)
+  under-reporting purged history. The daily purge job that enforces the
+  bound runs in the web process — see [Data retention](#data-retention-v25-phase-6).
 - Measured: **~23 ms for the full stats payload at 10k views on SQLite**
   (plan budget: 100 ms). No new indexes were needed — Phase 1's five
   `profile_views` indexes cover the analytics queries.
+
+### Content tracker (v2.5 Phases 4–5)
+
+The cross-posting tracker (`/content`, `netpro content`, `GET /api/content`)
+needs no configuration to use: `manual` and `rss` are built in, and nothing
+makes a network call you did not trigger.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `DEVTO_API_KEY` | *(unset)* | **Reserved** — the `devto` provider ships as a disabled stub in v2.5; setting the key changes nothing until a provider implementation lands. |
+| `TWITTER_BEARER_TOKEN` | *(unset)* | **Reserved** — same as above for `twitter`. |
+| `GITHUB_TOKEN` | *(unset)* | **Reserved** — same as above for `github`. |
+
+When a provider is disabled, `netpro content fetch` and the web's fetch path
+explain exactly which key would enable it (`not_configured`) — they never
+fail cryptically, and no provider polls or sweeps in the background:
+`fetchMetrics` is always an explicit, per-item call.
+
+### Data retention (v2.5 Phase 6)
+
+Two bounded tables are purged by a daily job that runs in the **web
+process** — in-memory, no queue, no new migration:
+
+| Table | Window | Rule |
+| --- | --- | --- |
+| `profile_views` | 90 days | Raw rows older than the window are deleted. Aggregated analytics (Phase 3) are what live longer. |
+| `content_metrics` | 365 days | Snapshots older than the window are deleted, **but the latest snapshot per content item always survives**, even when it is older than the window. |
+
+How the cadence works: each run stamps one `activity_log` row
+(`action = 'retention.purge'`, deleted counts in its metadata — never one
+row per deleted row). The job reads that row before acting and skips when a
+purge ran within the last 24 h. So:
+
+- a **Docker instance** purges at boot and then on a 24 h timer;
+- a **serverless deploy**'s cold starts all re-check the audit log and
+  collapse into one purge per day;
+- concurrent cold starts that both see "due" in the same second both delete
+  (idempotent — the second removes nothing) and both log. A duplicate costs
+  one extra zero-count row; correctness never depends on the race.
+
+The schedule starts in `instrumentation.ts` after the startup migrations and
+is independent of `NETPRO_AUTO_MIGRATE` (it is DML, not DDL). A purge
+failure is logged and swallowed — it never affects request paths.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `NETPRO_DISABLE_RETENTION` | *(unset)* | `true` → the schedule never starts; nothing is purged. |
+| `NETPRO_VIEW_RETENTION_DAYS` | `90` | Raw-view window. Positive integers only; garbage/zero/negative values fall back to the default (a typo must not widen the window to "delete everything"). |
+| `NETPRO_CONTENT_METRIC_RETENTION_DAYS` | `365` | Content-snapshot window; same lenient parsing. |
+
+The Settings → Card tracking panel shows the effective windows, so the UI
+and the job can never promise different horizons.
 
 ### Security headers
 

@@ -86,6 +86,24 @@ describe("profile view tracking panel (v2.5 phase 2)", () => {
     expect(html).toContain("Never stored");
     expect(html).toContain("raw IP addresses");
     expect(html).toContain("90 days");
+    // v2.5 Phase 6 — the retention windows document the same horizons the
+    // daily purge job honours.
+    expect(html).toContain("daily job enforces the window");
+    expect(html).toContain("365 days");
+    expect(html).toContain("latest snapshot");
+  });
+
+  it("reflects custom retention windows from the environment (v2.5 phase 6)", async () => {
+    process.env.NETPRO_VIEW_RETENTION_DAYS = "30";
+    process.env.NETPRO_CONTENT_METRIC_RETENTION_DAYS = "180";
+    try {
+      const html = renderToStaticMarkup(await CardSettingsPage());
+      expect(html).toContain("Stored (30 days, then purged)");
+      expect(html).toContain("kept for 180 days");
+    } finally {
+      delete process.env.NETPRO_VIEW_RETENTION_DAYS;
+      delete process.env.NETPRO_CONTENT_METRIC_RETENTION_DAYS;
+    }
   });
 
   it("shows the disabled state when NETPRO_DISABLE_VIEWS is set", async () => {
