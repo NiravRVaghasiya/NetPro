@@ -99,9 +99,9 @@
 
 The full monorepo (CLI + web, dual-dialect Drizzle database, GitHub OAuth via
 Auth.js) builds, lints, typechecks, and tests successfully — **1546 tests**,
-plus 48 more in live PostgreSQL suites that run in CI against a real database
+plus 54 more in live PostgreSQL suites that run in CI against a real database
 (including a performance pass at 5k contacts / 20k edges / 10k views / 1k
-content items). **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
+content items, and the view-beacon ingest suite). **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
 reminders, and batch campaigns are implemented, and per-contact relationship
 scoring now has a producer (interaction logging). **v2.0 — "The Strategist" is
 complete** — shipped as `v2.0.0` on 2026-09-08 (see the [v2.0 implementation

@@ -106,6 +106,15 @@ jobs:
       - name: Run core content integration tests against PostgreSQL
         run: npm run test -w @netpro/core -- src/content/postgres.integration.test.ts
 
+      # v2.5 Phase 7: the view-beacon ingest path against a real server. The
+      # dedup probe's nullable parameters are only used inside IS NOT NULL,
+      # which Postgres cannot type — the Docker smoke caught the resulting
+      # 500 at the release gate after every hermetic test had passed on
+      # SQLite. This suite runs recordView (dedup, privacy, owner/bot
+      # labeling, token resolution) on live Postgres so that can't regress.
+      - name: Run core views integration tests against PostgreSQL
+        run: npm run test -w @netpro/core -- src/views/postgres.integration.test.ts
+
       # v2.0 Phase 7: the release-cut performance pass, extended in v2.5
       # Phase 7. 5k contacts / 20k edges plus the Observer fixture — 10k
       # profile views, 1k content items, 5k metric snapshots — timing the

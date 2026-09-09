@@ -317,20 +317,24 @@ purge themselves on a documented schedule.
   (budget 100 ms). The pass also asserts correctness on the live planner —
   exact windowed view totals (bots and owner views excluded), distinct
   resolved contacts, zero-filled 30-day series, and `withMetrics` on the
-  content overview — because the views module previously had no dedicated
-  live-Postgres suite. Measured on PostgreSQL 18.4, medians of 3 runs;
+  content overview — because the views module had no dedicated
+  live-Postgres suite at Phase 6's end. Phase 7 then added one for the
+  *ingest* side too, after the Docker smoke caught the bug described under
+  **Fixed**. Measured on PostgreSQL 18.4, medians of 3 runs;
   recorded in the
   [Phase 7 progress doc](docs/superpowers/plans/2026-09-09-v2.5-phase7-release-progress.md)
   and `docs/deployment.md`. The Phase 6 hermetic SQLite budget test is
   unchanged and still runs in every `npm test`.
-- **CI's Docker smoke covers the new boundary.** The owner-only routes added
-  since v2.0 (`/api/analytics`, `/api/card/views`, `/api/content` and its
-  sub-routes) must answer 401 in a real production build, while the public
-  beacons must behave like public surfaces: `GET /api/card/pixel.gif`
-  answers 200 with `Cache-Control: no-store` and
+- **CI's Docker smoke covers the new boundary — and caught a real bug.** The
+  owner-only routes added since v2.0 (`/api/analytics`, `/api/card/views`,
+  `/api/content` and its sub-routes) must answer 401 in a real production
+  build, while the public beacons must behave like public surfaces:
+  `GET /api/card/pixel.gif` answers 200 with `Cache-Control: no-store` and
   `X-Content-Type-Options: nosniff` and never sets a cookie;
   `POST /api/card/view` accepts a minimal beacon (200) and its CORS
-  preflight answers 204 — in the image, not only in unit tests.
+  preflight answers 204 — in the image, not only in unit tests. The beacon
+  check failed on its first run, exposing the Postgres ingest bug fixed
+  under **Fixed** below.
 
 ### Changed — v2.5
 
@@ -344,6 +348,24 @@ purge themselves on a documented schedule.
   the v2.0 graph numbers, so the two release gates are readable in one
   place; the settings tracking panel already promised the same retention
   horizons the purge job enforces (Phase 6).
+
+### Fixed — v2.5
+
+- **Beacon ingestion failed on every PostgreSQL deployment** (`v2.5 Phase 7`
+  fix, found by the new Docker smoke at the release gate). The dedup probe in
+  `recordView` used its nullable parameters only inside `IS NOT NULL`, from
+  which Postgres cannot infer a parameter type — the query failed
+  server-side ("could not determine data type of parameter $2") on every
+  ingest, so `POST /api/card/view` answered 500 and the pixel silently
+  dropped its write behind its always-200 contract. SQLite does not
+  type-check bind parameters, so every hermetic test passed; the fix is an
+  ANSI `CAST(… AS text)` around each nullable parameter, a semantic no-op
+  that gives the planner a type. A new live-Postgres suite
+  (`packages/core/src/views/postgres.integration.test.ts`, wired into CI's
+  postgres job) runs the whole ingest path against a real server — dedup
+  windows, DNT-minimal rows, owner/bot labeling, signed-token resolution,
+  and the analytics totals over exactly those rows — so the ingest SQL can
+  never again be dialect-verified on SQLite alone.
 
 ### Deferred — v2.5 deliberately does not ship
 
