@@ -99,7 +99,7 @@
 
 The full monorepo (CLI + web, dual-dialect Drizzle database, GitHub OAuth via
 Auth.js) builds, lints, typechecks, and tests successfully — **1546 tests**,
-plus 54 more in live PostgreSQL suites that run in CI against a real database
+plus 56 more in live PostgreSQL suites that run in CI against a real database
 (including a performance pass at 5k contacts / 20k edges / 10k views / 1k
 content items, and the view-beacon ingest suite). **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
 reminders, and batch campaigns are implemented, and per-contact relationship
