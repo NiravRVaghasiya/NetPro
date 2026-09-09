@@ -414,6 +414,8 @@ export const followUps = pgTable('follow_ups', {
   workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
   // v3.0 Phase 2 — authorship: who created this follow-up.
   createdByUser: text('created_by_user'),
+  // v3.0 Phase 3 — assignment: who this follow-up is assigned to (null = anyone).
+  assignedTo: text('assigned_to'),
   contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
 
   reason: text('reason'),
@@ -434,6 +436,14 @@ export const followUps = pgTable('follow_ups', {
   workspaceIdx: index('idx_followups_workspace').on(t.workspaceId),
   workspaceStatusDueIdx: index('idx_followups_workspace_status_due').on(t.workspaceId, t.status, t.dueAt),
   authorIdx: index('idx_followups_author').on(t.createdByUser),
+  assignedToIdx: index('idx_followups_assigned_to').on(t.assignedTo),
+  workspaceAssignedIdx: index('idx_followups_workspace_assigned').on(t.workspaceId, t.assignedTo),
+  workspaceStatusAssignedDueIdx: index('idx_followups_workspace_status_assigned_due').on(
+    t.workspaceId,
+    t.status,
+    t.assignedTo,
+    t.dueAt,
+  ),
 }));
 
 export const activityLog = pgTable('activity_log', {

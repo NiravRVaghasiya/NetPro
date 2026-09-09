@@ -161,6 +161,7 @@ export function AddFollowUpPanel({ contactId }: { contactId: string }) {
   const [days, setDays] = useState('7');
   const [reason, setReason] = useState('');
   const [recurrenceRule, setRecurrenceRule] = useState('');
+  const [assignedTo, setAssignedTo] = useState('');
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -174,9 +175,11 @@ export function AddFollowUpPanel({ contactId }: { contactId: string }) {
       dueInMs: Math.round(n * 24 * 60 * 60 * 1000),
       reason: reason || undefined,
       recurrenceRule: recurrenceRule || undefined,
+      assignedTo: assignedTo.trim() || undefined,
     });
     if (ok) {
       setReason('');
+      setAssignedTo('');
     }
   }
 
@@ -212,6 +215,11 @@ export function AddFollowUpPanel({ contactId }: { contactId: string }) {
           maxLength={500}
           onChange={(e) => setReason(e.target.value)}
         />
+        <input
+          placeholder="Assign to user id (optional) — blank = unassigned"
+          value={assignedTo}
+          onChange={(e) => setAssignedTo(e.target.value)}
+        />
         <div>
           <button type="submit" disabled={busy}>
             {busy ? 'Scheduling…' : 'Schedule follow-up'}
@@ -229,11 +237,12 @@ export function AddFollowUpPanel({ contactId }: { contactId: string }) {
 
 export function FollowUpActions({ followUpId }: { followUpId: string }) {
   const { error, busy, run } = useAction();
+  const [assignInput, setAssignInput] = useState('');
   const url = `/api/follow-ups/${encodeURIComponent(followUpId)}`;
   const DAY = 24 * 60 * 60 * 1000;
 
   return (
-    <span style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
+    <span style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
       <button type="button" disabled={busy} onClick={() => run(url, 'PATCH', { action: 'complete' })}>
         Complete
       </button>
@@ -253,6 +262,26 @@ export function FollowUpActions({ followUpId }: { followUpId: string }) {
       </button>
       <button type="button" disabled={busy} onClick={() => run(url, 'PATCH', { action: 'cancel' })}>
         Cancel
+      </button>
+      <input
+        placeholder="assign to"
+        value={assignInput}
+        onChange={(e) => setAssignInput(e.target.value)}
+        style={{ width: '8rem' }}
+      />
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => run(url, 'PATCH', { action: 'assign', assignedTo: assignInput.trim() || null })}
+      >
+        Assign
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => run(url, 'PATCH', { action: 'assign', assignedTo: null })}
+      >
+        Unassign
       </button>
       {error && (
         <span role="alert" style={{ color: '#b91c1c' }}>

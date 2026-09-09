@@ -111,7 +111,7 @@ function clampInt(
 
 /** Escape LIKE wildcards so a search for `100%` is not "anything". */
 function likeEscape(value: string): string {
-  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
+  return value.replace(/[!%_]/g, (c) => `!${c}`);
 }
 
 function likePattern(query: string): string {
@@ -330,7 +330,7 @@ function buildItemFilters(
     // (`"js"`) through lower() so SQLite's case-insensitive LIKE and
     // Postgres' case-sensitive LIKE answer identically.
     parts.push(
-      sql`lower(i.tags) LIKE ${`%"${likeEscape(tag.slice(0, CONTENT_LIMITS.tagLength))}"%`} ESCAPE '\\'`,
+      sql`lower(i.tags) LIKE ${`%"${likeEscape(tag.slice(0, CONTENT_LIMITS.tagLength))}"%`} ESCAPE '!'`,
     );
   }
   if (opts.days !== undefined) {
@@ -350,7 +350,7 @@ function buildItemFilters(
   if (q) {
     const pattern = likePattern(q);
     parts.push(
-      sql`(lower(i.title) LIKE ${pattern} ESCAPE '\\' OR lower(i.url) LIKE ${pattern} ESCAPE '\\' OR lower(i.author) LIKE ${pattern} ESCAPE '\\')`,
+      sql`(lower(i.title) LIKE ${pattern} ESCAPE '!' OR lower(i.url) LIKE ${pattern} ESCAPE '!' OR lower(i.author) LIKE ${pattern} ESCAPE '!')`,
     );
   }
   return {

@@ -2,8 +2,8 @@
 import { conn } from '@/lib/db';
 import { requireMembership } from '@/lib/authz';
 import { crmJson, crmErrorResponse } from '@/lib/crm-request';
-import { getWorkspaceMembers, addMember, removeMember, updateMemberRole } from '@netpro/core/src/workspaces';
-import { assertCanRemoveMember, assertCanChangeRole } from '@netpro/core/src/workspaces';
+import { getWorkspaceMembers, addMember, updateMemberRole } from '@netpro/core/src/workspaces';
+import { assertCanRemoveMember, assertCanChangeRole, removeMemberAndReassign } from '@netpro/core/src/workspaces';
 
 export async function GET(): Promise<Response> {
   try {
@@ -71,8 +71,12 @@ export async function DELETE(request: Request): Promise<Response> {
     // We don't have githubId -> userId mapping easily here, but we can check if target is last owner
     await assertCanRemoveMember(conn, ctx.workspaceId, userId, ctx.role);
 
-    await removeMember(conn, ctx.workspaceId, userId);
-    return crmJson({ ok: true });
+    const result = await removeMemberAndReassign(conn, ctx.workspaceId, userId, {
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      role: ctx.role,
+    });
+    return crmJson({ ok: true, reassigned: result.reassigned });
   } catch (error: unknown) {
     if ((error as any)?.status === 401) return crmJson({ error: 'Unauthorized' }, 401);
     if ((error as any)?.status === 403) return crmJson({ error: (error as Error).message }, 403);

@@ -7,9 +7,11 @@ import {
   createInvite,
   revokeInvite,
   addMember,
-  removeMember,
   updateMemberRole,
   listWorkspaces,
+  removeMemberAndReassign,
+  assertCanRemoveMember,
+  assertCanChangeRole,
 } from '@netpro/core/src/workspaces';
 
 function getConn() {
@@ -102,22 +104,30 @@ export function registerTeamCommand(program: Command): void {
 
   team
     .command('rm')
-    .description('Remove a member')
+    .description('Remove a member (reassigns their follow-ups to unassigned)')
     .argument('<userId>', 'User ID')
     .action(async (userId) => {
       const conn = getConn();
-      await removeMember(conn, 'default', userId);
-      console.log(`Removed ${userId}`);
+      // Admin check via bootstrap scope for CLI admin tool
+      const { bootstrapScope } = await import('@netpro/core/src/workspaces');
+      const scope = bootstrapScope();
+      // Enforce break-glass and last-owner rules
+      await assertCanRemoveMember(conn, 'default', userId, 'owner');
+      const result = await removeMemberAndReassign(conn, 'default', userId, scope);
+      console.log(`Removed ${userId} — ${result.reassigned} follow-ups unassigned.`);
     });
 
   team
     .command('role')
-    .description('Change member role')
+    .description('Change member role (owner role transfer requires owner)')
     .argument('<userId>', 'User ID')
     .argument('<role>', 'New role')
     .action(async (userId, role) => {
       const conn = getConn();
-      const member = await updateMemberRole(conn, 'default', userId, role);
+      const { bootstrapScope } = await import('@netpro/core/src/workspaces');
+      const scope = bootstrapScope();
+      await assertCanChangeRole(conn, 'default', userId, role as never, scope.role, scope.userId);
+      const member = await updateMemberRole(conn, 'default', userId, role as never);
       console.log(`Updated ${userId} to ${member.role}`);
     });
 }

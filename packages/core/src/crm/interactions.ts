@@ -429,6 +429,7 @@ export async function listInteractions(
         campaignId: i.campaignId,
         occurredAt: i.occurredAt,
         createdAt: i.createdAt,
+        createdByUser: i.createdByUser,
       })
       .from(i)
       .innerJoin(c, eq(i.contactId, c.id))
@@ -460,6 +461,7 @@ export async function listInteractions(
       campaignId: i.campaignId,
       occurredAt: i.occurredAt,
       createdAt: i.createdAt,
+      createdByUser: i.createdByUser,
     })
     .from(i)
     .innerJoin(c, eq(i.contactId, c.id))

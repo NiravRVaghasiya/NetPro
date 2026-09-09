@@ -45,11 +45,22 @@ export default async function ContactsPage({
   const offset = Number.isFinite(rawOffset)
     ? Math.max(0, Math.floor(rawOffset))
     : 0;
+  const assignedToMe = one(sp.assignedToMe) === "1";
+  const unassigned = one(sp.unassigned) === "1";
 
   const scope = await requireScope();
   const [page, followUps] = await Promise.all([
     listCrmContacts(conn, { limit: PAGE_SIZE, offset, sort }, scope),
-    listFollowUps(conn, { view: "pending", limit: 5 }, scope),
+    listFollowUps(
+      conn,
+      {
+        view: "pending",
+        limit: 5,
+        assignedToMe: assignedToMe ? scope.userId : undefined,
+        unassigned: unassigned ? true : undefined,
+      },
+      scope
+    ),
   ]);
   const now = new Date();
 
@@ -72,7 +83,15 @@ export default async function ContactsPage({
         upcoming{" "}
         <Link href="/api/export?format=csv" style={{ marginLeft: "0.75rem" }}>
           Export CSV
-        </Link>
+        </Link>{" "}
+        <span style={{ marginLeft: "0.75rem" }}>
+          Filters:{" "}
+          <Link href="/contacts">all</Link> ·{" "}
+          <Link href="/contacts?assignedToMe=1">assigned to me</Link> ·{" "}
+          <Link href="/contacts?unassigned=1">unassigned</Link>
+          {assignedToMe && <strong> (assigned to me)</strong>}
+          {unassigned && <strong> (unassigned)</strong>}
+        </span>
       </p>
 
       {page.total === 0 ? (

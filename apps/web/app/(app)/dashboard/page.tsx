@@ -447,10 +447,14 @@ export default async function DashboardPage() {
   // v2.5 Phase 6 — the "Content" strip reads `overview.content` (the
   // all-time overview folded into the shared payload) instead of a second
   // `getContentOverview` round-trip, so page and API can't disagree.
+  // v3.0 Phase 3 — also fetch assigned-to-me and unassigned slices for the
+  // team dashboard strip.
   const scope = await requireScope();
-  const [overview, followUps] = await Promise.all([
+  const [overview, followUps, myFollowUps, unassignedFollowUps] = await Promise.all([
     getNetworkOverview(conn, { scope }),
     listFollowUps(conn, { view: "pending", limit: 1 }, scope),
+    listFollowUps(conn, { view: "pending", limit: 5, assignedToMe: scope.userId }, scope),
+    listFollowUps(conn, { view: "pending", limit: 5, unassigned: true }, scope),
   ]);
   const m = overview.metrics;
   const g = overview.growth;
@@ -511,6 +515,45 @@ export default async function DashboardPage() {
           />
         </Link>
       </div>
+
+      <section style={{ marginTop: "1.5rem", display: "flex", gap: "2rem", flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 260px" }}>
+          <h2>Assigned to me ({myFollowUps.followUps.length})</h2>
+          {myFollowUps.followUps.length === 0 ? (
+            <p style={{ color: "#9ca3af" }}>Nothing assigned to you — pick up unassigned follow-ups or assign them.</p>
+          ) : (
+            <ul style={{ paddingLeft: "1.25rem", margin: "0.25rem 0" }}>
+              {myFollowUps.followUps.map((f) => (
+                <li key={f.id} style={{ marginBottom: "0.25rem" }}>
+                  <Link href={`/contacts/${f.contactId}`}>{f.contactName}</Link> — due {f.effectiveDueAt.slice(0, 10)}
+                  {f.reason ? ` · “${f.reason}”` : ""}
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link href="/contacts?assignedToMe=1" style={{ fontSize: "0.85rem" }}>
+            View all assigned to me →
+          </Link>
+        </div>
+        <div style={{ flex: "1 1 260px" }}>
+          <h2>Unassigned ({unassignedFollowUps.followUps.length})</h2>
+          {unassignedFollowUps.followUps.length === 0 ? (
+            <p style={{ color: "#9ca3af" }}>No unassigned follow-ups — everything has an owner.</p>
+          ) : (
+            <ul style={{ paddingLeft: "1.25rem", margin: "0.25rem 0" }}>
+              {unassignedFollowUps.followUps.map((f) => (
+                <li key={f.id} style={{ marginBottom: "0.25rem" }}>
+                  <Link href={`/contacts/${f.contactId}`}>{f.contactName}</Link> — due {f.effectiveDueAt.slice(0, 10)}
+                  {f.reason ? ` · “${f.reason}”` : ""}
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link href="/contacts?unassigned=1" style={{ fontSize: "0.85rem" }}>
+            View all unassigned →
+          </Link>
+        </div>
+      </section>
 
       <section style={{ marginTop: "1.5rem" }}>
         <h2>Growth</h2>

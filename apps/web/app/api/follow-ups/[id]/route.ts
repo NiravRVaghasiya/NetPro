@@ -1,6 +1,7 @@
 import { conn } from '@/lib/db';
 import { requireScope } from '@/lib/authz';
 import {
+  assignFollowUp,
   cancelFollowUp,
   completeFollowUp,
   getFollowUp,
@@ -33,9 +34,10 @@ export async function GET(
 
 /**
  * PATCH /api/follow-ups/[id]
- * Body: { action: "complete" | "snooze" | "cancel", untilIso?, forMs? }.
+ * Body: { action: "complete" | "snooze" | "cancel" | "assign", untilIso?, forMs?, assignedTo? }.
  * Completing a recurring follow-up re-arms the next occurrence (returned as
- * `next`); snoozing needs `untilIso` or `forMs`.
+ * `next`); snoozing needs `untilIso` or `forMs`; assign needs `assignedTo`
+ * (user id or null to unassign).
  */
 export async function PATCH(
   request: Request,
@@ -68,9 +70,14 @@ export async function PATCH(
         )
       );
     }
+    if (action === 'assign') {
+      const assignedTo =
+        body.assignedTo === null ? null : (body.assignedTo as string | undefined) ?? null;
+      return crmJson(await assignFollowUp(conn, id, assignedTo, {}, scope));
+    }
     throw new CrmRequestError(
       400,
-      `Unknown action "${action}". Expected "complete", "snooze", or "cancel".`
+      `Unknown action "${action}". Expected "complete", "snooze", "cancel", or "assign".`
     );
   } catch (error) {
     return crmErrorResponse(error);
