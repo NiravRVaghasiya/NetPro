@@ -6,21 +6,26 @@
 // owner confirms. Nothing here is free-text because analytics (Phase 2)
 // will group and weight on these values.
 
-export const MODULE_NAME = 'graph';
+export const MODULE_NAME = "graph";
 
 export const EDGE_RELATIONS = [
-  'mutual_network',
-  'colleague',
-  'met_at_event',
-  'mutual_intro',
-  'manual',
+  "mutual_network",
+  "colleague",
+  "met_at_event",
+  "mutual_intro",
+  "manual",
 ] as const;
 export type EdgeRelation = (typeof EDGE_RELATIONS)[number];
 
-export const EDGE_SOURCES = ['linkedin_csv', 'manual', 'event_import', 'skype_migrate'] as const;
+export const EDGE_SOURCES = [
+  "linkedin_csv",
+  "manual",
+  "event_import",
+  "skype_migrate",
+] as const;
 export type EdgeSource = (typeof EDGE_SOURCES)[number];
 
-export const EDGE_STATUSES = ['pending', 'confirmed', 'rejected'] as const;
+export const EDGE_STATUSES = ["pending", "confirmed", "rejected"] as const;
 export type EdgeStatus = (typeof EDGE_STATUSES)[number];
 
 export const GRAPH_LIMITS = {
@@ -30,19 +35,24 @@ export const GRAPH_LIMITS = {
   attendeeRole: 80,
 } as const;
 
-export type GraphErrorCode = 'invalid_input' | 'not_found' | 'conflict';
+export type GraphErrorCode = "invalid_input" | "not_found" | "conflict";
 
 export class GraphError extends Error {
   readonly code: GraphErrorCode;
   constructor(code: GraphErrorCode, message: string) {
     super(message);
-    this.name = 'GraphError';
+    this.name = "GraphError";
     this.code = code;
   }
 }
 
 export interface GraphOptions {
   now?: Date;
+  /**
+   * v3.0 Phase 2 — workspace scope for every graph read/write. Absent =
+   * bootstrap workspace (single-owner compatibility guarantee).
+   */
+  scope?: import("../workspaces/scope").WorkspaceScope;
 }
 
 export function resolveNow(opts: GraphOptions = {}): Date {
@@ -52,16 +62,19 @@ export function resolveNow(opts: GraphOptions = {}): Date {
 export function optionalText(
   value: unknown,
   max: number,
-  field: string
+  field: string,
 ): string | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
-  if (typeof value !== 'string') {
-    throw new GraphError('invalid_input', `"${field}" must be a string.`);
+  if (typeof value !== "string") {
+    throw new GraphError("invalid_input", `"${field}" must be a string.`);
   }
   const trimmed = value.trim();
   if (trimmed.length > max) {
-    throw new GraphError('invalid_input', `"${field}" must be ${max} characters or fewer.`);
+    throw new GraphError(
+      "invalid_input",
+      `"${field}" must be ${max} characters or fewer.`,
+    );
   }
-  return trimmed === '' ? null : trimmed;
+  return trimmed === "" ? null : trimmed;
 }

@@ -13,26 +13,32 @@
 // authenticating layer already resolved. There is no path for an external
 // request to inject a `workspaceId` that then widens a query.
 
-import { eq, type AnyColumn, type SQL } from 'drizzle-orm';
-import type { WorkspaceScope } from './types';
+import { eq, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import type { WorkspaceScope } from "./types";
 
-export type { WorkspaceScope } from './types';
+export type { WorkspaceScope } from "./types";
 
 /** The workspace a fresh install is migrated into; every bootstrap row lives here. */
-export const BOOTSTRAP_WORKSPACE_ID = 'default';
+export const BOOTSTRAP_WORKSPACE_ID = "default";
 /** Synthetic actor id used when a caller supplies no scope (single-owner path). */
-export const SYSTEM_USER_ID = 'system';
+export const SYSTEM_USER_ID = "system";
 
 /**
  * The scope an un-scoped caller resolves to. Keeps the v2.5 compatibility
  * guarantee: a single-workspace, single-member install behaves identically.
  */
 export function bootstrapScope(): WorkspaceScope {
-  return { workspaceId: BOOTSTRAP_WORKSPACE_ID, role: 'owner', userId: SYSTEM_USER_ID };
+  return {
+    workspaceId: BOOTSTRAP_WORKSPACE_ID,
+    role: "owner",
+    userId: SYSTEM_USER_ID,
+  };
 }
 
 /** Normalize an optional scope to a concrete one (default = bootstrap). */
-export function resolveScope(scope: WorkspaceScope | undefined): WorkspaceScope {
+export function resolveScope(
+  scope: WorkspaceScope | undefined,
+): WorkspaceScope {
   return scope ?? bootstrapScope();
 }
 
@@ -42,7 +48,21 @@ export function resolveScope(scope: WorkspaceScope | undefined): WorkspaceScope 
  */
 export function workspacePredicate(
   scope: WorkspaceScope | undefined,
-  workspaceColumn: AnyColumn
+  workspaceColumn: AnyColumn,
 ): SQL {
   return eq(workspaceColumn, resolveScope(scope).workspaceId);
+}
+
+/**
+ * Raw-SQL `workspace_id = ?` predicate for the modules that query with
+ * `sql` templates instead of the typed query builder (search arms, the
+ * indexer, the analytics/content/overview SQL). The column reference is a
+ * compile-time literal (never request input); only the workspace id is a
+ * bind parameter.
+ */
+export function workspaceSql(
+  scope: WorkspaceScope | undefined,
+  column = "workspace_id",
+): SQL {
+  return sql`${sql.raw(column)} = ${resolveScope(scope).workspaceId}`;
 }

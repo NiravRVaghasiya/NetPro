@@ -1,5 +1,6 @@
-import { providerEnvironment, providerStatusEnvironment } from '@/lib/vault';
+import { providerEnvironment, providerStatusEnvironment } from "@/lib/vault";
 import Link from "next/link";
+import { requireScope } from "@/lib/authz";
 import { conn } from "@/lib/db";
 import {
   isSearchMode,
@@ -74,7 +75,13 @@ export default async function SearchPage({
   // below reports what actually ran.
   const requestedMode = one(sp.mode);
   const mode = isSearchMode(requestedMode) ? requestedMode : undefined;
-  const embeddingEnv = mode === 'hybrid' ? await providerEnvironment(['embeddings.openai', 'outreach.openai']) : await providerStatusEnvironment(['embeddings.openai', 'outreach.openai']);
+  const embeddingEnv =
+    mode === "hybrid"
+      ? await providerEnvironment(["embeddings.openai", "outreach.openai"])
+      : await providerStatusEnvironment([
+          "embeddings.openai",
+          "outreach.openai",
+        ]);
   const semanticAvailable = semanticSearchAvailable(embeddingEnv);
 
   const options: SearchContactsOptions = {
@@ -91,10 +98,12 @@ export default async function SearchPage({
     mode,
   };
 
+  const scope = await requireScope();
   const results = await searchContacts(
     conn,
     options,
     mode === "hybrid" ? { embedder: searchEmbedder(embeddingEnv) } : {},
+    scope,
   );
   const activeSort = options.sort ?? "relevance";
 
@@ -110,12 +119,18 @@ export default async function SearchPage({
           defaultValue={options.query ?? ""}
           aria-label="Search contacts"
         />
-        <select name="mode" defaultValue={mode ?? "portable"} aria-label="Search engine">
+        <select
+          name="mode"
+          defaultValue={mode ?? "portable"}
+          aria-label="Search engine"
+        >
           <option value="portable">Exact match</option>
           <option value="keyword">Smart (full-text)</option>
           {/* Only offered when a key is configured: a toggle that silently
               does nothing is worse than no toggle. */}
-          {semanticAvailable ? <option value="hybrid">Smart + semantic</option> : null}
+          {semanticAvailable ? (
+            <option value="hybrid">Smart + semantic</option>
+          ) : null}
         </select>
         <button type="submit">Search</button>
       </form>
@@ -306,7 +321,9 @@ function EngineBadge({
     );
   }
   if (engine.truncated) {
-    notes.push("Showing the top candidates only — narrow the query to see more.");
+    notes.push(
+      "Showing the top candidates only — narrow the query to see more.",
+    );
   }
 
   return (

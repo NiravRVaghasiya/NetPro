@@ -98,7 +98,11 @@ describe("toSearchOptions", () => {
   });
 
   it("splits --skills into a trimmed list and drops an empty flag", () => {
-    expect(toSearchOptions({ skills: " python, k8s ;aws,, " }).skills).toEqual(["python", "k8s", "aws"]);
+    expect(toSearchOptions({ skills: " python, k8s ;aws,, " }).skills).toEqual([
+      "python",
+      "k8s",
+      "aws",
+    ]);
     expect(toSearchOptions({ skills: " , " }).skills).toBeUndefined();
     expect(toSearchOptions({}).skills).toBeUndefined();
   });
@@ -159,12 +163,17 @@ describe("toSearchOptions — mode selection", () => {
     expect(toSearchOptions({ semantic: true }).mode).toBe("hybrid");
   });
 
-  it.each(["portable", "keyword", "hybrid"] as const)("accepts --mode %s", (mode) => {
-    expect(toSearchOptions({ mode }).mode).toBe(mode);
-  });
+  it.each(["portable", "keyword", "hybrid"] as const)(
+    "accepts --mode %s",
+    (mode) => {
+      expect(toSearchOptions({ mode }).mode).toBe(mode);
+    },
+  );
 
   it("lets an explicit --mode win over --semantic", () => {
-    expect(toSearchOptions({ mode: "keyword", semantic: true }).mode).toBe("keyword");
+    expect(toSearchOptions({ mode: "keyword", semantic: true }).mode).toBe(
+      "keyword",
+    );
   });
 
   it("rejects an unknown --mode with the valid list", () => {
@@ -199,7 +208,10 @@ describe("engineLine", () => {
       engineLine({
         ...base,
         mode: "portable",
-        arms: { ...base.arms, keyword: { used: false, hits: 0, reason: "index_empty" } },
+        arms: {
+          ...base.arms,
+          keyword: { used: false, hits: 0, reason: "index_empty" },
+        },
       }),
     ).toContain("full-text off (index empty; run netpro reindex)");
   });
@@ -208,7 +220,10 @@ describe("engineLine", () => {
     expect(
       engineLine({
         ...base,
-        arms: { ...base.arms, keyword: { used: false, hits: 0, reason: "index_missing" } },
+        arms: {
+          ...base.arms,
+          keyword: { used: false, hits: 0, reason: "index_missing" },
+        },
       }),
     ).toContain("run netpro migrate");
   });
@@ -227,7 +242,9 @@ describe("engineLine", () => {
   });
 
   it("flags a capped candidate pool", () => {
-    expect(engineLine({ ...base, truncated: true })).toContain("candidate pool capped");
+    expect(engineLine({ ...base, truncated: true })).toContain(
+      "candidate pool capped",
+    );
   });
 });
 
@@ -241,11 +258,12 @@ describe("executeSearch — hybrid output", () => {
     migratedSqlite = created.sqlite;
     migratedSqlite
       .prepare(
-        `INSERT INTO contacts (id, full_name, email, company, role, notes, source, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO contacts (id, workspace_id, full_name, email, company, role, notes, source, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         "c1",
+        "default",
         "Jane Doe",
         "jane@stripe.com",
         "Stripe",
@@ -259,19 +277,30 @@ describe("executeSearch — hybrid output", () => {
   });
 
   it("appends the engine line for a keyword run", async () => {
-    const output = await executeSearch({ query: "stripe", mode: "keyword" }, migrated);
+    const output = await executeSearch(
+      { query: "stripe", mode: "keyword" },
+      migrated,
+    );
     expect(output).toContain("Jane Doe");
     expect(output).toContain("Engine: keyword — full-text 1, substring 1");
   });
 
   it("finds an indexed-notes match the portable engine cannot", async () => {
-    expect(await executeSearch({ query: "pycon" }, migrated)).toContain("No contacts match");
-    const output = await executeSearch({ query: "pycon", mode: "keyword" }, migrated);
+    expect(await executeSearch({ query: "pycon" }, migrated)).toContain(
+      "No contacts match",
+    );
+    const output = await executeSearch(
+      { query: "pycon", mode: "keyword" },
+      migrated,
+    );
     expect(output).toContain("Jane Doe");
   });
 
   it("still prints the engine line when nothing matched", async () => {
-    const output = await executeSearch({ query: "zzznope", mode: "keyword" }, migrated);
+    const output = await executeSearch(
+      { query: "zzznope", mode: "keyword" },
+      migrated,
+    );
     expect(output).toContain("No contacts match");
     expect(output).toContain("Engine:");
   });
@@ -291,7 +320,10 @@ describe("executeSearch — hybrid output", () => {
       migrated,
     );
     const parsed = JSON.parse(output);
-    expect(parsed.engine).toMatchObject({ mode: "keyword", requested: "keyword" });
+    expect(parsed.engine).toMatchObject({
+      mode: "keyword",
+      requested: "keyword",
+    });
     expect(parsed.engine.arms.keyword.used).toBe(true);
   });
 

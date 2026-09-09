@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import type { SqliteConn, PgConn } from "@netpro/db";
+import type { WorkspaceScope } from "@netpro/core/src/workspaces/scope";
 import {
   createEmbeddingProvider,
   resolveEmbeddingsConfig,
@@ -115,11 +116,14 @@ export async function executeReindex(
   options: ReindexCommandOptions,
   conn: SqliteConn | PgConn,
   deps: { config?: EmbeddingsConfig } = {},
+  scope?: WorkspaceScope,
 ): Promise<{ output: string; failed: boolean }> {
   if (options.status) {
-    const status = await searchIndexStatus(conn);
+    const status = await searchIndexStatus(conn, scope);
     return {
-      output: options.json ? JSON.stringify(status, null, 2) : formatStatus(status),
+      output: options.json
+        ? JSON.stringify(status, null, 2)
+        : formatStatus(status),
       failed: false,
     };
   }
@@ -140,12 +144,16 @@ export async function executeReindex(
     }
   }
 
-  const summary = await reindexSearchIndex(conn, {
-    embedder,
-    force: options.force,
-    limit,
-    contactIds: options.contact,
-  });
+  const summary = await reindexSearchIndex(
+    conn,
+    {
+      embedder,
+      force: options.force,
+      limit,
+      contactIds: options.contact,
+    },
+    scope,
+  );
 
   return {
     output: options.json
@@ -159,24 +167,26 @@ export async function executeReindex(
 }
 
 export function registerReindexCommand(program: Command): void {
-  program
+  const cmd = program
     .command("reindex")
     .description(
       "Rebuild the full-text search index (and optionally embeddings) for hybrid search",
     )
-    .option("--embeddings", "Also compute embeddings (requires a configured key)")
+    .option(
+      "--embeddings",
+      "Also compute embeddings (requires a configured key)",
+    )
     .option("--force", "Rewrite every row, even unchanged ones")
     .option("--limit <n>", "Process at most N contacts")
-    .option(
-      "--contact <id...>",
-      "Only reindex these contact ids (repeatable)",
-    )
+    .option("--contact <id...>", "Only reindex these contact ids (repeatable)")
     .option("--status", "Show index coverage instead of rebuilding")
     .option("--json", "Print raw JSON instead of a summary")
     .action(async (opts: ReindexCommandOptions) => {
-      const { openDb } = await import("../db");
+      const { openDb, resolveCliScope } = await import("../db");
       try {
-        const { output, failed } = await executeReindex(opts, await openDb());
+        const conn = await openDb();
+        const scope = await resolveCliScope(cmd, conn);
+        const { output, failed } = await executeReindex(opts, conn, {}, scope);
         console.log(output);
         if (failed) process.exitCode = 1;
       } catch (e) {

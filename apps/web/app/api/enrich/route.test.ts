@@ -1,11 +1,22 @@
-vi.mock('@/lib/authz', () => ({ requireMembership: async () => ({ workspaceId: 'default', userId: 'test-user', role: 'member' }) }));
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import * as schema from '@netpro/db/src/schema.sqlite';
+vi.mock("@/lib/authz", () => ({
+  requireMembership: async () => ({
+    workspaceId: "default",
+    userId: "test-user",
+    role: "member",
+  }),
+  requireScope: async () => ({
+    workspaceId: "default",
+    userId: "test-user",
+    role: "member",
+  }),
+}));
+import { describe, it, expect, vi, afterEach } from "vitest";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import * as schema from "@netpro/db/src/schema.sqlite";
 
-vi.mock('@/lib/db', () => {
-  const sqlite = new Database(':memory:');
+vi.mock("@/lib/db", () => {
+  const sqlite = new Database(":memory:");
   const db = drizzle(sqlite, { schema });
   sqlite.exec(`
     CREATE TABLE contacts (
@@ -25,36 +36,46 @@ vi.mock('@/lib/db', () => {
       workspace_id TEXT DEFAULT 'default'
     );
   `);
-  db.insert(schema.contacts).values({
-    id: 'contact-1', fullName: 'Jane Doe', company: 'Stripe', source: 'linkedin_csv',
-    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-  }).run();
-  return { conn: { dialect: 'sqlite', db, schema } };
+  db.insert(schema.contacts)
+    .values({
+      id: "contact-1",
+      fullName: "Jane Doe",
+      company: "Stripe",
+      source: "linkedin_csv",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+    .run();
+  return { conn: { dialect: "sqlite", db, schema } };
 });
 
-const { POST } = await import('./route');
+const { POST } = await import("./route");
 
-describe('POST /api/enrich', () => {
+describe("POST /api/enrich", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it('reports zero enrichments when no provider env vars are set', async () => {
-    const response = await POST(new Request('http://localhost/api/enrich', {
-      method: 'POST',
-      body: JSON.stringify({ all: true }),
-    }));
+  it("reports zero enrichments when no provider env vars are set", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/enrich", {
+        method: "POST",
+        body: JSON.stringify({ all: true }),
+      }),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body.enriched).toBe(0);
   });
 
-  it('returns 400 when neither contactId nor all is provided', async () => {
-    const response = await POST(new Request('http://localhost/api/enrich', {
-      method: 'POST',
-      body: JSON.stringify({}),
-    }));
+  it("returns 400 when neither contactId nor all is provided", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/enrich", {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    );
     expect(response.status).toBe(400);
   });
 });

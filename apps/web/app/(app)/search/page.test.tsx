@@ -1,4 +1,15 @@
-vi.mock('@/lib/authz', () => ({ requireMembership: async () => ({ workspaceId: 'default', userId: 'test-user', role: 'member' }) }));
+vi.mock("@/lib/authz", () => ({
+  requireMembership: async () => ({
+    workspaceId: "default",
+    userId: "test-user",
+    role: "member",
+  }),
+  requireScope: async () => ({
+    workspaceId: "default",
+    userId: "test-user",
+    role: "owner",
+  }),
+}));
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -21,9 +32,7 @@ import { reindexSearchIndex } from "@netpro/core/src/search";
 
 const NOW = new Date("2026-09-07T12:00:00Z").toISOString();
 
-async function render(
-  params: Record<string, string> = {},
-): Promise<string> {
+async function render(params: Record<string, string> = {}): Promise<string> {
   const element = await SearchPage({ searchParams: Promise.resolve(params) });
   return renderToStaticMarkup(element as unknown as React.ReactElement);
 }
@@ -104,7 +113,9 @@ describe("/search page — engine badge", () => {
 
   it("surfaces an indexed-notes match that exact search misses", async () => {
     await reindexSearchIndex(fixture.conn);
-    expect(await render({ q: "pycon" })).toContain("No contacts match your search.");
+    expect(await render({ q: "pycon" })).toContain(
+      "No contacts match your search.",
+    );
     const html = await render({ q: "pycon", mode: "keyword" });
     expect(html).toContain("Jane Doe");
   });

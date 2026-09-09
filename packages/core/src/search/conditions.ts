@@ -10,9 +10,10 @@
 // duplication the import/enrichment pipelines have to do for their typed
 // query-builder calls. The only dialect-specific input is the set of column
 // references passed in.
-import { and, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, eq, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import type { SearchSort } from "./types";
 import { canonicalSkill } from "../skills/taxonomy";
+import { resolveScope, type WorkspaceScope } from "../workspaces/scope";
 
 /** Structural view of the contacts columns the search touches. */
 export interface ContactsColumns {
@@ -29,6 +30,8 @@ export interface ContactsColumns {
   deletedAt: AnyColumn;
   /** Derived skills verdict (JSON array text) — v2.0 Phase 5. */
   skills: AnyColumn;
+  /** Tenancy column (v3.0 Phase 2) — every search query is scoped through it. */
+  workspaceId: AnyColumn;
 }
 
 export interface PreparedTermFilters {
@@ -67,8 +70,15 @@ export function buildSearchConditions(
     skills?: string[];
   },
   filters: PreparedTermFilters,
+  scope?: WorkspaceScope,
 ): SQL | undefined {
-  const conds: SQL[] = [sql`${c.deletedAt} IS NULL`];
+  // v3.0 Phase 2 — tenancy is a condition like any other here so that the
+  // portable engine, the keyword/semantic arms (whose filter fragment is
+  // built by this function), pages, and facets all inherit it.
+  const conds: SQL[] = [
+    sql`${c.deletedAt} IS NULL`,
+    eq(c.workspaceId, resolveScope(scope).workspaceId),
+  ];
 
   // Free-text: every term must match (case-insensitive substring) in at least
   // one searchable column — AND across terms, OR across columns per term.
@@ -115,7 +125,9 @@ export function buildSearchConditions(
       conds.push(sql`1 = 0`);
       break;
     }
-    conds.push(sql`${c.skills} IS NOT NULL AND ${c.skills} LIKE ${"%\"" + skill + "\"%"}`);
+    conds.push(
+      sql`${c.skills} IS NOT NULL AND ${c.skills} LIKE ${'%"' + skill + '"%'}`,
+    );
   }
 
   return and(...conds) ?? undefined;

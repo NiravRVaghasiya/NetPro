@@ -29,8 +29,15 @@ import { sql } from "drizzle-orm";
 import type { SqliteConn, PgConn } from "@netpro/db";
 import { writeActivityLog } from "./crm/activity";
 import { rawAll } from "./search/indexer";
-import { CONTENT_METRIC_RETENTION_DAYS, purgeExpiredContentMetrics } from "./content/retention";
-import { VIEW_RETENTION_DAYS, purgeExpiredProfileViews } from "./views/retention";
+import { workspaceSql, type WorkspaceScope } from "./workspaces/scope";
+import {
+  CONTENT_METRIC_RETENTION_DAYS,
+  purgeExpiredContentMetrics,
+} from "./content/retention";
+import {
+  VIEW_RETENTION_DAYS,
+  purgeExpiredProfileViews,
+} from "./views/retention";
 
 type Conn = SqliteConn | PgConn;
 
@@ -51,6 +58,12 @@ export interface RunRetentionPurgeOptions {
   minIntervalMs?: number;
   /** Ignore the "last run" guard (manual re-runs, tests). */
   force?: boolean;
+  /**
+   * v3.0 Phase 2 — the workspace to purge. The purge is per-workspace end
+   * to end (guard read, deletes, audit row); absent = bootstrap workspace.
+   * A system scheduler sweeping every tenant calls this once per workspace.
+   */
+  scope?: WorkspaceScope;
 }
 
 export interface RetentionPurgeResult {
@@ -66,11 +79,15 @@ export interface RetentionPurgeResult {
   contentMetricRetentionDays: number;
 }
 
-async function lastPurgeAt(conn: Conn): Promise<string | null> {
+async function lastPurgeAt(
+  conn: Conn,
+  scope?: WorkspaceScope,
+): Promise<string | null> {
   const rows = await rawAll<{ created_at: string }>(
     conn,
     sql`SELECT created_at FROM activity_log
         WHERE action = ${RETENTION_PURGE_ACTION}
+          AND ${workspaceSql(scope, "activity_log.workspace_id")}
         ORDER BY created_at DESC
         LIMIT 1`,
   );
@@ -111,7 +128,7 @@ export async function runRetentionPurge(
     contentMetricRetentionDays,
   };
 
-  const lastRunAt = await lastPurgeAt(conn);
+  const lastRunAt = await lastPurgeAt(conn, options.scope);
   base.lastRunAt = lastRunAt;
   if (!options.force && minIntervalMs > 0 && lastRunAt !== null) {
     const last = Date.parse(lastRunAt);
@@ -121,21 +138,33 @@ export async function runRetentionPurge(
   }
 
   const [views, metrics] = await Promise.all([
-    purgeExpiredProfileViews(conn, { now, olderThanDays: viewRetentionDays }),
-    purgeExpiredContentMetrics(conn, { now, olderThanDays: contentMetricRetentionDays }),
+    purgeExpiredProfileViews(conn, {
+      now,
+      olderThanDays: viewRetentionDays,
+      scope: options.scope,
+    }),
+    purgeExpiredContentMetrics(conn, {
+      now,
+      olderThanDays: contentMetricRetentionDays,
+      scope: options.scope,
+    }),
   ]);
 
-  await writeActivityLog(conn, {
-    action: RETENTION_PURGE_ACTION,
-    entityType: "retention",
-    metadata: {
-      profileViewsDeleted: views.deleted,
-      contentMetricsDeleted: metrics.deleted,
-      viewRetentionDays,
-      contentMetricRetentionDays,
+  await writeActivityLog(
+    conn,
+    {
+      action: RETENTION_PURGE_ACTION,
+      entityType: "retention",
+      metadata: {
+        profileViewsDeleted: views.deleted,
+        contentMetricsDeleted: metrics.deleted,
+        viewRetentionDays,
+        contentMetricRetentionDays,
+      },
+      createdAt: now.toISOString(),
     },
-    createdAt: now.toISOString(),
-  });
+    options.scope,
+  );
 
   return {
     ...base,

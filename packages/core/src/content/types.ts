@@ -101,6 +101,8 @@ export class ContentError extends Error {
 
 export interface ContentOptions {
   now?: Date;
+  /** v3.0 Phase 2 — workspace scope. Absent = bootstrap workspace. */
+  scope?: import("../workspaces/scope").WorkspaceScope;
 }
 
 export function resolveNow(opts: ContentOptions = {}): Date {

@@ -1,19 +1,20 @@
-import { conn } from '@/lib/db';
+import { requireScope } from "@/lib/authz";
+import { conn } from "@/lib/db";
 import {
   markRecipientReplied,
   markRecipientSent,
   markRecipientSkipped,
-} from '@netpro/core/src/campaigns';
+} from "@netpro/core/src/campaigns";
 import {
   CrmRequestError,
   crmErrorResponse,
   crmJson,
   readCrmJson,
-} from '@/lib/crm-request';
+} from "@/lib/crm-request";
 
 type Params = { params: Promise<{ id: string; recipientId: string }> };
 
-const ACTIONS = ['sent', 'replied', 'skipped'] as const;
+const ACTIONS = ["sent", "replied", "skipped"] as const;
 
 /**
  * POST /api/campaigns/[id]/recipients/[recipientId]
@@ -26,28 +27,42 @@ const ACTIONS = ['sent', 'replied', 'skipped'] as const;
  * and cancels the remaining drip. "skipped" opts the recipient out without
  * logging any interaction.
  */
-export async function POST(request: Request, { params }: Params): Promise<Response> {
+export async function POST(
+  request: Request,
+  { params }: Params,
+): Promise<Response> {
   const { id, recipientId } = await params;
   try {
     const body = await readCrmJson(request);
-    const action = String(body.action ?? '');
+    const action = String(body.action ?? "");
     if (!ACTIONS.includes(action as (typeof ACTIONS)[number])) {
       throw new CrmRequestError(
         400,
-        `Unknown action "${action}". Expected one of: ${ACTIONS.join(', ')}.`
+        `Unknown action "${action}". Expected one of: ${ACTIONS.join(", ")}.`,
       );
     }
 
-    if (action === 'sent') {
-      const result = await markRecipientSent(conn, id, recipientId, {
-        force: body.force === true || body.force === 'true',
-      });
+    const scope = await requireScope("member");
+    if (action === "sent") {
+      const result = await markRecipientSent(
+        conn,
+        id,
+        recipientId,
+        {
+          force: body.force === true || body.force === "true",
+        },
+        scope,
+      );
       return crmJson(result);
     }
-    if (action === 'replied') {
-      return crmJson(await markRecipientReplied(conn, id, recipientId));
+    if (action === "replied") {
+      return crmJson(
+        await markRecipientReplied(conn, id, recipientId, {}, scope),
+      );
     }
-    return crmJson(await markRecipientSkipped(conn, id, recipientId));
+    return crmJson(
+      await markRecipientSkipped(conn, id, recipientId, {}, scope),
+    );
   } catch (error) {
     return crmErrorResponse(error);
   }

@@ -1,7 +1,6 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useState } from "react";
 
 interface Member {
   id: string;
@@ -9,7 +8,12 @@ interface Member {
   userId: string;
   role: string;
   createdAt: string;
-  user: { id: string; name: string | null; email: string; image: string | null } | null;
+  user: {
+    id: string;
+    name: string | null;
+    email: string;
+    image: string | null;
+  } | null;
 }
 
 interface Invite {
@@ -32,26 +36,35 @@ interface Props {
   invites: Invite[];
 }
 
-export default function TeamClient({ workspaceId: _workspaceId, currentUserId, currentRole, members: initialMembers, invites: initialInvites }: Props) {
+export default function TeamClient({
+  workspaceId: _workspaceId,
+  currentUserId,
+  currentRole,
+  members: initialMembers,
+  invites: initialInvites,
+}: Props) {
   const [members, setMembers] = useState(initialMembers);
   const [invites, setInvites] = useState(initialInvites);
-  const [newRole, setNewRole] = useState('member');
+  const [newRole, setNewRole] = useState("member");
   const [creating, setCreating] = useState(false);
-  const [lastInvite, setLastInvite] = useState<{ token: string; url: string } | null>(null);
+  const [lastInvite, setLastInvite] = useState<{
+    token: string;
+    url: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function createInvite() {
     setCreating(true);
     setError(null);
     try {
-      const res = await fetch('/api/workspaces/invites', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/workspaces/invites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: newRole }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || 'Failed to create invite');
+        setError(data.error || "Failed to create invite");
       } else {
         setLastInvite({ token: data.token, url: data.url });
         setInvites((prev) => [...prev, data.invite]);
@@ -66,12 +79,20 @@ export default function TeamClient({ workspaceId: _workspaceId, currentUserId, c
   async function revokeInvite(id: string) {
     setError(null);
     try {
-      const res = await fetch(`/api/workspaces/invites/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/workspaces/invites/${id}`, {
+        method: "DELETE",
+      });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || 'Failed to revoke');
+        setError(data.error || "Failed to revoke");
       } else {
-        setInvites((prev) => prev.map((inv) => (inv.id === id ? { ...inv, revokedAt: new Date().toISOString() } : inv)));
+        setInvites((prev) =>
+          prev.map((inv) =>
+            inv.id === id
+              ? { ...inv, revokedAt: new Date().toISOString() }
+              : inv,
+          ),
+        );
       }
     } catch (e: unknown) {
       setError((e as Error).message);
@@ -81,16 +102,20 @@ export default function TeamClient({ workspaceId: _workspaceId, currentUserId, c
   async function changeRole(userId: string, role: string) {
     setError(null);
     try {
-      const res = await fetch('/api/workspaces/members', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/workspaces/members", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, role }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || 'Failed to change role');
+        setError(data.error || "Failed to change role");
       } else {
-        setMembers((prev) => prev.map((m) => (m.userId === userId ? { ...m, role: data.member.role } : m)));
+        setMembers((prev) =>
+          prev.map((m) =>
+            m.userId === userId ? { ...m, role: data.member.role } : m,
+          ),
+        );
       }
     } catch (e: unknown) {
       setError((e as Error).message);
@@ -101,10 +126,13 @@ export default function TeamClient({ workspaceId: _workspaceId, currentUserId, c
     if (!confirm(`Remove member ${userId}?`)) return;
     setError(null);
     try {
-      const res = await fetch(`/api/workspaces/members?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
+      const res = await fetch(
+        `/api/workspaces/members?userId=${encodeURIComponent(userId)}`,
+        { method: "DELETE" },
+      );
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || 'Failed to remove');
+        setError(data.error || "Failed to remove");
       } else {
         setMembers((prev) => prev.filter((m) => m.userId !== userId));
       }
@@ -115,17 +143,28 @@ export default function TeamClient({ workspaceId: _workspaceId, currentUserId, c
 
   return (
     <div className="space-y-8">
-      {error && <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded">{error}</div>}
+      {error && (
+        <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded">
+          {error}
+        </div>
+      )}
       {lastInvite && (
         <div className="p-4 bg-green-50 border border-green-200 rounded">
           <p className="font-medium">Invite created!</p>
-          <p className="text-sm break-all">Link: {window.location.origin}{lastInvite.url}</p>
-          <p className="text-xs text-gray-500 mt-1">Share this link securely. It expires in 7 days and is single-use.</p>
+          <p className="text-sm break-all">
+            Link: {window.location.origin}
+            {lastInvite.url}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            Share this link securely. It expires in 7 days and is single-use.
+          </p>
         </div>
       )}
 
       <section>
-        <h2 className="text-lg font-semibold mb-3">Members ({members.length})</h2>
+        <h2 className="text-lg font-semibold mb-3">
+          Members ({members.length})
+        </h2>
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b">
@@ -139,12 +178,14 @@ export default function TeamClient({ workspaceId: _workspaceId, currentUserId, c
             {members.map((m) => (
               <tr key={m.id} className="border-b">
                 <td className="p-2">{m.user?.name || m.userId.slice(0, 8)}</td>
-                <td className="p-2">{m.user?.email || '—'}</td>
+                <td className="p-2">{m.user?.email || "—"}</td>
                 <td className="p-2">
                   <select
                     value={m.role}
                     onChange={(e) => changeRole(m.userId, e.target.value)}
-                    disabled={currentRole !== 'owner' && currentRole !== 'admin'}
+                    disabled={
+                      currentRole !== "owner" && currentRole !== "admin"
+                    }
                     className="border rounded px-2 py-1"
                   >
                     <option value="viewer">viewer</option>
@@ -171,7 +212,11 @@ export default function TeamClient({ workspaceId: _workspaceId, currentUserId, c
       <section>
         <h2 className="text-lg font-semibold mb-3">Invites</h2>
         <div className="flex gap-2 mb-4">
-          <select value={newRole} onChange={(e) => setNewRole(e.target.value)} className="border rounded px-2 py-1">
+          <select
+            value={newRole}
+            onChange={(e) => setNewRole(e.target.value)}
+            className="border rounded px-2 py-1"
+          >
             <option value="viewer">viewer</option>
             <option value="member">member</option>
             <option value="admin">admin</option>
@@ -181,7 +226,7 @@ export default function TeamClient({ workspaceId: _workspaceId, currentUserId, c
             disabled={creating}
             className="px-3 py-1 bg-black text-white rounded disabled:opacity-50"
           >
-            {creating ? 'Creating...' : 'Create invite'}
+            {creating ? "Creating..." : "Create invite"}
           </button>
         </div>
         <table className="w-full border-collapse text-sm">
@@ -197,13 +242,22 @@ export default function TeamClient({ workspaceId: _workspaceId, currentUserId, c
             {invites.map((inv) => (
               <tr key={inv.id} className="border-b">
                 <td className="p-2">{inv.role}</td>
-                <td className="p-2">{new Date(inv.expiresAt).toLocaleDateString()}</td>
                 <td className="p-2">
-                  {inv.revokedAt ? 'revoked' : inv.acceptedAt ? 'accepted' : 'pending'}
+                  {new Date(inv.expiresAt).toLocaleDateString()}
+                </td>
+                <td className="p-2">
+                  {inv.revokedAt
+                    ? "revoked"
+                    : inv.acceptedAt
+                      ? "accepted"
+                      : "pending"}
                 </td>
                 <td className="p-2">
                   {!inv.revokedAt && !inv.acceptedAt && (
-                    <button onClick={() => revokeInvite(inv.id)} className="text-red-600 underline">
+                    <button
+                      onClick={() => revokeInvite(inv.id)}
+                      className="text-red-600 underline"
+                    >
                       Revoke
                     </button>
                   )}

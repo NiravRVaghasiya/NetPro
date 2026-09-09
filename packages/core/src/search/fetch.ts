@@ -34,6 +34,7 @@ export function contactColumns(conn: Conn): ContactsColumns {
     lastInteraction: t.lastInteraction,
     deletedAt: t.deletedAt,
     skills: t.skills,
+    workspaceId: t.workspaceId,
   };
 }
 
@@ -200,7 +201,11 @@ export const EMPTY_FACETS: SearchFacets = {
 };
 
 /** `id IN (…)` for a bounded id list, or a never-true condition when empty. */
-export function idInList(cols: ContactsColumns, conn: Conn, ids: string[]): SQL {
+export function idInList(
+  cols: ContactsColumns,
+  conn: Conn,
+  ids: string[],
+): SQL {
   const idColumn = conn.schema.contacts.id;
   if (ids.length === 0) return sql`1 = 0`;
   return sql`${idColumn} IN (${sql.join(

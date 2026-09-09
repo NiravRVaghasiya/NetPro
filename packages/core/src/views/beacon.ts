@@ -22,14 +22,20 @@
 //     personalized card link; the token is an HMAC under
 //     `NEXTAUTH_SECRET` with a 30-day cap, and the referenced contact must
 //     still exist. No auto-resolution from IP or email, ever.
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { isIP } from 'node:net';
-import { sql } from 'drizzle-orm';
-import type { SqliteConn, PgConn } from '@netpro/db';
-import { rawAll } from '../search/indexer';
-import { classifyUserAgent } from './bots';
-import { shouldMarkOwnerView, recentOwnerViewIpHashes } from './owner';
-import { hashViewerFingerprint, hashViewerIp } from './privacy';
+import {
+  createHmac,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
+import { isIP } from "node:net";
+import { sql } from "drizzle-orm";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import { rawAll } from "../search/indexer";
+import { classifyUserAgent } from "./bots";
+import { shouldMarkOwnerView, recentOwnerViewIpHashes } from "./owner";
+import { hashViewerFingerprint, hashViewerIp } from "./privacy";
+import { BOOTSTRAP_WORKSPACE_ID } from "../workspaces/scope";
 
 type Conn = SqliteConn | PgConn;
 
@@ -45,24 +51,26 @@ export interface BeaconHeaders {
 // stored or rejected (beacons should degrade silently, not 400).
 
 export const VIEWED_PAGES = [
-  '/card',
-  '/card/vcard',
-  'blog',
-  'portfolio',
-  'embed',
+  "/card",
+  "/card/vcard",
+  "blog",
+  "portfolio",
+  "embed",
 ] as const;
 
 export type ViewedPage = (typeof VIEWED_PAGES)[number];
 
 /** Snap any requested page onto the allowlist; unknown values → `/card`. */
-export function normalizeViewedPage(page: string | null | undefined): ViewedPage {
-  if (typeof page === 'string') {
+export function normalizeViewedPage(
+  page: string | null | undefined,
+): ViewedPage {
+  if (typeof page === "string") {
     const trimmed = page.trim();
     for (const allowed of VIEWED_PAGES) {
       if (trimmed === allowed) return allowed;
     }
   }
-  return '/card';
+  return "/card";
 }
 
 // ── Request extraction (pure header reading, no I/O) ────────────────────
@@ -74,13 +82,13 @@ export function normalizeViewedPage(page: string | null | undefined): ViewedPage
  * falling through to proxy hops (a spoofer controls the whole header).
  */
 export function extractViewerIp(headers: BeaconHeaders): string | null {
-  const forwarded = headers.get('x-forwarded-for');
+  const forwarded = headers.get("x-forwarded-for");
   if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
+    const first = forwarded.split(",")[0]?.trim();
     if (first && isIP(first) !== 0) return first;
     return null;
   }
-  const realIp = headers.get('x-real-ip')?.trim();
+  const realIp = headers.get("x-real-ip")?.trim();
   if (realIp && isIP(realIp) !== 0) return realIp;
   return null;
 }
@@ -97,8 +105,8 @@ export function extractViewerGeo(headers: BeaconHeaders): {
   city: string | null;
 } {
   const country =
-    headers.get('x-vercel-ip-country') ?? headers.get('cf-ipcountry') ?? null;
-  const city = headers.get('x-vercel-ip-city') ?? null;
+    headers.get("x-vercel-ip-country") ?? headers.get("cf-ipcountry") ?? null;
+  const city = headers.get("x-vercel-ip-city") ?? null;
   const cap = (value: string | null): string | null => {
     if (!value) return null;
     const trimmed = value.trim();
@@ -110,8 +118,7 @@ export function extractViewerGeo(headers: BeaconHeaders): {
 /** Do-Not-Track / Global Privacy Control → minimal storage mode. */
 export function isDntRequest(headers: BeaconHeaders): boolean {
   return (
-    headers.get('dnt')?.trim() === '1' ||
-    headers.get('sec-gpc')?.trim() === '1'
+    headers.get("dnt")?.trim() === "1" || headers.get("sec-gpc")?.trim() === "1"
   );
 }
 
@@ -146,7 +153,7 @@ export interface ShouldCountViewArgs {
   ipPageWindowMs?: number;
 }
 
-export type DedupReason = 'new' | 'dedup-fingerprint' | 'dedup-ip-page';
+export type DedupReason = "new" | "dedup-fingerprint" | "dedup-ip-page";
 
 /**
  * Pure dedup decision (no I/O): `false` + reason when this request is a
@@ -164,7 +171,9 @@ export function shouldCountView(args: ShouldCountViewArgs): {
   let ipPageHit = false;
   for (const row of args.recent) {
     const rowMs =
-      row.viewed_at instanceof Date ? row.viewed_at.getTime() : Date.parse(row.viewed_at);
+      row.viewed_at instanceof Date
+        ? row.viewed_at.getTime()
+        : Date.parse(row.viewed_at);
     if (Number.isNaN(rowMs)) continue;
     const age = nowMs - rowMs;
     if (
@@ -173,7 +182,7 @@ export function shouldCountView(args: ShouldCountViewArgs): {
       age >= 0 &&
       age <= fpWindow
     ) {
-      return { count: false, reason: 'dedup-fingerprint' };
+      return { count: false, reason: "dedup-fingerprint" };
     }
     if (
       !ipPageHit &&
@@ -186,8 +195,8 @@ export function shouldCountView(args: ShouldCountViewArgs): {
       ipPageHit = true;
     }
   }
-  if (ipPageHit) return { count: false, reason: 'dedup-ip-page' };
-  return { count: true, reason: 'new' };
+  if (ipPageHit) return { count: false, reason: "dedup-ip-page" };
+  return { count: true, reason: "new" };
 }
 
 // ── recordView ───────────────────────────────────────────────────────────
@@ -220,6 +229,12 @@ export interface RecordViewInput {
   minimalPrivacy?: boolean;
   /** Base salt for the daily HMAC (`NETPRO_VIEW_SALT` or fallback). */
   baseSalt: string;
+  /**
+   * v3.0 Phase 2 — the workspace this view belongs to. Resolved
+   * server-side from the viewed card (never from the request), so a
+   * public beacon cannot pick a workspace. Absent = bootstrap workspace.
+   */
+  workspaceId?: string;
   /** Clock override for tests. */
   now?: Date;
 }
@@ -234,7 +249,8 @@ export interface RecordViewResult {
 }
 
 function cleanDuration(durationMs: number | null | undefined): number | null {
-  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs)) return null;
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs))
+    return null;
   const value = Math.round(durationMs);
   if (value < 0 || value > VIEW_DURATION_MAX_MS) return null;
   return value;
@@ -246,18 +262,27 @@ function cleanDuration(durationMs: number | null | undefined): number | null {
  * which the beacon surfaces swallow — a broken database must not break the
  * visitor's page.
  */
-export async function recordView(conn: Conn, input: RecordViewInput): Promise<RecordViewResult> {
+export async function recordView(
+  conn: Conn,
+  input: RecordViewInput,
+): Promise<RecordViewResult> {
   const now = input.now ?? new Date();
+  const workspaceId = input.workspaceId ?? BOOTSTRAP_WORKSPACE_ID;
   const viewedPage = normalizeViewedPage(input.viewedPage);
   const minimal = Boolean(input.minimalPrivacy);
   const userAgent =
-    typeof input.userAgent === 'string' && input.userAgent.trim() !== ''
+    typeof input.userAgent === "string" && input.userAgent.trim() !== ""
       ? input.userAgent.slice(0, VIEWER_AGENT_MAX_LENGTH)
       : null;
 
   const bot = classifyUserAgent(userAgent);
   const ipHash = input.ip
-    ? hashViewerIp({ ip: input.ip, userAgent, baseSalt: input.baseSalt, date: now })
+    ? hashViewerIp({
+        ip: input.ip,
+        userAgent,
+        baseSalt: input.baseSalt,
+        date: now,
+      })
     : null;
   const fingerprint =
     !minimal && input.ip && userAgent
@@ -274,7 +299,7 @@ export async function recordView(conn: Conn, input: RecordViewInput): Promise<Re
     authenticatedOwnerSession: Boolean(input.authenticatedOwnerSession),
     ipHash,
     recentOwnerIpHashes: ipHash
-      ? await recentOwnerViewIpHashes(conn, { now })
+      ? await recentOwnerViewIpHashes(conn, { now, workspaceId })
       : [],
   });
 
@@ -298,6 +323,7 @@ export async function recordView(conn: Conn, input: RecordViewInput): Promise<Re
     sql`SELECT viewer_fingerprint, viewer_ip, viewed_page, viewed_at
         FROM profile_views
         WHERE viewed_at >= ${sinceIso}
+          AND workspace_id = ${workspaceId}
           AND (
             (CAST(${fingerprint} AS text) IS NOT NULL AND viewer_fingerprint = ${fingerprint})
             OR
@@ -313,33 +339,34 @@ export async function recordView(conn: Conn, input: RecordViewInput): Promise<Re
   });
   if (!verdict.count) return { counted: false, reason: verdict.reason };
 
-  const referrer = minimal ? null : input.referrer ?? null;
+  const referrer = minimal ? null : (input.referrer ?? null);
   const row = {
     id: randomUUID(),
+    workspaceId,
     viewerIp: ipHash,
     viewerAgent: minimal ? null : userAgent,
     referrer,
-    resolvedContact: minimal ? null : input.resolvedContact ?? null,
+    resolvedContact: minimal ? null : (input.resolvedContact ?? null),
     viewerFingerprint: fingerprint,
     isBot: bot.isBot,
     isOwnerView: isOwnerView,
-    sessionId: randomBytes(8).toString('hex'),
+    sessionId: randomBytes(8).toString("hex"),
     durationMs: minimal ? null : cleanDuration(input.durationMs),
-    utmSource: minimal ? null : input.utmSource ?? null,
-    utmMedium: minimal ? null : input.utmMedium ?? null,
-    utmCampaign: minimal ? null : input.utmCampaign ?? null,
+    utmSource: minimal ? null : (input.utmSource ?? null),
+    utmMedium: minimal ? null : (input.utmMedium ?? null),
+    utmCampaign: minimal ? null : (input.utmCampaign ?? null),
     // Single owner card for now; the column exists for future cards.
     viewedCardId: null,
     viewedPage,
     viewedAt: now.toISOString(),
-    country: minimal ? null : input.country ?? null,
-    city: minimal ? null : input.city ?? null,
+    country: minimal ? null : (input.country ?? null),
+    city: minimal ? null : (input.city ?? null),
   };
   // The Drizzle builders differ between dialects, so pick by dialect
   // (the house pattern from Phase 1's card repository). The sqlite branch
   // needs an explicit terminal call — better-sqlite3 does not execute
   // until `.run()` (`.returning()` also works, but the row is not needed).
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     conn.db.insert(conn.schema.profileViews).values(row).run();
   } else {
     await conn.db.insert(conn.schema.profileViews).values(row);
@@ -368,22 +395,27 @@ export const VIEW_TOKEN_TTL_MS = 30 * 86_400_000;
 const CONTACT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 function b64urlEncode(bytes: Buffer): string {
-  return bytes.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return bytes
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
 function b64urlDecode(value: string): Buffer | null {
   if (!/^[A-Za-z0-9_-]+$/.test(value) || value.length > 512) return null;
-  const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice(value.length % 4);
+  const padded =
+    value.replace(/-/g, "+").replace(/_/g, "/") + "===".slice(value.length % 4);
   try {
-    return Buffer.from(padded, 'base64');
+    return Buffer.from(padded, "base64");
   } catch {
     return null;
   }
 }
 
 function timingSafeEqualHex(a: string, b: string): boolean {
-  const ba = Buffer.from(a, 'utf8');
-  const bb = Buffer.from(b, 'utf8');
+  const ba = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
   if (ba.length !== bb.length) return false;
   return timingSafeEqual(ba, bb);
 }
@@ -400,11 +432,14 @@ export function createContactViewToken(
   ttlMs: number = VIEW_TOKEN_TTL_MS,
 ): string | null {
   if (!secret || !CONTACT_ID_PATTERN.test(contactId)) return null;
-  if (!Number.isFinite(ttlMs) || ttlMs <= 0 || ttlMs > VIEW_TOKEN_TTL_MS) return null;
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0 || ttlMs > VIEW_TOKEN_TTL_MS)
+    return null;
   const exp = Math.floor((now.getTime() + ttlMs) / 1000);
   const payload = `${contactId}|${exp}`;
-  const hmac = createHmac('sha256', secret).update(payload, 'utf8').digest('hex');
-  return b64urlEncode(Buffer.from(`${payload}|${hmac}`, 'utf8'));
+  const hmac = createHmac("sha256", secret)
+    .update(payload, "utf8")
+    .digest("hex");
+  return b64urlEncode(Buffer.from(`${payload}|${hmac}`, "utf8"));
 }
 
 /**
@@ -417,12 +452,17 @@ export function resolveContactFromToken(
   token: string | null | undefined,
   args: { secret: string; now?: Date },
 ): string | null {
-  if (typeof token !== 'string' || !token || !args.secret) return null;
+  if (typeof token !== "string" || !token || !args.secret) return null;
   const decoded = b64urlDecode(token.trim());
   if (!decoded) return null;
-  const parts = decoded.toString('utf8').split('|');
+  const parts = decoded.toString("utf8").split("|");
   const [contactId, expRaw, hmac] = parts;
-  if (parts.length !== 3 || contactId === undefined || expRaw === undefined || hmac === undefined) {
+  if (
+    parts.length !== 3 ||
+    contactId === undefined ||
+    expRaw === undefined ||
+    hmac === undefined
+  ) {
     return null;
   }
   if (!CONTACT_ID_PATTERN.test(contactId)) return null;
@@ -433,9 +473,9 @@ export function resolveContactFromToken(
   if (exp * 1000 > now.getTime() + VIEW_TOKEN_TTL_MS + 86_400_000) {
     return null; // longer than a 30-day cap could ever be — forged/buggy
   }
-  const expected = createHmac('sha256', args.secret)
-    .update(`${contactId}|${exp}`, 'utf8')
-    .digest('hex');
+  const expected = createHmac("sha256", args.secret)
+    .update(`${contactId}|${exp}`, "utf8")
+    .digest("hex");
   if (!timingSafeEqualHex(hmac, expected)) return null;
   return contactId;
 }
@@ -443,15 +483,21 @@ export function resolveContactFromToken(
 /**
  * Resolve a token-claimed contact id to a *live* contact (exists and not
  * soft-deleted), or `null`. The token proves the owner minted a link for
- * this id; this proves the contact is still there.
+ * this id; this proves the contact is still there. `workspaceId` (the
+ * viewed card's workspace) additionally pins the lookup to that
+ * workspace — a token minted in one workspace never resolves a contact
+ * from another.
  */
 export async function findLiveContactId(
   conn: Conn,
   contactId: string,
+  workspaceId?: string,
 ): Promise<string | null> {
   const rows = await rawAll<{ id: string }>(
     conn,
-    sql`SELECT id FROM contacts WHERE id = ${contactId} AND deleted_at IS NULL`,
+    sql`SELECT id FROM contacts
+        WHERE id = ${contactId} AND deleted_at IS NULL
+          AND workspace_id = ${workspaceId ?? BOOTSTRAP_WORKSPACE_ID}`,
   );
   return rows[0]?.id ?? null;
 }

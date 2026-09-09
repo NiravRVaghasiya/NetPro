@@ -4,11 +4,11 @@
 //   1. LinkedIn CSV "Mutual connections" / "Shared connections" columns —
 //      never auto-inserted as confirmed.
 //   2. A two-column CSV (`from,to`) for `netpro edge import`.
-import Papa from 'papaparse';
-import type { SqliteConn, PgConn } from '@netpro/db';
-import { resolveContactRef } from '../ai/resolve-contact';
-import { addEdge, type EdgeRow } from './edges';
-import { GraphError, type GraphOptions } from './types';
+import Papa from "papaparse";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import { resolveContactRef } from "../ai/resolve-contact";
+import { addEdge, type EdgeRow } from "./edges";
+import { GraphError, type GraphOptions } from "./types";
 
 export interface MutualCandidate {
   fromName: string;
@@ -17,10 +17,10 @@ export interface MutualCandidate {
 }
 
 const MUTUAL_KEYS = [
-  'Mutual Connections',
-  'Shared Connections',
-  'Mutual connections',
-  'Shared connections',
+  "Mutual Connections",
+  "Shared Connections",
+  "Mutual connections",
+  "Shared connections",
 ];
 
 function mutualField(row: Record<string, string>): string | undefined {
@@ -39,7 +39,7 @@ function parseMutualList(value: string): { names: string[]; count?: number } {
   const count = countMatch ? Number(countMatch[1]) : undefined;
   const names = value
     .split(/[,;|]/)
-    .map((s) => s.replace(/\d+\s*mutual.*/i, '').trim())
+    .map((s) => s.replace(/\d+\s*mutual.*/i, "").trim())
     .filter((s) => s.length > 1 && !/^\d+$/.test(s));
   return { names, count };
 }
@@ -58,17 +58,20 @@ export function confidenceFromMutuals(count: number | undefined): number {
 export async function ingestMutualCandidates(
   conn: SqliteConn | PgConn,
   csv: string,
-  opts: GraphOptions = {}
+  opts: GraphOptions = {},
 ): Promise<{ candidates: number; inserted: number; skipped: number }> {
-  const { data } = Papa.parse<Record<string, string>>(csv, { header: true, skipEmptyLines: true });
+  const { data } = Papa.parse<Record<string, string>>(csv, {
+    header: true,
+    skipEmptyLines: true,
+  });
   let candidates = 0;
   let inserted = 0;
   let skipped = 0;
 
   for (const row of data) {
-    const first = row['First Name']?.trim() ?? '';
-    const last = row['Last Name']?.trim() ?? '';
-    const ownerName = `${first} ${last}`.trim() || row['Full Name']?.trim();
+    const first = row["First Name"]?.trim() ?? "";
+    const last = row["Last Name"]?.trim() ?? "";
+    const ownerName = `${first} ${last}`.trim() || row["Full Name"]?.trim();
     const mutuals = mutualField(row);
     if (!ownerName || !mutuals) continue;
     const { names, count } = parseMutualList(mutuals);
@@ -76,7 +79,7 @@ export async function ingestMutualCandidates(
 
     let from;
     try {
-      from = await resolveContactRef(conn, ownerName);
+      from = await resolveContactRef(conn, ownerName, opts.scope);
     } catch {
       skipped++;
       continue;
@@ -87,19 +90,21 @@ export async function ingestMutualCandidates(
     for (const name of targets) {
       candidates++;
       try {
-        const to = await resolveContactRef(conn, name);
+        const to = await resolveContactRef(conn, name, opts.scope);
         const result = await addEdge(
           conn,
           {
             sourceId: from.id,
             targetId: to.id,
-            relation: 'mutual_network',
-            source: 'linkedin_csv',
-            status: 'pending',
+            relation: "mutual_network",
+            source: "linkedin_csv",
+            status: "pending",
             confidence: confidenceFromMutuals(count ?? targets.length),
-            context: count ? `${count} mutual connections` : 'shared connections',
+            context: count
+              ? `${count} mutual connections`
+              : "shared connections",
           },
-          { ...opts, merge: true }
+          { ...opts, merge: true },
         );
         if (result.created) inserted++;
       } catch {
@@ -125,36 +130,52 @@ export interface ImportEdgesSummary {
 export async function importEdgesCsv(
   conn: SqliteConn | PgConn,
   csv: string,
-  opts: GraphOptions & { relation?: string; source?: string; status?: string } = {}
+  opts: GraphOptions & {
+    relation?: string;
+    source?: string;
+    status?: string;
+  } = {},
 ): Promise<ImportEdgesSummary> {
-  const { data } = Papa.parse<Record<string, string>>(csv, { header: true, skipEmptyLines: true });
-  const errors: ImportEdgesSummary['errors'] = [];
+  const { data } = Papa.parse<Record<string, string>>(csv, {
+    header: true,
+    skipEmptyLines: true,
+  });
+  const errors: ImportEdgesSummary["errors"] = [];
   const edges: EdgeRow[] = [];
   let imported = 0;
   let merged = 0;
 
   for (const [index, row] of data.entries()) {
     const line = index + 2;
-    const fromSel = (row.from ?? row.source ?? row.From ?? row.Source ?? '').trim();
-    const toSel = (row.to ?? row.target ?? row.To ?? row.Target ?? '').trim();
+    const fromSel = (
+      row.from ??
+      row.source ??
+      row.From ??
+      row.Source ??
+      ""
+    ).trim();
+    const toSel = (row.to ?? row.target ?? row.To ?? row.Target ?? "").trim();
     if (!fromSel || !toSel) {
-      errors.push({ row: line, reason: 'both from and to columns are required' });
+      errors.push({
+        row: line,
+        reason: "both from and to columns are required",
+      });
       continue;
     }
     try {
-      const from = await resolveContactRef(conn, fromSel);
-      const to = await resolveContactRef(conn, toSel);
+      const from = await resolveContactRef(conn, fromSel, opts.scope);
+      const to = await resolveContactRef(conn, toSel, opts.scope);
       const result = await addEdge(
         conn,
         {
           sourceId: from.id,
           targetId: to.id,
-          relation: opts.relation ?? 'manual',
-          source: opts.source ?? 'manual',
-          status: opts.status ?? 'confirmed',
+          relation: opts.relation ?? "manual",
+          source: opts.source ?? "manual",
+          status: opts.status ?? "confirmed",
           confidence: 1,
         },
-        { ...opts, merge: true }
+        { ...opts, merge: true },
       );
       edges.push(result.edge);
       if (result.created) imported++;
@@ -165,7 +186,10 @@ export async function importEdgesCsv(
   }
 
   if (data.length === 0) {
-    throw new GraphError('invalid_input', 'CSV is empty or missing a header row (from,to).');
+    throw new GraphError(
+      "invalid_input",
+      "CSV is empty or missing a header row (from,to).",
+    );
   }
 
   return { imported, merged, errors, edges };

@@ -12,9 +12,10 @@
 //   * Inferred (`pending`) edges are excluded by default — analytics runs on
 //     what the owner confirmed; `status: 'all'` opts into pending rows.
 //   * Edges touching a soft-deleted (or missing) contact are dropped.
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import type { SqliteConn, PgConn } from '@netpro/db';
-import { EDGE_RELATIONS, GraphError, type EdgeRelation } from './types';
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import { EDGE_RELATIONS, GraphError, type EdgeRelation } from "./types";
+import { workspacePredicate, type WorkspaceScope } from "../workspaces/scope";
 
 /** Hard ceilings from the v2.0 plan (risk table), overridable only for tests. */
 export const GRAPH_ANALYSIS_LIMITS = {
@@ -45,7 +46,7 @@ export interface GraphLimits {
 
 export interface GraphAnalysisOptions {
   /** Which confirmation states enter the graph. `rejected` is never included. Default `'confirmed'`. */
-  status?: 'confirmed' | 'pending' | 'all';
+  status?: "confirmed" | "pending" | "all";
   /** Restrict to one provenance relation (whitelist). */
   relation?: EdgeRelation | string;
   /** Edges must carry at least this confidence (0–1). Default 0. */
@@ -58,6 +59,8 @@ export interface GraphAnalysisOptions {
   now?: Date;
   /** Internal/test seam: tighten the caps (never raise past the defaults). */
   limits?: Partial<GraphLimits>;
+  /** v3.0 Phase 2 — workspace scope; absent = bootstrap workspace. */
+  scope?: WorkspaceScope;
 }
 
 export interface ResolvedGraphAnalysisOptions {
@@ -71,52 +74,81 @@ export interface ResolvedGraphAnalysisOptions {
 }
 
 export function resolveGraphAnalysisOptions(
-  opts: GraphAnalysisOptions = {}
+  opts: GraphAnalysisOptions = {},
 ): ResolvedGraphAnalysisOptions {
   let statuses: string[];
-  if (opts.status === undefined || opts.status === 'confirmed') {
-    statuses = ['confirmed'];
-  } else if (opts.status === 'all') {
-    statuses = ['confirmed', 'pending'];
-  } else if (opts.status === 'pending') {
-    statuses = ['pending'];
+  if (opts.status === undefined || opts.status === "confirmed") {
+    statuses = ["confirmed"];
+  } else if (opts.status === "all") {
+    statuses = ["confirmed", "pending"];
+  } else if (opts.status === "pending") {
+    statuses = ["pending"];
   } else {
-    throw new GraphError('invalid_input', `Unknown edge status "${String(opts.status)}".`);
+    throw new GraphError(
+      "invalid_input",
+      `Unknown edge status "${String(opts.status)}".`,
+    );
   }
 
   let relation: EdgeRelation | null = null;
-  if (opts.relation !== undefined && opts.relation !== null && opts.relation !== '') {
+  if (
+    opts.relation !== undefined &&
+    opts.relation !== null &&
+    opts.relation !== ""
+  ) {
     if (!(EDGE_RELATIONS as readonly string[]).includes(opts.relation)) {
       throw new GraphError(
-        'invalid_input',
-        `Unknown relation "${String(opts.relation)}". Expected one of: ${EDGE_RELATIONS.join(', ')}.`
+        "invalid_input",
+        `Unknown relation "${String(opts.relation)}". Expected one of: ${EDGE_RELATIONS.join(", ")}.`,
       );
     }
     relation = opts.relation as EdgeRelation;
   }
 
   const minConfidence = opts.minConfidence ?? 0;
-  if (!Number.isFinite(minConfidence) || minConfidence < 0 || minConfidence > 1) {
-    throw new GraphError('invalid_input', 'minConfidence must be a number between 0 and 1.');
+  if (
+    !Number.isFinite(minConfidence) ||
+    minConfidence < 0 ||
+    minConfidence > 1
+  ) {
+    throw new GraphError(
+      "invalid_input",
+      "minConfidence must be a number between 0 and 1.",
+    );
   }
 
-  const limit = Math.min(Math.max(Math.trunc(opts.limit ?? GRAPH_ANALYSIS_LIMITS.listLimitDefault), 1), GRAPH_ANALYSIS_LIMITS.listLimitCap);
+  const limit = Math.min(
+    Math.max(
+      Math.trunc(opts.limit ?? GRAPH_ANALYSIS_LIMITS.listLimitDefault),
+      1,
+    ),
+    GRAPH_ANALYSIS_LIMITS.listLimitCap,
+  );
   const maxDepth = Math.min(
-    Math.max(Math.trunc(opts.maxDepth ?? GRAPH_ANALYSIS_LIMITS.maxDepthDefault), 1),
-    GRAPH_ANALYSIS_LIMITS.maxDepthCap
+    Math.max(
+      Math.trunc(opts.maxDepth ?? GRAPH_ANALYSIS_LIMITS.maxDepthDefault),
+      1,
+    ),
+    GRAPH_ANALYSIS_LIMITS.maxDepthCap,
   );
 
   const limits: GraphLimits = {
-    maxEdges: Math.min(opts.limits?.maxEdges ?? GRAPH_ANALYSIS_LIMITS.maxEdges, GRAPH_ANALYSIS_LIMITS.maxEdges),
+    maxEdges: Math.min(
+      opts.limits?.maxEdges ?? GRAPH_ANALYSIS_LIMITS.maxEdges,
+      GRAPH_ANALYSIS_LIMITS.maxEdges,
+    ),
     betweennessMaxNodes: Math.min(
-      opts.limits?.betweennessMaxNodes ?? GRAPH_ANALYSIS_LIMITS.betweennessMaxNodes,
-      GRAPH_ANALYSIS_LIMITS.betweennessMaxNodes
+      opts.limits?.betweennessMaxNodes ??
+        GRAPH_ANALYSIS_LIMITS.betweennessMaxNodes,
+      GRAPH_ANALYSIS_LIMITS.betweennessMaxNodes,
     ),
     avgPathLengthMaxNodes: Math.min(
-      opts.limits?.avgPathLengthMaxNodes ?? GRAPH_ANALYSIS_LIMITS.avgPathLengthMaxNodes,
-      GRAPH_ANALYSIS_LIMITS.avgPathLengthMaxNodes
+      opts.limits?.avgPathLengthMaxNodes ??
+        GRAPH_ANALYSIS_LIMITS.avgPathLengthMaxNodes,
+      GRAPH_ANALYSIS_LIMITS.avgPathLengthMaxNodes,
     ),
-    communityMembers: opts.limits?.communityMembers ?? GRAPH_ANALYSIS_LIMITS.communityMembers,
+    communityMembers:
+      opts.limits?.communityMembers ?? GRAPH_ANALYSIS_LIMITS.communityMembers,
   };
 
   return {
@@ -187,11 +219,11 @@ export interface EdgeReadRow {
  */
 export async function loadGraph(
   conn: SqliteConn | PgConn,
-  options: GraphAnalysisOptions = {}
+  options: GraphAnalysisOptions = {},
 ): Promise<LoadedGraph> {
   const resolved = resolveGraphAnalysisOptions(options);
-  const rows = await readEdgeRows(conn, resolved);
-  const contacts = await readLiveContacts(conn);
+  const rows = await readEdgeRows(conn, resolved, options.scope);
+  const contacts = await readLiveContacts(conn, options.scope);
   return buildGraph(rows, contacts);
 }
 
@@ -200,8 +232,11 @@ export async function loadGraph(
  * `fullName` (labels need names, and names must come from live rows so a
  * soft-deleted endpoint never appears as a node).
  */
-async function readLiveContacts(conn: SqliteConn | PgConn): Promise<GraphContactRow[]> {
-  if (conn.dialect === 'sqlite') {
+async function readLiveContacts(
+  conn: SqliteConn | PgConn,
+  scope?: WorkspaceScope,
+): Promise<GraphContactRow[]> {
+  if (conn.dialect === "sqlite") {
     const c = conn.schema.contacts;
     return conn.db
       .select({
@@ -215,7 +250,9 @@ async function readLiveContacts(conn: SqliteConn | PgConn): Promise<GraphContact
         createdAt: c.createdAt,
       })
       .from(c)
-      .where(isNull(c.deletedAt));
+      .where(
+        and(isNull(c.deletedAt), workspacePredicate(scope, c.workspaceId)),
+      );
   }
   const c = conn.schema.contacts;
   return conn.db
@@ -230,7 +267,7 @@ async function readLiveContacts(conn: SqliteConn | PgConn): Promise<GraphContact
       createdAt: c.createdAt,
     })
     .from(c)
-    .where(isNull(c.deletedAt));
+    .where(and(isNull(c.deletedAt), workspacePredicate(scope, c.workspaceId)));
 }
 
 export interface GraphContactRow {
@@ -251,14 +288,18 @@ export interface GraphContactRow {
  */
 async function readEdgeRows(
   conn: SqliteConn | PgConn,
-  resolved: ResolvedGraphAnalysisOptions
+  resolved: ResolvedGraphAnalysisOptions,
+  scope?: WorkspaceScope,
 ): Promise<EdgeReadRow[]> {
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     const e = conn.schema.edges;
     const where = and(
       inArray(e.status, resolved.statuses),
-      resolved.relation === null ? undefined : eq(e.relation, resolved.relation),
-      sql`${e.confidence} >= ${resolved.minConfidence}`
+      workspacePredicate(scope, e.workspaceId),
+      resolved.relation === null
+        ? undefined
+        : eq(e.relation, resolved.relation),
+      sql`${e.confidence} >= ${resolved.minConfidence}`,
     );
     return (await conn.db
       .select({
@@ -277,8 +318,9 @@ async function readEdgeRows(
   const e = conn.schema.edges;
   const where = and(
     inArray(e.status, resolved.statuses),
+    workspacePredicate(scope, e.workspaceId),
     resolved.relation === null ? undefined : eq(e.relation, resolved.relation),
-    sql`${e.confidence} >= ${resolved.minConfidence}`
+    sql`${e.confidence} >= ${resolved.minConfidence}`,
   );
   return (await conn.db
     .select({
@@ -298,7 +340,7 @@ async function readEdgeRows(
 /** Pure join — exported for tests. Both dialects read identical row shapes. */
 export function buildGraph(
   edgeRows: EdgeReadRow[],
-  contacts: GraphContactRow[]
+  contacts: GraphContactRow[],
 ): LoadedGraph {
   const live = new Map<string, GraphNode>();
   for (const c of contacts) {
@@ -335,19 +377,29 @@ export function buildGraph(
     // Undirected adjacency is ALWAYS symmetric: a one-way row still proves
     // the two people are connected, which is what clustering/centrality ask.
     // `bidirectional` only gates the pathfinder's traversal (`out`).
-    for (const pair of [[a.id, b.id], [b.id, a.id]] as const) {
+    for (const pair of [
+      [a.id, b.id],
+      [b.id, a.id],
+    ] as const) {
       let n = neighbors.get(pair[0]);
       if (!n) neighbors.set(pair[0], (n = new Set()));
       n.add(pair[1]);
     }
     for (const [from, to] of edge.bidirectional
-      ? ([[a.id, b.id], [b.id, a.id]] as const)
+      ? ([
+          [a.id, b.id],
+          [b.id, a.id],
+        ] as const)
       : ([[a.id, b.id]] as const)) {
       let o = out.get(from);
       if (!o) out.set(from, (o = []));
       // Store the traversal-oriented copy so `edge.targetId` always names
       // the node we'd walk INTO (a shared row would self-point backward).
-      o.push(from === edge.sourceId && to === edge.targetId ? edge : { ...edge, sourceId: from, targetId: to });
+      o.push(
+        from === edge.sourceId && to === edge.targetId
+          ? edge
+          : { ...edge, sourceId: from, targetId: to },
+      );
     }
   }
 
@@ -357,7 +409,15 @@ export function buildGraph(
     sortedNeighbors.set(id, Array.from(set).sort());
   }
   for (const list of out.values()) {
-    list.sort((x, y) => (x.targetId < y.targetId ? -1 : x.targetId > y.targetId ? 1 : x.id < y.id ? -1 : 1));
+    list.sort((x, y) =>
+      x.targetId < y.targetId
+        ? -1
+        : x.targetId > y.targetId
+          ? 1
+          : x.id < y.id
+            ? -1
+            : 1,
+    );
   }
   // Insert in sorted id order so iteration is deterministic everywhere.
   const orderedNodes = new Map<string, GraphNode>();

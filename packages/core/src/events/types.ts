@@ -17,14 +17,14 @@
 //      tier it matched on (`email` / `name` / `initials`), a confidence, and
 //      the candidates it hesitated between. Ambiguity is returned, never
 //      resolved by guessing.
-export const MODULE_NAME = 'events';
+export const MODULE_NAME = "events";
 
 /** How the event row arrived. `provider` is reserved for the deferred discovery API. */
-export const EVENT_SOURCES = ['manual', 'import', 'provider'] as const;
+export const EVENT_SOURCES = ["manual", "import", "provider"] as const;
 export type EventSource = (typeof EVENT_SOURCES)[number];
 
 /** How an attendance row was written — drives edge status (see rule 1 above). */
-export const ATTENDANCE_VIAS = ['manual', 'import'] as const;
+export const ATTENDANCE_VIAS = ["manual", "import"] as const;
 export type AttendanceVia = (typeof ATTENDANCE_VIAS)[number];
 
 export const EVENT_LIMITS = {
@@ -52,19 +52,24 @@ export const EVENT_LIMITS = {
 /** Confidence at or above this is linked without asking. */
 export const AUTO_MATCH_CONFIDENCE = 0.9;
 
-export type EventErrorCode = 'invalid_input' | 'not_found' | 'conflict';
+export type EventErrorCode = "invalid_input" | "not_found" | "conflict";
 
 export class EventError extends Error {
   readonly code: EventErrorCode;
   constructor(code: EventErrorCode, message: string) {
     super(message);
-    this.name = 'EventError';
+    this.name = "EventError";
     this.code = code;
   }
 }
 
 export interface EventOptions {
   now?: Date;
+  /**
+   * v3.0 Phase 2 — workspace scope for every event read/write. Absent =
+   * bootstrap workspace (single-owner compatibility guarantee).
+   */
+  scope?: import("../workspaces/scope").WorkspaceScope;
 }
 
 export function resolveNow(opts: EventOptions = {}): Date {
@@ -74,6 +79,8 @@ export function resolveNow(opts: EventOptions = {}): Date {
 /** A row of the `events` table. */
 export interface EventRecord {
   id: string;
+  /** v3.0 Phase 2 — tenancy stamp; optional so pre-tenancy fixtures still typecheck. */
+  workspaceId?: string;
   name: string;
   location: string | null;
   startsAt: string | null;
@@ -126,8 +133,8 @@ export interface EventDetail {
   unmatched: UnmatchedAttendee[];
 }
 
-export type MatchStatus = 'matched' | 'review' | 'ambiguous' | 'unmatched';
-export type MatchVia = 'email' | 'name' | 'initials';
+export type MatchStatus = "matched" | "review" | "ambiguous" | "unmatched";
+export type MatchVia = "email" | "name" | "initials";
 
 export interface AttendeeMatch {
   ref: AttendeeRef;

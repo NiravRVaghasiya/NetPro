@@ -1,6 +1,7 @@
-import { providerEnvironment, vaultErrorResponse } from '@/lib/vault';
-import { VaultError } from '@netpro/core/src/crypto';
+import { providerEnvironment, vaultErrorResponse } from "@/lib/vault";
+import { VaultError } from "@netpro/core/src/crypto";
 import { NextResponse } from "next/server";
+import { requireScope } from "@/lib/authz";
 import { conn } from "@/lib/db";
 import {
   isSearchMode,
@@ -78,16 +79,31 @@ export async function GET(request: Request) {
   };
 
   try {
+    const scope = await requireScope();
     // Build the embedder only for a hybrid request — the portable and keyword
     // paths must not depend on credentials existing.
     const results = await searchContacts(
       conn,
       options,
-      mode === "hybrid" ? { embedder: searchEmbedder(await providerEnvironment(['embeddings.openai', 'outreach.openai'])) } : {},
+      mode === "hybrid"
+        ? {
+            embedder: searchEmbedder(
+              await providerEnvironment([
+                "embeddings.openai",
+                "outreach.openai",
+              ]),
+            ),
+          }
+        : {},
+      scope,
     );
     return NextResponse.json(results);
   } catch (error) {
-    if (error instanceof VaultError || (typeof error === 'object' && error !== null && 'status' in error)) return vaultErrorResponse(error);
+    if (
+      error instanceof VaultError ||
+      (typeof error === "object" && error !== null && "status" in error)
+    )
+      return vaultErrorResponse(error);
     return NextResponse.json(
       { error: (error as Error).message },
       { status: 500 },

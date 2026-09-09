@@ -1,7 +1,6 @@
 // v2.5 Phase 6 — the web-side retention schedule: env knobs (lenient by
 // design) and the start-up + 24 h cadence, self-guarded by the audit log.
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestSqliteConn } from "@netpro/db/src/testing";
 import { RETENTION_PURGE_ACTION } from "@netpro/core/src/retention";
 
 const fixture = await vi.hoisted(async () => {
@@ -18,7 +17,10 @@ import {
 function purgeRows(): Array<{ created_at: string; metadata: string | null }> {
   return fixture.sqlite
     .prepare("SELECT created_at, metadata FROM activity_log WHERE action = ?")
-    .all(RETENTION_PURGE_ACTION) as Array<{ created_at: string; metadata: string | null }>;
+    .all(RETENTION_PURGE_ACTION) as Array<{
+    created_at: string;
+    metadata: string | null;
+  }>;
 }
 
 /** Seed relative to the REAL clock — the schedule does not take a `now`. */
@@ -66,7 +68,7 @@ describe("retentionDisabled (v2.5 phase 6)", () => {
     ["true", true],
     ["True", true],
     [" true ", true],
-  ])('NETPRO_DISABLE_RETENTION=%j → %j', (value, expected) => {
+  ])("NETPRO_DISABLE_RETENTION=%j → %j", (value, expected) => {
     expect(retentionDisabled({ NETPRO_DISABLE_RETENTION: value })).toBe(
       expected,
     );
@@ -96,7 +98,9 @@ describe("retentionConfig (v2.5 phase 6)", () => {
   });
 
   it("floors fractional windows", () => {
-    expect(retentionConfig({ NETPRO_VIEW_RETENTION_DAYS: "12.7" }).viewRetentionDays).toBe(12);
+    expect(
+      retentionConfig({ NETPRO_VIEW_RETENTION_DAYS: "12.7" }).viewRetentionDays,
+    ).toBe(12);
   });
 
   it("falls back to the defaults for garbage, zero and negative values", () => {
@@ -115,7 +119,9 @@ describe("retentionConfig (v2.5 phase 6)", () => {
   });
 
   it("reports disabled when the kill switch is on", () => {
-    expect(retentionConfig({ NETPRO_DISABLE_RETENTION: "true" }).enabled).toBe(false);
+    expect(retentionConfig({ NETPRO_DISABLE_RETENTION: "true" }).enabled).toBe(
+      false,
+    );
   });
 });
 
@@ -129,7 +135,9 @@ describe("scheduleRetentionPurge (v2.5 phase 6)", () => {
     await vi.waitFor(() => expect(purgeRows()).toHaveLength(0));
     // The expired row is untouched — no schedule, no purge.
     expect(
-      fixture.sqlite.prepare("SELECT COUNT(*) AS n FROM profile_views").get() as { n: number },
+      fixture.sqlite
+        .prepare("SELECT COUNT(*) AS n FROM profile_views")
+        .get() as { n: number },
     ).toEqual({ n: 1 });
   });
 
@@ -142,9 +150,13 @@ describe("scheduleRetentionPurge (v2.5 phase 6)", () => {
 
       await vi.waitFor(() => expect(purgeRows()).toHaveLength(1));
       const row = purgeRows()[0]!;
-      expect(JSON.parse(row.metadata!)).toMatchObject({ profileViewsDeleted: 1 });
+      expect(JSON.parse(row.metadata!)).toMatchObject({
+        profileViewsDeleted: 1,
+      });
       expect(
-        fixture.sqlite.prepare("SELECT COUNT(*) AS n FROM profile_views").get() as { n: number },
+        fixture.sqlite
+          .prepare("SELECT COUNT(*) AS n FROM profile_views")
+          .get() as { n: number },
       ).toEqual({ n: 0 });
       // The run is announced with counts, not per-row.
       expect(consoleInfo).toHaveBeenCalledTimes(1);
@@ -164,7 +176,9 @@ describe("scheduleRetentionPurge (v2.5 phase 6)", () => {
     await new Promise((r) => setTimeout(r, 50)); // let the (skipped) run settle
     expect(purgeRows()).toHaveLength(1); // only the seeded row
     expect(
-      fixture.sqlite.prepare("SELECT COUNT(*) AS n FROM profile_views").get() as { n: number },
+      fixture.sqlite
+        .prepare("SELECT COUNT(*) AS n FROM profile_views")
+        .get() as { n: number },
     ).toEqual({ n: 1 }); // nothing deleted — the day is not over
   });
 
@@ -174,7 +188,10 @@ describe("scheduleRetentionPurge (v2.5 phase 6)", () => {
     try {
       // A bogus connection: the purge must fail inside the schedule, never
       // surface synchronously (the caller is the instrumentation hook).
-      scheduleRetentionPurge({ dialect: "sqlite", db: null, schema: null } as never, {});
+      scheduleRetentionPurge(
+        { dialect: "sqlite", db: null, schema: null } as never,
+        {},
+      );
     } catch {
       threw = true;
     }

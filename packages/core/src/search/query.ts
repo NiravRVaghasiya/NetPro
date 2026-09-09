@@ -21,14 +21,20 @@ import {
   type SearchContactsOptions,
   type SearchContactsResponse,
 } from "./types";
-import { buildSearchConditions, buildOrderBy, type PreparedTermFilters } from "./conditions";
+import {
+  buildSearchConditions,
+  buildOrderBy,
+  type PreparedTermFilters,
+} from "./conditions";
 import { contactColumns, mapRow, runFacets, runPage } from "./fetch";
 import { searchContactsFused, type HybridSearchDeps } from "./hybrid";
+import type { WorkspaceScope } from "../workspaces/scope";
 
 export async function searchContacts(
   conn: SqliteConn | PgConn,
   options: SearchContactsOptions = {},
   deps: HybridSearchDeps = {},
+  scope?: WorkspaceScope,
 ): Promise<SearchContactsResponse> {
   const norm = normalizeSearchOptions(options);
 
@@ -36,20 +42,27 @@ export async function searchContacts(
   // portable engine's filter+sort behaviour is already the correct answer, so
   // a mode request degrades silently rather than paying for an empty fusion.
   if (norm.mode !== "portable" && norm.terms.length > 0) {
-    return searchContactsFused(conn, options, norm, deps);
+    return searchContactsFused(conn, options, norm, deps, scope);
   }
 
   const prepared: PreparedTermFilters = {
     terms: norm.terms,
     cutoff: norm.cutoff,
-    fullQuery: norm.terms.length > 0 ? norm.terms.join(" ").toLowerCase() : null,
+    fullQuery:
+      norm.terms.length > 0 ? norm.terms.join(" ").toLowerCase() : null,
   };
 
   const cols = contactColumns(conn);
-  const where = buildSearchConditions(cols, options, prepared);
+  const where = buildSearchConditions(cols, options, prepared, scope);
   const orderBy = buildOrderBy(cols, norm.sort, prepared.fullQuery);
 
-  const { rows, total } = await runPage(conn, where, orderBy, norm.limit, norm.offset);
+  const { rows, total } = await runPage(
+    conn,
+    where,
+    orderBy,
+    norm.limit,
+    norm.offset,
+  );
   const facets = await runFacets(conn, cols, where);
 
   return {

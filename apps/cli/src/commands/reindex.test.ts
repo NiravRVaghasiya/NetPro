@@ -16,10 +16,18 @@ let sqlite: ReturnType<typeof createTestSqliteConn>["sqlite"];
 function insertContact(id: string, fullName: string, company?: string): void {
   sqlite
     .prepare(
-      `INSERT INTO contacts (id, full_name, company, source, created_at, updated_at)
-       VALUES (?,?,?,?,?,?)`,
+      `INSERT INTO contacts (id, workspace_id, full_name, company, source, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?)`,
     )
-    .run(id, fullName, company ?? null, "manual", "2026-01-01", "2026-01-01");
+    .run(
+      id,
+      "default",
+      fullName,
+      company ?? null,
+      "manual",
+      "2026-01-01",
+      "2026-01-01",
+    );
 }
 
 /** Keychain double — the real one reads an encrypted file in $HOME. */
@@ -61,7 +69,10 @@ describe("readEmbeddingsConfig", () => {
   it("lets the environment override the keychain", async () => {
     const config = await readEmbeddingsConfig(
       { EMBEDDINGS_API_KEY: "sk-env", EMBEDDINGS_MODEL: "env-model" },
-      fakeKeychain({ "embeddings.key": "sk-keychain", "embeddings.model": "kc-model" }),
+      fakeKeychain({
+        "embeddings.key": "sk-keychain",
+        "embeddings.model": "kc-model",
+      }),
     );
     expect(config.apiKey).toBe("sk-env");
     expect(config.model).toBe("env-model");
@@ -98,9 +109,13 @@ describe("executeReindex", () => {
 
     const { output, failed } = await executeReindex({}, conn);
     expect(failed).toBe(false);
-    expect(output).toContain("Scanned 2 contacts: 2 indexed, 0 unchanged, 0 pruned.");
+    expect(output).toContain(
+      "Scanned 2 contacts: 2 indexed, 0 unchanged, 0 pruned.",
+    );
     expect(output).not.toContain("Embeddings");
-    expect(sqlite.prepare("SELECT count(*) AS n FROM search_index").get()).toEqual({ n: 2 });
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM search_index").get(),
+    ).toEqual({ n: 2 });
   });
 
   it("is idempotent on a second run", async () => {
@@ -122,18 +137,24 @@ describe("executeReindex", () => {
     insertContact("c2", "John Smith");
     const { output } = await executeReindex({ contact: ["c1"] }, conn);
     expect(output).toContain("Scanned 1 contact:");
-    expect(sqlite.prepare("SELECT count(*) AS n FROM search_index").get()).toEqual({ n: 1 });
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM search_index").get(),
+    ).toEqual({ n: 1 });
   });
 
   it("--limit caps the run", async () => {
     insertContact("c1", "A");
     insertContact("c2", "B");
     insertContact("c3", "C");
-    expect((await executeReindex({ limit: "2" }, conn)).output).toContain("Scanned 2 contacts");
+    expect((await executeReindex({ limit: "2" }, conn)).output).toContain(
+      "Scanned 2 contacts",
+    );
   });
 
   it("rejects a bad --limit before touching the database", async () => {
-    await expect(executeReindex({ limit: "-3" }, conn)).rejects.toThrow(/positive integer/);
+    await expect(executeReindex({ limit: "-3" }, conn)).rejects.toThrow(
+      /positive integer/,
+    );
   });
 
   it("--json prints the raw summary", async () => {
@@ -155,7 +176,9 @@ describe("executeReindex", () => {
     expect(output).toContain("Full-text index: available");
     expect(output).toContain("Contacts:        1");
     expect(output).toContain("not indexed — run netpro reindex");
-    expect(sqlite.prepare("SELECT count(*) AS n FROM search_index").get()).toEqual({ n: 0 });
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM search_index").get(),
+    ).toEqual({ n: 0 });
   });
 
   it("--status --json returns the structured status", async () => {
@@ -172,10 +195,14 @@ describe("executeReindex", () => {
   it("--embeddings without a key fails with an actionable message", async () => {
     insertContact("c1", "Jane Doe");
     await expect(
-      executeReindex({ embeddings: true }, conn, { config: { provider: "disabled" } }),
+      executeReindex({ embeddings: true }, conn, {
+        config: { provider: "disabled" },
+      }),
     ).rejects.toThrow(/netpro config set embeddings\.key/);
     // And it must not have written a half-finished index.
-    expect(sqlite.prepare("SELECT count(*) AS n FROM search_index").get()).toEqual({ n: 0 });
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM search_index").get(),
+    ).toEqual({ n: 0 });
   });
 });
 
@@ -278,6 +305,8 @@ describe("executeReindex — embeddings path", () => {
     // same summary formatter the command prints.
     const { reindexSearchIndex } = await import("@netpro/core/src/search");
     const summary = await reindexSearchIndex(conn, { embedder });
-    expect(formatSummary(summary, embedder)).toContain("Embeddings (fake-model): 1 written.");
+    expect(formatSummary(summary, embedder)).toContain(
+      "Embeddings (fake-model): 1 written.",
+    );
   });
 });

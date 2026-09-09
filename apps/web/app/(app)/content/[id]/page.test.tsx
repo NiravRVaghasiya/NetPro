@@ -6,6 +6,13 @@ const fixture = await vi.hoisted(async () => {
   return createTestSqliteConn();
 });
 vi.mock("@/lib/db", () => ({ conn: fixture.conn }));
+vi.mock("@/lib/authz", () => ({
+  requireScope: async () => ({
+    workspaceId: "default",
+    userId: "test-user",
+    role: "owner",
+  }),
+}));
 // The panels are client components (useRouter); stub them so the server render
 // stays static — their APIs are covered by the route tests.
 vi.mock("../panels", () => ({

@@ -11,6 +11,7 @@ import {
   type SearchSort,
 } from "@netpro/core/src/search";
 import { readEmbeddingsConfig } from "./reindex";
+import type { WorkspaceScope } from "@netpro/core/src/workspaces/scope";
 
 export interface SearchCommandOptions {
   query?: string;
@@ -35,7 +36,9 @@ export interface SearchCommandOptions {
 }
 
 /** Split a comma/semicolon list into trimmed, non-empty values (undefined when empty). */
-export function parseSkillsFlag(value: string | undefined): string[] | undefined {
+export function parseSkillsFlag(
+  value: string | undefined,
+): string[] | undefined {
   if (value === undefined) return undefined;
   const list = value
     .split(/[,;]/)
@@ -119,9 +122,17 @@ export function engineLine(engine: SearchEngineReport): string | null {
 
   const parts: string[] = [];
   const { keyword, semantic } = engine.arms;
-  parts.push(keyword.used ? `full-text ${keyword.hits}` : `full-text off (${reasonLabel(keyword.reason)})`);
+  parts.push(
+    keyword.used
+      ? `full-text ${keyword.hits}`
+      : `full-text off (${reasonLabel(keyword.reason)})`,
+  );
   if (engine.requested === "hybrid") {
-    parts.push(semantic.used ? `semantic ${semantic.hits}` : `semantic off (${reasonLabel(semantic.reason)})`);
+    parts.push(
+      semantic.used
+        ? `semantic ${semantic.hits}`
+        : `semantic off (${reasonLabel(semantic.reason)})`,
+    );
   }
   parts.push(`substring ${engine.arms.portable.hits}`);
 
@@ -129,7 +140,9 @@ export function engineLine(engine: SearchEngineReport): string | null {
   return `Engine: ${engine.mode} — ${parts.join(", ")}${truncated}`;
 }
 
-function reasonLabel(reason: SearchEngineReport["arms"]["keyword"]["reason"]): string {
+function reasonLabel(
+  reason: SearchEngineReport["arms"]["keyword"]["reason"],
+): string {
   switch (reason) {
     case "index_empty":
       return "index empty; run netpro reindex";
@@ -155,6 +168,7 @@ export async function executeSearch(
   options: SearchCommandOptions,
   conn: SqliteConn | PgConn,
   deps: { embedder?: Parameters<typeof searchContacts>[2] } = {},
+  scope?: WorkspaceScope,
 ): Promise<string> {
   const searchOptions = toSearchOptions(options);
 
@@ -165,7 +179,7 @@ export async function executeSearch(
       ? { embedder: createEmbeddingProvider(await readEmbeddingsConfig()) }
       : undefined);
 
-  const res = await searchContacts(conn, searchOptions, embedder);
+  const res = await searchContacts(conn, searchOptions, embedder, scope);
 
   if (options.json) {
     return JSON.stringify(res, null, 2);
@@ -206,7 +220,7 @@ export async function executeSearch(
 }
 
 export function registerSearchCommand(program: Command): void {
-  program
+  const cmd = program
     .command("search")
     .description(
       "Search your contacts by text, role, company, location, seniority, and more",
@@ -243,13 +257,15 @@ export function registerSearchCommand(program: Command): void {
       "Print raw JSON (contacts, total, facets) instead of a table",
     )
     .action(async (queryArgs: string[], opts: SearchCommandOptions) => {
-      const { openDb } = await import("../db");
+      const { openDb, resolveCliScope } = await import("../db");
       try {
+        const conn = await openDb();
+        const scope = await resolveCliScope(cmd, conn);
         const merged: SearchCommandOptions = {
           ...opts,
           query: queryArgs.join(" ") || opts.query,
         };
-        const output = await executeSearch(merged, await openDb());
+        const output = await executeSearch(merged, conn, {}, scope);
         console.log(output);
       } catch (e) {
         console.error(`netpro search: ${(e as Error).message}`);

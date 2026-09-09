@@ -4,6 +4,13 @@ const fixture = await vi.hoisted(async () => {
   const { createTestSqliteConn } = await import("@netpro/db/src/testing");
   return createTestSqliteConn();
 });
+vi.mock("@/lib/authz", () => ({
+  requireScope: async () => ({
+    workspaceId: "default",
+    role: "owner",
+    userId: "system",
+  }),
+}));
 vi.mock("@/lib/db", () => ({ conn: fixture.conn }));
 
 import { GET } from "./route";
@@ -25,10 +32,23 @@ function seed(): void {
     })
     .run();
   const rows = [
-    { id: "w1", at: iso(0), referrer: "https://blog.example/hello", country: "GB", contact: "ada" },
+    {
+      id: "w1",
+      at: iso(0),
+      referrer: "https://blog.example/hello",
+      country: "GB",
+      contact: "ada",
+    },
     { id: "w2", at: iso(1), referrer: null, country: null, contact: null },
     { id: "w3", at: iso(40), referrer: null, country: null, contact: null },
-    { id: "w4", at: iso(0), referrer: null, country: null, contact: null, bot: true },
+    {
+      id: "w4",
+      at: iso(0),
+      referrer: null,
+      country: null,
+      contact: null,
+      bot: true,
+    },
   ];
   for (const [i, r] of rows.entries()) {
     fixture.conn.db
@@ -77,13 +97,23 @@ describe("GET /api/card/views (v2.5 phase 3)", () => {
         excluded: { bots: number; ownerViews: number };
         byReferrer: Array<{ value: string; count: number }>;
       };
-      recent: { total: number; views: Array<{ id: string; resolvedContact: unknown }> };
-      matches: { total: number; matches: Array<{ contact: { fullName: string } }> };
+      recent: {
+        total: number;
+        views: Array<{ id: string; resolvedContact: unknown }>;
+      };
+      matches: {
+        total: number;
+        matches: Array<{ contact: { fullName: string } }>;
+      };
     };
     expect(body.stats.window.days).toBe(30);
     expect(body.stats.totals).toMatchObject({ views: 2, uniqueViewers: 2 });
     expect(body.stats.excluded).toEqual({ bots: 1, ownerViews: 0 });
-    expect(body.stats.byReferrer).toContainEqual({ value: "blog.example", count: 1, share: 0.5 });
+    expect(body.stats.byReferrer).toContainEqual({
+      value: "blog.example",
+      count: 1,
+      share: 0.5,
+    });
     expect(body.recent.total).toBe(2);
     expect(body.matches.total).toBe(1);
     expect(body.matches.matches[0]?.contact.fullName).toBe("Ada Lovelace");
@@ -96,7 +126,12 @@ describe("GET /api/card/views (v2.5 phase 3)", () => {
     };
     expect(wide.stats.totals.views).toBe(3);
     const page = (await (await get("?limit=1&offset=1")).json()) as {
-      recent: { total: number; limit: number; offset: number; views: Array<{ id: string }> };
+      recent: {
+        total: number;
+        limit: number;
+        offset: number;
+        views: Array<{ id: string }>;
+      };
     };
     expect(page.recent.total).toBe(2);
     expect(page.recent.limit).toBe(1);

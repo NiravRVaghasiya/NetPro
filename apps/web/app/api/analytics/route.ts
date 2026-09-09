@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { requireScope } from "@/lib/authz";
+import { crmErrorResponse } from "@/lib/crm-request";
 import { conn } from "@/lib/db";
 import { getNetworkOverview } from "@netpro/core/src/analytics";
 
@@ -24,6 +26,7 @@ export async function GET(request: Request) {
   const content = p.get("content");
 
   try {
+    const scope = await requireScope();
     const overview = await getNetworkOverview(conn, {
       dormantDays: num(p.get("days")),
       activeDays: num(p.get("activeDays")),
@@ -32,12 +35,10 @@ export async function GET(request: Request) {
       includeGraph: graph === null ? true : graph !== "0",
       includeViews: views === null ? true : views !== "0",
       includeContent: content === null ? true : content !== "0",
+      scope,
     });
     return NextResponse.json(overview);
   } catch (error) {
-    return NextResponse.json(
-      { error: (error as Error).message },
-      { status: 500 },
-    );
+    return crmErrorResponse(error);
   }
 }

@@ -1,7 +1,14 @@
 // v2.5 Phase 6 — the startup hook: migrations and the daily retention
 // schedule, in the right order, on the right runtime, with the right knobs.
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTestSqliteConn } from "@netpro/db/src/testing";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { RETENTION_PURGE_ACTION } from "@netpro/core/src/retention";
 
 const fixture = await vi.hoisted(async () => {
@@ -53,9 +60,11 @@ describe("instrumentation register() (v2.5 phase 6)", () => {
       await vi.waitFor(() => expect(purgeRows()).toHaveLength(1));
       // The first boot of a fresh deployment purges immediately: the audit
       // row carries the (empty) counts, not per-row detail.
-      expect(consoleInfo.mock.calls.some((c) => String(c[0]).includes("retention purge"))).toBe(
-        true,
-      );
+      expect(
+        consoleInfo.mock.calls.some((c) =>
+          String(c[0]).includes("retention purge"),
+        ),
+      ).toBe(true);
     } finally {
       consoleInfo.mockRestore();
     }
@@ -68,7 +77,9 @@ describe("instrumentation register() (v2.5 phase 6)", () => {
     try {
       await register();
       expect(
-        consoleInfo.mock.calls.some((c) => String(c[0]).includes("skipping startup migrations")),
+        consoleInfo.mock.calls.some((c) =>
+          String(c[0]).includes("skipping startup migrations"),
+        ),
       ).toBe(true);
       await vi.waitFor(() => expect(purgeRows()).toHaveLength(1));
     } finally {

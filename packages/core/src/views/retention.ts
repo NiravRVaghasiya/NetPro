@@ -11,8 +11,9 @@
 // *query* to exist and be tested ("retention query deletes > 90d"); the
 // scheduling, the env knob, and the activity-log entry arrive with the
 // cross-cutting phase.
-import { sql } from 'drizzle-orm';
-import type { SqliteConn, PgConn } from '@netpro/db';
+import { sql } from "drizzle-orm";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import { workspaceSql, type WorkspaceScope } from "../workspaces/scope";
 
 type Conn = SqliteConn | PgConn;
 
@@ -24,6 +25,11 @@ export interface PurgeProfileViewsOptions {
   olderThanDays?: number;
   /** Clock override for tests. Defaults to now. */
   now?: Date;
+  /**
+   * v3.0 Phase 2 — when present, purge only this workspace (system sweeps
+   * call once per workspace). Absent = across all workspaces.
+   */
+  scope?: WorkspaceScope;
 }
 
 /**
@@ -36,13 +42,17 @@ export async function purgeExpiredProfileViews(
 ): Promise<{ deleted: number }> {
   const olderThanDays = options.olderThanDays ?? VIEW_RETENTION_DAYS;
   if (!Number.isFinite(olderThanDays) || olderThanDays < 1) {
-    throw new RangeError(`olderThanDays must be a positive number, got ${olderThanDays}`);
+    throw new RangeError(
+      `olderThanDays must be a positive number, got ${olderThanDays}`,
+    );
   }
   const cutoff = new Date(
     (options.now ?? new Date()).getTime() - olderThanDays * 86_400_000,
   ).toISOString();
-  const statement = sql`DELETE FROM profile_views WHERE viewed_at < ${cutoff}`;
-  if (conn.dialect === 'sqlite') {
+  const statement = options.scope
+    ? sql`DELETE FROM profile_views WHERE viewed_at < ${cutoff} AND ${workspaceSql(options.scope)}`
+    : sql`DELETE FROM profile_views WHERE viewed_at < ${cutoff}`;
+  if (conn.dialect === "sqlite") {
     return { deleted: conn.db.run(statement).changes };
   }
   const result = await conn.db.execute(statement);

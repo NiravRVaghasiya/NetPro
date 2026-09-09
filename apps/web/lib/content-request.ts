@@ -12,6 +12,7 @@
 import type { SqliteConn, PgConn } from "@netpro/db";
 import { resolveContactRef, type ContactRef } from "@netpro/core/src/ai";
 import { resolveContentRef, type ContentItem } from "@netpro/core/src/content";
+import type { WorkspaceScope } from "@netpro/core/src/workspaces/scope";
 import { CrmRequestError } from "./crm-request";
 
 /** 1 MiB is ~10k content rows — generous for a spreadsheet export. */
@@ -77,13 +78,14 @@ export function contentListParams(sp: URLSearchParams): {
 export async function resolveOptionalContent(
   conn: SqliteConn | PgConn,
   selector: string | null | undefined,
+  scope?: WorkspaceScope,
 ): Promise<ContentItem | null> {
   const trimmed = selector?.trim();
   if (!trimmed) return null;
   if (trimmed.length > 4096)
     throw new CrmRequestError(400, "content selector is too long.");
   try {
-    return await resolveContentRef(conn, trimmed);
+    return await resolveContentRef(conn, trimmed, scope);
   } catch {
     throw new CrmRequestError(
       404,
@@ -96,13 +98,14 @@ export async function resolveOptionalContent(
 export async function resolveOptionalContact(
   conn: SqliteConn | PgConn,
   selector: string | null | undefined,
+  scope?: WorkspaceScope,
 ): Promise<ContactRef | null> {
   const trimmed = selector?.trim();
   if (!trimmed) return null;
   if (trimmed.length > 320)
     throw new CrmRequestError(400, "contact selector is too long.");
   try {
-    return await resolveContactRef(conn, trimmed);
+    return await resolveContactRef(conn, trimmed, scope);
   } catch (e) {
     const message = (e as Error).message;
     if (message.startsWith("Ambiguous"))

@@ -12,16 +12,62 @@ const fixture = await vi.hoisted(async () => {
   ];
   for (const r of rows) {
     await f.conn.db.insert(f.conn.schema.contacts).values({
-      ...r, source: "test", createdAt: NOW, updatedAt: NOW,
+      ...r,
+      source: "test",
+      createdAt: NOW,
+      updatedAt: NOW,
     });
   }
   await f.conn.db.insert(f.conn.schema.edges).values([
-    { id: "e1", sourceId: "a", targetId: "b", relation: "colleague", strength: 0.7, confidence: 1, status: "confirmed", bidirectional: true, source: "manual", discoveredAt: NOW, updatedAt: NOW },
-    { id: "e2", sourceId: "b", targetId: "z", relation: "met_at_event", strength: 0.5, confidence: 1, status: "confirmed", bidirectional: true, source: "manual", discoveredAt: NOW, updatedAt: NOW },
-    { id: "e3", sourceId: "a", targetId: "l", relation: "mutual_network", strength: 0.3, confidence: 0.5, status: "pending", bidirectional: true, source: "linkedin_csv", discoveredAt: NOW, updatedAt: NOW },
+    {
+      id: "e1",
+      sourceId: "a",
+      targetId: "b",
+      relation: "colleague",
+      strength: 0.7,
+      confidence: 1,
+      status: "confirmed",
+      bidirectional: true,
+      source: "manual",
+      discoveredAt: NOW,
+      updatedAt: NOW,
+    },
+    {
+      id: "e2",
+      sourceId: "b",
+      targetId: "z",
+      relation: "met_at_event",
+      strength: 0.5,
+      confidence: 1,
+      status: "confirmed",
+      bidirectional: true,
+      source: "manual",
+      discoveredAt: NOW,
+      updatedAt: NOW,
+    },
+    {
+      id: "e3",
+      sourceId: "a",
+      targetId: "l",
+      relation: "mutual_network",
+      strength: 0.3,
+      confidence: 0.5,
+      status: "pending",
+      bidirectional: true,
+      source: "linkedin_csv",
+      discoveredAt: NOW,
+      updatedAt: NOW,
+    },
   ]);
   return f;
 });
+vi.mock("@/lib/authz", () => ({
+  requireScope: async () => ({
+    workspaceId: "default",
+    role: "owner",
+    userId: "system",
+  }),
+}));
 vi.mock("@/lib/db", () => ({ conn: fixture.conn }));
 
 import { GET } from "./route";
@@ -33,9 +79,16 @@ describe("GET /api/graph/overview", () => {
     const res = await get("/api/graph/overview");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      nodes: number; edges: number; totalContacts: number; coverage: number;
-      pendingCandidates: number; degraded: unknown;
-      communities: { count: number; top: Array<{ label: string; size: number }> };
+      nodes: number;
+      edges: number;
+      totalContacts: number;
+      coverage: number;
+      pendingCandidates: number;
+      degraded: unknown;
+      communities: {
+        count: number;
+        top: Array<{ label: string; size: number }>;
+      };
       centrality: { top: Array<{ contactId: string; degree: number }> };
       components: { count: number };
       avgPathLength: { value: number | null };
@@ -61,7 +114,9 @@ describe("GET /api/graph/overview", () => {
   });
 
   it("validates relation and status against the whitelists (400)", async () => {
-    expect((await get("/api/graph/overview?relation=telepathy")).status).toBe(400);
+    expect((await get("/api/graph/overview?relation=telepathy")).status).toBe(
+      400,
+    );
     expect((await get("/api/graph/overview?status=maybe")).status).toBe(400);
     expect((await get("/api/graph/overview?minConfidence=9")).status).toBe(400);
   });

@@ -1,10 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import * as schema from '@netpro/db/src/schema.sqlite';
+import { describe, it, expect, vi } from "vitest";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import * as schema from "@netpro/db/src/schema.sqlite";
 
-vi.mock('@/lib/db', () => {
-  const sqlite = new Database(':memory:');
+vi.mock("@/lib/authz", () => ({
+  requireScope: async () => ({
+    workspaceId: "default",
+    role: "owner",
+    userId: "system",
+  }),
+}));
+vi.mock("@/lib/db", () => {
+  const sqlite = new Database(":memory:");
   const db = drizzle(sqlite, { schema });
   sqlite.exec(`
     CREATE TABLE contacts (
@@ -18,27 +25,38 @@ vi.mock('@/lib/db', () => {
       workspace_id TEXT DEFAULT 'default', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
     );
   `);
-  db.insert(schema.contacts).values({
-    id: 'contact-1', fullName: 'Jane Doe', email: 'jane@example.com', company: 'Stripe',
-    source: 'linkedin_csv', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-  }).run();
-  return { conn: { dialect: 'sqlite', db, schema } };
+  db.insert(schema.contacts)
+    .values({
+      id: "contact-1",
+      fullName: "Jane Doe",
+      email: "jane@example.com",
+      company: "Stripe",
+      source: "linkedin_csv",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+    .run();
+  return { conn: { dialect: "sqlite", db, schema } };
 });
 
-const { GET } = await import('./route');
+const { GET } = await import("./route");
 
-describe('GET /api/export', () => {
-  it('returns a CSV attachment', async () => {
-    const response = await GET(new Request('http://localhost/api/export?format=csv'));
+describe("GET /api/export", () => {
+  it("returns a CSV attachment", async () => {
+    const response = await GET(
+      new Request("http://localhost/api/export?format=csv"),
+    );
     const text = await response.text();
 
-    expect(response.headers.get('Content-Type')).toBe('text/csv');
-    expect(response.headers.get('Content-Disposition')).toContain('attachment');
-    expect(text).toContain('Jane Doe');
+    expect(response.headers.get("Content-Type")).toBe("text/csv");
+    expect(response.headers.get("Content-Disposition")).toContain("attachment");
+    expect(text).toContain("Jane Doe");
   });
 
-  it('rejects an unsupported format', async () => {
-    const response = await GET(new Request('http://localhost/api/export?format=json'));
+  it("rejects an unsupported format", async () => {
+    const response = await GET(
+      new Request("http://localhost/api/export?format=json"),
+    );
     expect(response.status).toBe(400);
   });
 });

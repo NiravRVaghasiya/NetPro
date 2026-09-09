@@ -7,6 +7,7 @@
 //
 //   POST   { contactId | contact, context? }   link a contact (selector allowed)
 //   DELETE ?contactId=... | ?contact=...       remove the mention
+import { requireScope } from "@/lib/authz";
 import { conn } from "@/lib/db";
 import {
   addContentMention,
@@ -43,23 +44,29 @@ export async function POST(
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   try {
+    const scope = await requireScope("member");
     const { id } = await context.params;
-    const content = await resolveOptionalContent(conn, id);
+    const content = await resolveOptionalContent(conn, id, scope);
     if (!content)
       throw new CrmRequestError(404, "A content id or URL is required.");
     const body = await readCrmJson(request);
     const ref = await resolveOptionalContact(
       conn,
       (body.contactId ?? body.contact) as string | undefined,
+      scope,
     );
     if (!ref) {
       throw new CrmRequestError(400, "contactId or contact is required.");
     }
-    const { mention, created } = await addContentMention(conn, {
-      contentId: content.id,
-      contactId: ref.id,
-      context: mentionContext(body.context),
-    });
+    const { mention, created } = await addContentMention(
+      conn,
+      {
+        contentId: content.id,
+        contactId: ref.id,
+        context: mentionContext(body.context),
+      },
+      scope,
+    );
     return crmJson({ mention, created }, 201);
   } catch (error) {
     return crmErrorResponse(error);
@@ -71,22 +78,28 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   try {
+    const scope = await requireScope("member");
     const { id } = await context.params;
-    const content = await resolveOptionalContent(conn, id);
+    const content = await resolveOptionalContent(conn, id, scope);
     if (!content)
       throw new CrmRequestError(404, "A content id or URL is required.");
     const sp = new URL(request.url).searchParams;
     const ref = await resolveOptionalContact(
       conn,
       sp.get("contactId") ?? sp.get("contact"),
+      scope,
     );
     if (!ref) {
       throw new CrmRequestError(400, "contactId or contact is required.");
     }
-    const result = await removeContentMention(conn, {
-      contentId: content.id,
-      contactId: ref.id,
-    });
+    const result = await removeContentMention(
+      conn,
+      {
+        contentId: content.id,
+        contactId: ref.id,
+      },
+      scope,
+    );
     return crmJson({
       mention: result,
       contact: { id: ref.id, fullName: ref.fullName },

@@ -8,6 +8,7 @@
 // report this", never zero.
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { requireScope } from "@/lib/authz";
 import { conn } from "@/lib/db";
 import {
   getContentItem,
@@ -42,12 +43,13 @@ export default async function ContentDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const item = await resolveContentRef(conn, id).catch(() => null);
+  const scope = await requireScope();
+  const item = await resolveContentRef(conn, id, scope).catch(() => null);
   if (!item) notFound();
   const [detail, series, mentions] = await Promise.all([
-    getContentItem(conn, item.id),
-    getContentMetricsSeries(conn, item.id),
-    listContentMentions(conn, item.id),
+    getContentItem(conn, item.id, scope),
+    getContentMetricsSeries(conn, item.id, { scope }),
+    listContentMentions(conn, item.id, scope),
   ]);
   if (!detail) notFound();
   const now = new Date();

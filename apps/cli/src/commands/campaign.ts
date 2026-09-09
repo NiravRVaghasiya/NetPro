@@ -11,10 +11,11 @@
 // House pattern (mirrors commands/track.ts): exported execute*/render*
 // functions take an injected conn and clock (testable without a process), and
 // the commander actions are thin wrappers that open the database and print.
-import type { Command } from 'commander';
-import type { SqliteConn, PgConn } from '@netpro/db';
-import { resolveContactRef } from '@netpro/core/src/ai';
-import { CrmError } from '@netpro/core/src/crm';
+import type { Command } from "commander";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import { resolveContactRef } from "@netpro/core/src/ai";
+import { CrmError } from "@netpro/core/src/crm";
+import type { WorkspaceScope } from "@netpro/core/src/workspaces/scope";
 import {
   addRecipients,
   campaignSequence,
@@ -33,7 +34,7 @@ import {
   type MessageTemplate,
   type RecipientSelection,
   type RenderedRecipient,
-} from '@netpro/core/src/campaigns';
+} from "@netpro/core/src/campaigns";
 
 export interface CampaignListOptions {
   status?: string;
@@ -77,13 +78,17 @@ export interface CampaignMarkOptions {
 /** Resolve a campaign by exact id, unique id-prefix, or unique name. */
 export async function resolveCampaignId(
   conn: SqliteConn | PgConn,
-  ref: string
+  ref: string,
+  scope?: WorkspaceScope,
 ): Promise<string> {
   const trimmed = ref.trim();
   if (!trimmed) {
-    throw new CrmError('invalid_input', 'A campaign id (or unique prefix/name) is required.');
+    throw new CrmError(
+      "invalid_input",
+      "A campaign id (or unique prefix/name) is required.",
+    );
   }
-  const { campaigns } = await listCampaigns(conn, { limit: 1000 });
+  const { campaigns } = await listCampaigns(conn, { limit: 1000 }, scope);
 
   const exact = campaigns.find((c) => c.id === trimmed);
   if (exact) return exact.id;
@@ -92,23 +97,23 @@ export async function resolveCampaignId(
   if (byPrefix.length === 1) return byPrefix[0]!.id;
   if (byPrefix.length > 1) {
     throw new CrmError(
-      'invalid_input',
-      `Campaign prefix "${trimmed}" is ambiguous (${byPrefix.length} matches). Use more characters.`
+      "invalid_input",
+      `Campaign prefix "${trimmed}" is ambiguous (${byPrefix.length} matches). Use more characters.`,
     );
   }
 
   const byName = campaigns.filter(
-    (c) => c.name.toLowerCase() === trimmed.toLowerCase()
+    (c) => c.name.toLowerCase() === trimmed.toLowerCase(),
   );
   if (byName.length === 1) return byName[0]!.id;
   if (byName.length > 1) {
     throw new CrmError(
-      'invalid_input',
-      `Campaign name "${trimmed}" matches ${byName.length} campaigns. Use the id instead.`
+      "invalid_input",
+      `Campaign name "${trimmed}" matches ${byName.length} campaigns. Use the id instead.`,
     );
   }
 
-  throw new CrmError('not_found', `No campaign matches "${trimmed}".`);
+  throw new CrmError("not_found", `No campaign matches "${trimmed}".`);
 }
 
 /**
@@ -119,14 +124,19 @@ export async function resolveCampaignId(
 export async function resolveRecipientId(
   conn: SqliteConn | PgConn,
   campaignId: string,
-  ref: string
+  ref: string,
+  scope?: WorkspaceScope,
 ): Promise<string> {
   const trimmed = ref.trim();
   if (!trimmed) {
-    throw new CrmError('invalid_input', 'A recipient id (or contact reference) is required.');
+    throw new CrmError(
+      "invalid_input",
+      "A recipient id (or contact reference) is required.",
+    );
   }
-  const render = await renderCampaign(conn, campaignId);
-  if (!render) throw new CrmError('not_found', `No campaign with id "${campaignId}".`);
+  const render = await renderCampaign(conn, campaignId, {}, scope);
+  if (!render)
+    throw new CrmError("not_found", `No campaign with id "${campaignId}".`);
   const recipients = render.recipients;
 
   const exact = recipients.find((r) => r.id === trimmed);
@@ -136,8 +146,8 @@ export async function resolveRecipientId(
   if (byPrefix.length === 1) return byPrefix[0]!.id;
   if (byPrefix.length > 1) {
     throw new CrmError(
-      'invalid_input',
-      `Recipient prefix "${trimmed}" is ambiguous (${byPrefix.length} matches).`
+      "invalid_input",
+      `Recipient prefix "${trimmed}" is ambiguous (${byPrefix.length} matches).`,
     );
   }
 
@@ -147,13 +157,13 @@ export async function resolveRecipientId(
     (r) =>
       r.contactId === trimmed ||
       r.contactEmail?.toLowerCase() === lower ||
-      r.contactName.toLowerCase() === lower
+      r.contactName.toLowerCase() === lower,
   );
   if (byContact.length === 1) return byContact[0]!.id;
   if (byContact.length > 1) {
     throw new CrmError(
-      'invalid_input',
-      `Recipient "${trimmed}" matches ${byContact.length} contacts. Use the recipient id.`
+      "invalid_input",
+      `Recipient "${trimmed}" matches ${byContact.length} contacts. Use the recipient id.`,
     );
   }
 
@@ -161,13 +171,20 @@ export async function resolveRecipientId(
   // the resolved contact back to its recipient row in this campaign.
   try {
     const contact = await resolveContactRef(conn, trimmed);
-    const viaContact = await findRecipientByContact(conn, campaignId, contact.id);
+    const viaContact = await findRecipientByContact(
+      conn,
+      campaignId,
+      contact.id,
+    );
     if (viaContact) return viaContact.recipientId;
   } catch {
     // fall through to not_found
   }
 
-  throw new CrmError('not_found', `No recipient matches "${trimmed}" in this campaign.`);
+  throw new CrmError(
+    "not_found",
+    `No recipient matches "${trimmed}" in this campaign.`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -175,18 +192,31 @@ export async function resolveRecipientId(
 // ---------------------------------------------------------------------------
 
 /** Parse a repeatable `--step DAYS:SUBJECT:BODY` (body may contain colons). */
-export function parseStep(spec: string): { delayDays: number; subject: string; body: string } {
-  const first = spec.indexOf(':');
+export function parseStep(spec: string): {
+  delayDays: number;
+  subject: string;
+  body: string;
+} {
+  const first = spec.indexOf(":");
   if (first < 0) {
-    throw new CrmError('invalid_input', `--step expects "DAYS:SUBJECT:BODY", got "${spec}".`);
+    throw new CrmError(
+      "invalid_input",
+      `--step expects "DAYS:SUBJECT:BODY", got "${spec}".`,
+    );
   }
-  const second = spec.indexOf(':', first + 1);
+  const second = spec.indexOf(":", first + 1);
   if (second < 0) {
-    throw new CrmError('invalid_input', `--step expects "DAYS:SUBJECT:BODY", got "${spec}".`);
+    throw new CrmError(
+      "invalid_input",
+      `--step expects "DAYS:SUBJECT:BODY", got "${spec}".`,
+    );
   }
   const delayDays = Number(spec.slice(0, first));
   if (!Number.isInteger(delayDays) || delayDays < 1) {
-    throw new CrmError('invalid_input', `--step delay must be a whole number of days (got "${spec.slice(0, first)}").`);
+    throw new CrmError(
+      "invalid_input",
+      `--step delay must be a whole number of days (got "${spec.slice(0, first)}").`,
+    );
   }
   return {
     delayDays,
@@ -197,9 +227,9 @@ export function parseStep(spec: string): { delayDays: number; subject: string; b
 
 /** Build a search filter from the create flags (only keys that were set). */
 function searchFilterFromOptions(
-  opts: CampaignCreateOptions
-): RecipientSelection['search'] | null {
-  const filter: NonNullable<RecipientSelection['search']> = {};
+  opts: CampaignCreateOptions,
+): RecipientSelection["search"] | null {
+  const filter: NonNullable<RecipientSelection["search"]> = {};
   if (opts.query) filter.query = opts.query;
   if (opts.company) filter.company = opts.company;
   if (opts.role) filter.role = opts.role;
@@ -208,7 +238,9 @@ function searchFilterFromOptions(
   return Object.keys(filter).length > 0 ? filter : null;
 }
 
-function buildSelection(opts: CampaignCreateOptions): RecipientSelection | undefined {
+function buildSelection(
+  opts: CampaignCreateOptions,
+): RecipientSelection | undefined {
   if (opts.contact && opts.contact.length > 0) {
     return { contactIds: opts.contact };
   }
@@ -230,40 +262,58 @@ function statusCounts(c: Campaign): string {
 }
 
 export function renderCampaignLine(c: Campaign): string {
-  const type = c.type === 'sequence' ? `sequence(${c.steps.length + 1})` : 'single';
+  const type =
+    c.type === "sequence" ? `sequence(${c.steps.length + 1})` : "single";
   return `${shortId(c.id)}  ${c.status.padEnd(9)}  ${type.padEnd(12)}  ${statusCounts(c).padEnd(20)}  ${c.name}`;
 }
 
 export function renderRecipientLine(r: RenderedRecipient): string {
-  const draft = r.draft ? ` — "${r.draft.subject}"` : '';
-  const scheduled = r.scheduledAt ? ` (next ${r.scheduledAt.slice(0, 10)})` : '';
+  const draft = r.draft ? ` — "${r.draft.subject}"` : "";
+  const scheduled = r.scheduledAt
+    ? ` (next ${r.scheduledAt.slice(0, 10)})`
+    : "";
   return `${shortId(r.id)}  ${r.status.padEnd(9)}  ${r.contactName}${scheduled}${draft}`;
 }
 
-function renderCampaignDetail(render: CampaignRender, campaign: Campaign): string {
+function renderCampaignDetail(
+  render: CampaignRender,
+  campaign: Campaign,
+): string {
   const sequence: MessageTemplate[] = campaignSequence(campaign);
   const lines: string[] = [];
   lines.push(`${campaign.name}  [${shortId(campaign.id)}]`);
-  lines.push(`status: ${campaign.status}   type: ${campaign.type}   daily limit: ${campaign.dailyLimit}`);
-  lines.push(`recipients: ${campaign.totalRecipients}   sent: ${campaign.sent}   replied: ${campaign.replied}   bounced: ${campaign.bounced}`);
+  lines.push(
+    `status: ${campaign.status}   type: ${campaign.type}   daily limit: ${campaign.dailyLimit}`,
+  );
+  lines.push(
+    `recipients: ${campaign.totalRecipients}   sent: ${campaign.sent}   replied: ${campaign.replied}   bounced: ${campaign.bounced}`,
+  );
   if (campaign.sendFrom) lines.push(`send from: ${campaign.sendFrom}`);
-  lines.push('');
-  lines.push(`Sequence (${render.sequenceLength} message${render.sequenceLength === 1 ? '' : 's'}):`);
+  lines.push("");
+  lines.push(
+    `Sequence (${render.sequenceLength} message${render.sequenceLength === 1 ? "" : "s"}):`,
+  );
   sequence.forEach((m, i) => {
-    const lead = i === 0 ? 'initial' : `step ${i} (+${campaign.steps[i - 1]!.delayDays}d)`;
+    const lead =
+      i === 0 ? "initial" : `step ${i} (+${campaign.steps[i - 1]!.delayDays}d)`;
     lines.push(`  ${i + 1}. [${lead}] ${m.subject}`);
     lines.push(`     ${m.body}`);
   });
-  lines.push('');
-  lines.push(`Today: ${render.sentToday} sent · ${render.dailyLimitRemaining} remaining under the daily limit`);
-  lines.push('');
-  lines.push('Recipients:');
+  lines.push("");
+  lines.push(
+    `Today: ${render.sentToday} sent · ${render.dailyLimitRemaining} remaining under the daily limit`,
+  );
+  lines.push("");
+  lines.push("Recipients:");
   if (render.recipients.length === 0) {
-    lines.push('  (none — add with `netpro campaign create … --contact <id>` or a search filter)');
+    lines.push(
+      "  (none — add with `netpro campaign create … --contact <id>` or a search filter)",
+    );
   } else {
-    for (const r of render.recipients) lines.push(`  ${renderRecipientLine(r)}`);
+    for (const r of render.recipients)
+      lines.push(`  ${renderRecipientLine(r)}`);
   }
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -273,31 +323,43 @@ function renderCampaignDetail(render: CampaignRender, campaign: Campaign): strin
 export async function executeCampaignList(
   opts: CampaignListOptions,
   conn: SqliteConn | PgConn,
-  _now: Date = new Date()
+  _now: Date = new Date(),
+  scope?: WorkspaceScope,
 ): Promise<string> {
   const limit = Math.min(Math.max(Number(opts.limit ?? 20) || 20, 1), 200);
-  const { campaigns, total } = await listCampaigns(conn, {
-    status: opts.status,
-    limit,
-  });
+  const { campaigns, total } = await listCampaigns(
+    conn,
+    {
+      status: opts.status,
+      limit,
+    },
+    scope,
+  );
   if (opts.json) return JSON.stringify({ campaigns, total }, null, 2);
   if (campaigns.length === 0) {
     return opts.status
       ? `No ${opts.status} campaigns yet.`
-      : 'No campaigns yet. Create one with `netpro campaign create`.';
+      : "No campaigns yet. Create one with `netpro campaign create`.";
   }
-  const header = 'id        status     type          stats                 name';
-  return [header, ...campaigns.map(renderCampaignLine), `\n${total} campaign${total === 1 ? '' : 's'} total.`].join('\n');
+  const header =
+    "id        status     type          stats                 name";
+  return [
+    header,
+    ...campaigns.map(renderCampaignLine),
+    `\n${total} campaign${total === 1 ? "" : "s"} total.`,
+  ].join("\n");
 }
 
 export async function executeCampaignCreate(
   opts: CampaignCreateOptions,
   conn: SqliteConn | PgConn,
-  now: Date = new Date()
+  now: Date = new Date(),
+  scope?: WorkspaceScope,
 ): Promise<string> {
-  if (!opts.name) throw new CrmError('invalid_input', '--name is required.');
-  if (!opts.subject) throw new CrmError('invalid_input', '--subject is required.');
-  if (!opts.body) throw new CrmError('invalid_input', '--body is required.');
+  if (!opts.name) throw new CrmError("invalid_input", "--name is required.");
+  if (!opts.subject)
+    throw new CrmError("invalid_input", "--subject is required.");
+  if (!opts.body) throw new CrmError("invalid_input", "--body is required.");
 
   const steps = (opts.step ?? []).map(parseStep);
   const selection = buildSelection(opts);
@@ -308,55 +370,77 @@ export async function executeCampaignCreate(
       name: opts.name,
       template: { subject: opts.subject, body: opts.body },
       steps,
-      dailyLimit: opts.dailyLimit !== undefined ? Number(opts.dailyLimit) : undefined,
+      dailyLimit:
+        opts.dailyLimit !== undefined ? Number(opts.dailyLimit) : undefined,
       sendFrom: opts.sendFrom,
       recipients: selection,
     },
-    { now }
+    { now },
+    scope,
   );
 
   if (opts.json) return JSON.stringify(result, null, 2);
   const c = result.campaign;
   const bits = [`Created draft campaign "${c.name}" [${shortId(c.id)}]`];
-  bits.push(`${c.type === 'sequence' ? `${c.steps.length + 1}-message sequence` : 'single message'}, daily limit ${c.dailyLimit}`);
+  bits.push(
+    `${c.type === "sequence" ? `${c.steps.length + 1}-message sequence` : "single message"}, daily limit ${c.dailyLimit}`,
+  );
   if (selection) {
     const detail = [`recipients: +${result.added} added`];
-    if (result.skippedDuplicates > 0) detail.push(`${result.skippedDuplicates} duplicates skipped`);
-    bits.push(detail.join(' · '));
+    if (result.skippedDuplicates > 0)
+      detail.push(`${result.skippedDuplicates} duplicates skipped`);
+    bits.push(detail.join(" · "));
   } else {
-    bits.push('no recipients yet — add with `netpro campaign add-recipients` or a search filter at create time');
+    bits.push(
+      "no recipients yet — add with `netpro campaign add-recipients` or a search filter at create time",
+    );
   }
-  bits.push('\nActivate when ready: `netpro campaign activate ' + shortId(c.id) + '`');
-  return bits.join('\n');
+  bits.push(
+    "\nActivate when ready: `netpro campaign activate " + shortId(c.id) + "`",
+  );
+  return bits.join("\n");
 }
 
 export async function executeCampaignAddRecipients(
   campaignRef: string,
   opts: CampaignCreateOptions,
   conn: SqliteConn | PgConn,
-  now: Date = new Date()
+  now: Date = new Date(),
+  scope?: WorkspaceScope,
 ): Promise<string> {
-  const campaignId = await resolveCampaignId(conn, campaignRef);
+  const campaignId = await resolveCampaignId(conn, campaignRef, scope);
   const selection = buildSelection(opts);
   if (!selection) {
-    throw new CrmError('invalid_input', 'Provide --contact <id> (repeatable) or a search filter (--company/--role/--location/--industry/--query).');
+    throw new CrmError(
+      "invalid_input",
+      "Provide --contact <id> (repeatable) or a search filter (--company/--role/--location/--industry/--query).",
+    );
   }
-  const result = await addRecipients(conn, campaignId, selection, { now });
+  const result = await addRecipients(
+    conn,
+    campaignId,
+    selection,
+    { now },
+    scope,
+  );
   if (opts.json) return JSON.stringify(result, null, 2);
   const bits = [`+${result.added} recipients added`];
-  if (result.skippedDuplicates > 0) bits.push(`${result.skippedDuplicates} duplicates skipped`);
-  return bits.join(' · ');
+  if (result.skippedDuplicates > 0)
+    bits.push(`${result.skippedDuplicates} duplicates skipped`);
+  return bits.join(" · ");
 }
 
 export async function executeCampaignShow(
   campaignRef: string,
   opts: CampaignShowOptions,
   conn: SqliteConn | PgConn,
-  _now: Date = new Date()
+  _now: Date = new Date(),
+  scope?: WorkspaceScope,
 ): Promise<string> {
-  const campaignId = await resolveCampaignId(conn, campaignRef);
-  const render = await renderCampaign(conn, campaignId);
-  if (!render) throw new CrmError('not_found', `No campaign with id "${campaignId}".`);
+  const campaignId = await resolveCampaignId(conn, campaignRef, scope);
+  const render = await renderCampaign(conn, campaignId, {}, scope);
+  if (!render)
+    throw new CrmError("not_found", `No campaign with id "${campaignId}".`);
   if (opts.json) return JSON.stringify(render, null, 2);
   return renderCampaignDetail(render, render.campaign);
 }
@@ -366,10 +450,17 @@ export async function executeCampaignStatus(
   status: CampaignStatus,
   opts: CampaignStatusOptions,
   conn: SqliteConn | PgConn,
-  now: Date = new Date()
+  now: Date = new Date(),
+  scope?: WorkspaceScope,
 ): Promise<string> {
-  const campaignId = await resolveCampaignId(conn, campaignRef);
-  const updated = await setCampaignStatus(conn, campaignId, status, { now });
+  const campaignId = await resolveCampaignId(conn, campaignRef, scope);
+  const updated = await setCampaignStatus(
+    conn,
+    campaignId,
+    status,
+    { now },
+    scope,
+  );
   if (opts.json) return JSON.stringify(updated, null, 2);
   return `✓ "${updated.name}" is now ${updated.status}.`;
 }
@@ -379,21 +470,34 @@ export async function executeCampaignMarkSent(
   recipientRef: string,
   opts: CampaignMarkOptions,
   conn: SqliteConn | PgConn,
-  now: Date = new Date()
+  now: Date = new Date(),
+  scope?: WorkspaceScope,
 ): Promise<string> {
-  const campaignId = await resolveCampaignId(conn, campaignRef);
-  const recipientId = await resolveRecipientId(conn, campaignId, recipientRef);
-  const result = await markRecipientSent(conn, campaignId, recipientId, {
-    now,
-    force: opts.force,
-  });
+  const campaignId = await resolveCampaignId(conn, campaignRef, scope);
+  const recipientId = await resolveRecipientId(
+    conn,
+    campaignId,
+    recipientRef,
+    scope,
+  );
+  const result = await markRecipientSent(
+    conn,
+    campaignId,
+    recipientId,
+    {
+      now,
+      force: opts.force,
+    },
+    scope,
+  );
   if (opts.json) return JSON.stringify(result, null, 2);
   const r = result.recipient;
-  const next = r.status === 'scheduled' && r.scheduledAt
-    ? ` Next message scheduled for ${r.scheduledAt.slice(0, 10)}.`
-    : r.status === 'sent'
-      ? ' Sequence complete.'
-      : '';
+  const next =
+    r.status === "scheduled" && r.scheduledAt
+      ? ` Next message scheduled for ${r.scheduledAt.slice(0, 10)}.`
+      : r.status === "sent"
+        ? " Sequence complete."
+        : "";
   return `✓ Sent to ${r.contactName} — logged email_sent.${next} (${result.campaign.sent}/${result.campaign.totalRecipients} sent)`;
 }
 
@@ -402,11 +506,23 @@ export async function executeCampaignMarkReplied(
   recipientRef: string,
   opts: CampaignMarkOptions,
   conn: SqliteConn | PgConn,
-  now: Date = new Date()
+  now: Date = new Date(),
+  scope?: WorkspaceScope,
 ): Promise<string> {
-  const campaignId = await resolveCampaignId(conn, campaignRef);
-  const recipientId = await resolveRecipientId(conn, campaignId, recipientRef);
-  const result = await markRecipientReplied(conn, campaignId, recipientId, { now });
+  const campaignId = await resolveCampaignId(conn, campaignRef, scope);
+  const recipientId = await resolveRecipientId(
+    conn,
+    campaignId,
+    recipientRef,
+    scope,
+  );
+  const result = await markRecipientReplied(
+    conn,
+    campaignId,
+    recipientId,
+    { now },
+    scope,
+  );
   if (opts.json) return JSON.stringify(result, null, 2);
   return `✓ Reply from ${result.recipient.contactName} recorded — drip cancelled. (${result.campaign.replied} replied)`;
 }
@@ -416,19 +532,36 @@ export async function executeCampaignMarkSkipped(
   recipientRef: string,
   opts: CampaignMarkOptions,
   conn: SqliteConn | PgConn,
-  now: Date = new Date()
+  now: Date = new Date(),
+  scope?: WorkspaceScope,
 ): Promise<string> {
-  const campaignId = await resolveCampaignId(conn, campaignRef);
-  const recipientId = await resolveRecipientId(conn, campaignId, recipientRef);
-  const result = await markRecipientSkipped(conn, campaignId, recipientId, { now });
+  const campaignId = await resolveCampaignId(conn, campaignRef, scope);
+  const recipientId = await resolveRecipientId(
+    conn,
+    campaignId,
+    recipientRef,
+    scope,
+  );
+  const result = await markRecipientSkipped(
+    conn,
+    campaignId,
+    recipientId,
+    { now },
+    scope,
+  );
   if (opts.json) return JSON.stringify(result, null, 2);
   return `⊘ Skipped ${result.recipient.contactName} — no message will be drafted for this contact.`;
 }
 
-async function run(fn: (conn: SqliteConn | PgConn) => Promise<string>): Promise<void> {
-  const { openDb } = await import('../db');
+async function run(
+  cmd: Command,
+  fn: (conn: SqliteConn | PgConn, scope?: WorkspaceScope) => Promise<string>,
+): Promise<void> {
+  const { openDb, resolveCliScope } = await import("../db");
   try {
-    console.log(await fn(await openDb()));
+    const conn = await openDb();
+    const scope = await resolveCliScope(cmd, conn);
+    console.log(await fn(conn, scope));
   } catch (e) {
     console.error(`netpro campaign: ${(e as Error).message}`);
     process.exitCode = 1;
@@ -437,91 +570,149 @@ async function run(fn: (conn: SqliteConn | PgConn) => Promise<string>): Promise<
 
 export function registerCampaignCommand(program: Command): void {
   const campaign = program
-    .command('campaign')
-    .description('Draft and manage batch outreach campaigns (NetPro drafts — you send)');
+    .command("campaign")
+    .description(
+      "Draft and manage batch outreach campaigns (NetPro drafts — you send)",
+    );
 
   campaign
-    .command('list')
-    .description('List campaigns')
-    .option('--status <status>', `Filter by status (${CAMPAIGN_STATUSES.join(' | ')})`)
-    .option('--limit <n>', 'Max rows (default 20, max 200)', '20')
-    .option('--json', 'Print the result as JSON')
-    .action((opts: CampaignListOptions) => run((conn) => executeCampaignList(opts, conn)));
+    .command("list")
+    .description("List campaigns")
+    .option(
+      "--status <status>",
+      `Filter by status (${CAMPAIGN_STATUSES.join(" | ")})`,
+    )
+    .option("--limit <n>", "Max rows (default 20, max 200)", "20")
+    .option("--json", "Print the result as JSON")
+    .action((opts: CampaignListOptions) =>
+      run(campaign, (conn, scope) =>
+        executeCampaignList(opts, conn, new Date(), scope),
+      ),
+    );
 
   campaign
-    .command('create')
-    .description('Create a draft campaign (single message or drip sequence)')
-    .option('--name <name>', 'Campaign name (required)')
-    .option('--subject <text>', 'First message subject; merge vars allowed (required)')
-    .option('--body <text>', 'First message body; merge vars allowed (required)')
-    .option('--step <DAYS:SUBJECT:BODY>', 'Add a drip step (repeatable, max 5)', (v: string, prev: string[]) => [...prev, v], [] as string[])
-    .option('--daily-limit <n>', 'Max sends per day (default 50)')
-    .option('--send-from <email>', 'The mailbox you send from (advisory only)')
-    .option('--contact <id>', 'Recipient contact id (repeatable)', (v: string, prev: string[]) => [...prev, v], [] as string[])
-    .option('--query <text>', 'Search snapshot: full-text query')
-    .option('--company <company>', 'Search snapshot: company substring')
-    .option('--role <role>', 'Search snapshot: role substring')
-    .option('--location <location>', 'Search snapshot: location substring')
-    .option('--industry <industry>', 'Search snapshot: industry substring')
-    .option('--json', 'Print the result as JSON')
-    .action((opts: CampaignCreateOptions) => run((conn) => executeCampaignCreate(opts, conn)));
+    .command("create")
+    .description("Create a draft campaign (single message or drip sequence)")
+    .option("--name <name>", "Campaign name (required)")
+    .option(
+      "--subject <text>",
+      "First message subject; merge vars allowed (required)",
+    )
+    .option(
+      "--body <text>",
+      "First message body; merge vars allowed (required)",
+    )
+    .option(
+      "--step <DAYS:SUBJECT:BODY>",
+      "Add a drip step (repeatable, max 5)",
+      (v: string, prev: string[]) => [...prev, v],
+      [] as string[],
+    )
+    .option("--daily-limit <n>", "Max sends per day (default 50)")
+    .option("--send-from <email>", "The mailbox you send from (advisory only)")
+    .option(
+      "--contact <id>",
+      "Recipient contact id (repeatable)",
+      (v: string, prev: string[]) => [...prev, v],
+      [] as string[],
+    )
+    .option("--query <text>", "Search snapshot: full-text query")
+    .option("--company <company>", "Search snapshot: company substring")
+    .option("--role <role>", "Search snapshot: role substring")
+    .option("--location <location>", "Search snapshot: location substring")
+    .option("--industry <industry>", "Search snapshot: industry substring")
+    .option("--json", "Print the result as JSON")
+    .action((opts: CampaignCreateOptions) =>
+      run(campaign, (conn, scope) =>
+        executeCampaignCreate(opts, conn, new Date(), scope),
+      ),
+    );
 
   campaign
-    .command('add-recipients <campaign>')
-    .description('Add recipients to a campaign by id or search snapshot')
-    .option('--contact <id>', 'Recipient contact id (repeatable)', (v: string, prev: string[]) => [...prev, v], [] as string[])
-    .option('--query <text>', 'Search snapshot: full-text query')
-    .option('--company <company>', 'Search snapshot: company substring')
-    .option('--role <role>', 'Search snapshot: role substring')
-    .option('--location <location>', 'Search snapshot: location substring')
-    .option('--industry <industry>', 'Search snapshot: industry substring')
-    .option('--json', 'Print the result as JSON')
+    .command("add-recipients <campaign>")
+    .description("Add recipients to a campaign by id or search snapshot")
+    .option(
+      "--contact <id>",
+      "Recipient contact id (repeatable)",
+      (v: string, prev: string[]) => [...prev, v],
+      [] as string[],
+    )
+    .option("--query <text>", "Search snapshot: full-text query")
+    .option("--company <company>", "Search snapshot: company substring")
+    .option("--role <role>", "Search snapshot: role substring")
+    .option("--location <location>", "Search snapshot: location substring")
+    .option("--industry <industry>", "Search snapshot: industry substring")
+    .option("--json", "Print the result as JSON")
     .action((ref: string, opts: CampaignCreateOptions) =>
-      run((conn) => executeCampaignAddRecipients(ref, opts, conn))
+      run(campaign, (conn, scope) =>
+        executeCampaignAddRecipients(ref, opts, conn, new Date(), scope),
+      ),
     );
 
   campaign
-    .command('show <campaign>')
-    .description('Show a campaign: sequence, recipients, and each personalized draft')
-    .option('--json', 'Print the result as JSON')
+    .command("show <campaign>")
+    .description(
+      "Show a campaign: sequence, recipients, and each personalized draft",
+    )
+    .option("--json", "Print the result as JSON")
     .action((ref: string, opts: CampaignShowOptions) =>
-      run((conn) => executeCampaignShow(ref, opts, conn))
+      run(campaign, (conn, scope) =>
+        executeCampaignShow(ref, opts, conn, new Date(), scope),
+      ),
     );
 
-  for (const status of ['activate', 'pause', 'complete', 'archive'] as const) {
+  for (const status of ["activate", "pause", "complete", "archive"] as const) {
     const target: CampaignStatus =
-      status === 'activate' ? 'active' : status === 'pause' ? 'paused' : status === 'complete' ? 'completed' : 'archived';
+      status === "activate"
+        ? "active"
+        : status === "pause"
+          ? "paused"
+          : status === "complete"
+            ? "completed"
+            : "archived";
     campaign
       .command(`${status} <campaign>`)
       .description(`Move a campaign to "${target}"`)
-      .option('--json', 'Print the result as JSON')
+      .option("--json", "Print the result as JSON")
       .action((ref: string, opts: CampaignStatusOptions) =>
-        run((conn) => executeCampaignStatus(ref, target, opts, conn))
+        run(campaign, (conn, scope) =>
+          executeCampaignStatus(ref, target, opts, conn, new Date(), scope),
+        ),
       );
   }
 
   campaign
-    .command('mark-sent <campaign> <recipient>')
-    .description('Record that you sent a recipient\'s drafted message (logs an interaction)')
-    .option('--force', 'Send even if it exceeds the daily limit')
-    .option('--json', 'Print the result as JSON')
+    .command("mark-sent <campaign> <recipient>")
+    .description(
+      "Record that you sent a recipient's drafted message (logs an interaction)",
+    )
+    .option("--force", "Send even if it exceeds the daily limit")
+    .option("--json", "Print the result as JSON")
     .action((cref: string, rref: string, opts: CampaignMarkOptions) =>
-      run((conn) => executeCampaignMarkSent(cref, rref, opts, conn))
+      run(campaign, (conn, scope) =>
+        executeCampaignMarkSent(cref, rref, opts, conn, new Date(), scope),
+      ),
     );
 
   campaign
-    .command('mark-replied <campaign> <recipient>')
-    .description('Record an inbound reply (logs an interaction and cancels the drip)')
-    .option('--json', 'Print the result as JSON')
+    .command("mark-replied <campaign> <recipient>")
+    .description(
+      "Record an inbound reply (logs an interaction and cancels the drip)",
+    )
+    .option("--json", "Print the result as JSON")
     .action((cref: string, rref: string, opts: CampaignMarkOptions) =>
-      run((conn) => executeCampaignMarkReplied(cref, rref, opts, conn))
+      run(campaign, (conn, scope) =>
+        executeCampaignMarkReplied(cref, rref, opts, conn, new Date(), scope),
+      ),
     );
 
   campaign
-    .command('mark-skipped <campaign> <recipient>')
-    .description('Opt a recipient out before sending (no interaction logged)')
-    .option('--json', 'Print the result as JSON')
+    .command("mark-skipped <campaign> <recipient>")
+    .description("Opt a recipient out before sending (no interaction logged)")
+    .option("--json", "Print the result as JSON")
     .action((cref: string, rref: string, opts: CampaignMarkOptions) =>
-      run((conn) => executeCampaignMarkSkipped(cref, rref, opts, conn))
+      run(campaign, (conn, scope) =>
+        executeCampaignMarkSkipped(cref, rref, opts, conn, new Date(), scope),
+      ),
     );
 }

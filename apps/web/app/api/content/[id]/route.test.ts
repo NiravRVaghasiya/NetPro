@@ -4,6 +4,13 @@ const fixture = await vi.hoisted(async () => {
   const { createTestSqliteConn } = await import("@netpro/db/src/testing");
   return createTestSqliteConn();
 });
+vi.mock("@/lib/authz", () => ({
+  requireScope: async () => ({
+    workspaceId: "default",
+    role: "owner",
+    userId: "system",
+  }),
+}));
 vi.mock("@/lib/db", () => ({ conn: fixture.conn }));
 
 import { DELETE, GET } from "./route";

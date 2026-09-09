@@ -24,6 +24,11 @@ import { getContactById } from "../ai/resolve-contact";
 import { writeActivityLog } from "../crm/activity";
 import { rawAll } from "../search/indexer";
 import {
+  resolveScope,
+  workspaceSql,
+  type WorkspaceScope,
+} from "../workspaces/scope";
+import {
   parseContentCsv,
   parseContentDate,
   parseFeedXml,
@@ -262,10 +267,12 @@ const LATEST_ORDER = sql`ORDER BY m.fetched_at DESC, m.created_at DESC, m.id DES
 async function itemRowById(
   conn: Conn,
   id: string,
+  scope?: WorkspaceScope,
 ): Promise<ContentItem | null> {
   const rows = await rawAll<ItemSqlRow>(
     conn,
-    sql`${ITEM_SELECT} FROM content_items i WHERE i.id = ${id}`,
+    sql`${ITEM_SELECT} FROM content_items i
+        WHERE i.id = ${id} AND ${workspaceSql(scope, "i.workspace_id")}`,
   );
   return rows[0] ? toItem(rows[0]) : null;
 }
@@ -273,10 +280,12 @@ async function itemRowById(
 async function itemRowByUrlNorm(
   conn: Conn,
   urlNorm: string,
+  scope?: WorkspaceScope,
 ): Promise<ContentItem | null> {
   const rows = await rawAll<ItemSqlRow>(
     conn,
-    sql`${ITEM_SELECT} FROM content_items i WHERE i.url_norm = ${urlNorm}`,
+    sql`${ITEM_SELECT} FROM content_items i
+        WHERE i.url_norm = ${urlNorm} AND ${workspaceSql(scope, "i.workspace_id")}`,
   );
   return rows[0] ? toItem(rows[0]) : null;
 }
@@ -291,6 +300,8 @@ export interface ListContentOptions {
   limit?: number;
   offset?: number;
   now?: Date;
+  /** v3.0 Phase 2 — workspace scope. Absent = bootstrap workspace. */
+  scope?: WorkspaceScope;
 }
 
 export interface ListContentResult {
@@ -305,7 +316,7 @@ function buildItemFilters(
   opts: ListContentOptions,
 ): { where: SQL } {
   void conn;
-  const parts: SQL[] = [];
+  const parts: SQL[] = [workspaceSql(opts.scope, "i.workspace_id")];
   if (
     opts.platform !== undefined &&
     opts.platform !== null &&
@@ -394,7 +405,12 @@ export async function listContentSummaries(
   opts: ListContentOptions = {},
 ): Promise<ListContentSummariesResult> {
   const { items, total, limit, offset } = await listContentItems(conn, opts);
-  return { items: await enrichSummaries(conn, items), total, limit, offset };
+  return {
+    items: await enrichSummaries(conn, items, opts.scope),
+    total,
+    limit,
+    offset,
+  };
 }
 
 /**
@@ -404,6 +420,7 @@ export async function listContentSummaries(
 async function enrichSummaries(
   conn: Conn,
   items: ContentItem[],
+  scope?: WorkspaceScope,
 ): Promise<ContentItemSummary[]> {
   if (items.length === 0) return [];
   const ids = items.map((i) => i.id);
@@ -438,6 +455,7 @@ async function enrichSummaries(
     sql`SELECT m.content_id AS content_id, COUNT(*) AS n FROM content_mentions m
         JOIN contacts c ON c.id = m.contact_id
         WHERE m.content_id IN (${idList}) AND c.deleted_at IS NULL
+          AND ${workspaceSql(scope, "c.workspace_id")}
         GROUP BY m.content_id`,
   );
 
@@ -464,11 +482,12 @@ async function enrichSummaries(
 export async function resolveContentRef(
   conn: Conn,
   selector: string,
+  scope?: WorkspaceScope,
 ): Promise<ContentItem> {
   const trimmed = selector.trim();
   if (!trimmed)
     throw new ContentError("invalid_input", "A content id or URL is required.");
-  const byId = await itemRowById(conn, trimmed);
+  const byId = await itemRowById(conn, trimmed, scope);
   if (byId) return byId;
   let urlNorm: string | null = null;
   try {
@@ -477,7 +496,7 @@ export async function resolveContentRef(
     // Not a URL — the id lookup above already missed, so this is a miss.
   }
   if (urlNorm) {
-    const byUrl = await itemRowByUrlNorm(conn, urlNorm);
+    const byUrl = await itemRowByUrlNorm(conn, urlNorm, scope);
     if (byUrl) return byUrl;
   }
   throw new ContentError(
@@ -489,18 +508,26 @@ export async function resolveContentRef(
 async function latestMetric(
   conn: Conn,
   contentId: string,
+  scope?: WorkspaceScope,
 ): Promise<ContentMetric | null> {
   const rows = await rawAll<MetricSqlRow>(
     conn,
-    sql`${METRIC_SELECT} FROM content_metrics m WHERE m.content_id = ${contentId} ${LATEST_ORDER} LIMIT 1`,
+    sql`${METRIC_SELECT} FROM content_metrics m
+        WHERE m.content_id = ${contentId} AND ${workspaceSql(scope, "m.workspace_id")}
+        ${LATEST_ORDER} LIMIT 1`,
   );
   return rows[0] ? toMetric(rows[0]) : null;
 }
 
-async function countMetrics(conn: Conn, contentId: string): Promise<number> {
+async function countMetrics(
+  conn: Conn,
+  contentId: string,
+  scope?: WorkspaceScope,
+): Promise<number> {
   const rows = await rawAll<{ n: number | string }>(
     conn,
-    sql`SELECT COUNT(*) AS n FROM content_metrics m WHERE m.content_id = ${contentId}`,
+    sql`SELECT COUNT(*) AS n FROM content_metrics m
+        WHERE m.content_id = ${contentId} AND ${workspaceSql(scope, "m.workspace_id")}`,
   );
   return num(rows[0]?.n ?? 0);
 }
@@ -508,12 +535,14 @@ async function countMetrics(conn: Conn, contentId: string): Promise<number> {
 async function countLiveMentions(
   conn: Conn,
   contentId: string,
+  scope?: WorkspaceScope,
 ): Promise<number> {
   const rows = await rawAll<{ n: number | string }>(
     conn,
     sql`SELECT COUNT(*) AS n FROM content_mentions m
         JOIN contacts c ON c.id = m.contact_id
-        WHERE m.content_id = ${contentId} AND c.deleted_at IS NULL`,
+        WHERE m.content_id = ${contentId} AND c.deleted_at IS NULL
+          AND ${workspaceSql(scope, "c.workspace_id")}`,
   );
   return num(rows[0]?.n ?? 0);
 }
@@ -522,13 +551,14 @@ async function countLiveMentions(
 export async function getContentItem(
   conn: Conn,
   id: string,
+  scope?: WorkspaceScope,
 ): Promise<ContentItemSummary | null> {
-  const item = await itemRowById(conn, id.trim());
+  const item = await itemRowById(conn, id.trim(), scope);
   if (!item) return null;
   const [metrics, metricsCount, mentionsCount] = await Promise.all([
-    latestMetric(conn, item.id),
-    countMetrics(conn, item.id),
-    countLiveMentions(conn, item.id),
+    latestMetric(conn, item.id, scope),
+    countMetrics(conn, item.id, scope),
+    countLiveMentions(conn, item.id, scope),
   ]);
   return { ...item, latestMetrics: metrics, metricsCount, mentionsCount };
 }
@@ -616,7 +646,8 @@ export async function upsertContentItem(
   opts: ContentOptions = {},
 ): Promise<UpsertContentItemResult> {
   const fields = coerceItemFields(input);
-  const existing = await itemRowByUrlNorm(conn, fields.urlNorm);
+  const resolved = resolveScope(opts.scope);
+  const existing = await itemRowByUrlNorm(conn, fields.urlNorm, resolved);
   // Idempotent means unchanged: a re-import reports `existing`, it does not
   // overwrite the title the owner may have edited since.
   if (existing) return { item: existing, created: false };
@@ -624,6 +655,7 @@ export async function upsertContentItem(
   const nowIso = resolveNow(opts).toISOString();
   const row = {
     id: randomUUID(),
+    workspaceId: resolved.workspaceId,
     ...fields,
     createdAt: nowIso,
     updatedAt: nowIso,
@@ -640,18 +672,22 @@ export async function upsertContentItem(
     }
   } catch (error) {
     if (isUniqueViolation(error)) {
-      const raced = await itemRowByUrlNorm(conn, fields.urlNorm);
+      const raced = await itemRowByUrlNorm(conn, fields.urlNorm, resolved);
       if (raced) return { item: raced, created: false };
     }
     throw error;
   }
-  await writeActivityLog(conn, {
-    action: "content.created",
-    entityType: "content",
-    entityId: row.id,
-    metadata: { url: row.url, platform: row.platform, source: row.source },
-  });
-  const created = await itemRowById(conn, row.id);
+  await writeActivityLog(
+    conn,
+    {
+      action: "content.created",
+      entityType: "content",
+      entityId: row.id,
+      metadata: { url: row.url, platform: row.platform, source: row.source },
+    },
+    resolved,
+  );
+  const created = await itemRowById(conn, row.id, resolved);
   return { item: created!, created: true };
 }
 
@@ -672,7 +708,7 @@ export async function addContentItem(
   opts: ContentOptions = {},
 ): Promise<ContentItem> {
   const fields = coerceItemFields(input);
-  const existing = await itemRowByUrlNorm(conn, fields.urlNorm);
+  const existing = await itemRowByUrlNorm(conn, fields.urlNorm, opts.scope);
   if (existing) {
     throw new ContentError(
       "conflict",
@@ -690,37 +726,68 @@ export async function addContentItem(
 export async function deleteContentItem(
   conn: Conn,
   id: string,
+  scope?: WorkspaceScope,
 ): Promise<ContentItem> {
-  const item = await itemRowById(conn, id.trim());
+  const item = await itemRowById(conn, id.trim(), resolveScope(scope));
   if (!item)
     throw new ContentError("not_found", `No content with id "${id.trim()}".`);
+  // Every child delete carries the workspace too: a forged id pair must
+  // never reach across workspaces even if the item check were bypassed.
+  const ws = workspaceSql(scope, "content_mentions.workspace_id");
+  const wsM = workspaceSql(scope, "content_metrics.workspace_id");
   if (conn.dialect === "sqlite") {
-    await conn.db
-      .delete(conn.schema.contentMetrics)
-      .where(eq(conn.schema.contentMetrics.contentId, item.id));
-    await conn.db
-      .delete(conn.schema.contentMentions)
-      .where(eq(conn.schema.contentMentions.contentId, item.id));
+    await conn.db.run(
+      sql`DELETE FROM content_metrics WHERE content_id = ${item.id} AND ${wsM}`,
+    );
+    await conn.db.run(
+      sql`DELETE FROM content_mentions WHERE content_id = ${item.id} AND ${ws}`,
+    );
     await conn.db
       .delete(conn.schema.contentItems)
-      .where(eq(conn.schema.contentItems.id, item.id));
+      .where(
+        and(
+          eq(conn.schema.contentItems.id, item.id),
+          workspaceScopeEq(conn, item, scope),
+        ),
+      );
   } else {
-    await conn.db
-      .delete(conn.schema.contentMetrics)
-      .where(eq(conn.schema.contentMetrics.contentId, item.id));
-    await conn.db
-      .delete(conn.schema.contentMentions)
-      .where(eq(conn.schema.contentMentions.contentId, item.id));
+    await conn.db.execute(
+      sql`DELETE FROM content_metrics WHERE content_id = ${item.id} AND ${wsM}`,
+    );
+    await conn.db.execute(
+      sql`DELETE FROM content_mentions WHERE content_id = ${item.id} AND ${ws}`,
+    );
     await conn.db
       .delete(conn.schema.contentItems)
-      .where(eq(conn.schema.contentItems.id, item.id));
+      .where(
+        and(
+          eq(conn.schema.contentItems.id, item.id),
+          workspaceScopeEq(conn, item, scope),
+        ),
+      );
   }
-  await writeActivityLog(conn, {
-    action: "content.removed",
-    entityType: "content",
-    entityId: item.id,
-  });
+  await writeActivityLog(
+    conn,
+    {
+      action: "content.removed",
+      entityType: "content",
+      entityId: item.id,
+    },
+    scope,
+  );
   return item;
+}
+
+/** Drizzle `eq` on the item workspace, for the typed delete path. */
+function workspaceScopeEq(
+  conn: Conn,
+  item: ContentItem,
+  scope?: WorkspaceScope,
+) {
+  return eq(
+    conn.schema.contentItems.workspaceId,
+    resolveScope(scope).workspaceId,
+  );
 }
 
 // ── Writes: metrics ──────────────────────────────────────────────────────
@@ -746,7 +813,7 @@ export async function recordMetrics(
   const contentId = input.contentId?.trim() ?? "";
   if (!contentId)
     throw new ContentError("invalid_input", '"contentId" is required.');
-  const item = await itemRowById(conn, contentId);
+  const item = await itemRowById(conn, contentId, opts.scope);
   if (!item)
     throw new ContentError("not_found", `No content with id "${contentId}".`);
 
@@ -805,6 +872,7 @@ export async function recordMetrics(
 
   const row = {
     id: randomUUID(),
+    workspaceId: resolveScope(opts.scope).workspaceId,
     contentId: item.id,
     fetchedAt,
     source,
@@ -820,12 +888,10 @@ export async function recordMetrics(
       .insert(conn.schema.contentMetrics)
       .values({ ...row, rawPayload });
   } else {
-    await conn.db
-      .insert(conn.schema.contentMetrics)
-      .values({
-        ...row,
-        rawPayload: rawPayload ? JSON.stringify(rawPayload) : null,
-      });
+    await conn.db.insert(conn.schema.contentMetrics).values({
+      ...row,
+      rawPayload: rawPayload ? JSON.stringify(rawPayload) : null,
+    });
   }
   const rows = await rawAll<MetricSqlRow>(
     conn,
@@ -838,6 +904,8 @@ export interface MetricsSeriesOptions {
   days?: number;
   limit?: number;
   now?: Date;
+  /** v3.0 Phase 2 — workspace scope. Absent = bootstrap workspace. */
+  scope?: WorkspaceScope;
 }
 
 export interface MetricsSeries {
@@ -854,7 +922,7 @@ export async function getContentMetricsSeries(
   contentId: string,
   opts: MetricsSeriesOptions = {},
 ): Promise<MetricsSeries | null> {
-  const item = await itemRowById(conn, contentId.trim());
+  const item = await itemRowById(conn, contentId.trim(), opts.scope);
   if (!item) return null;
   const limit = clampInt(
     opts.limit,
@@ -862,7 +930,7 @@ export async function getContentMetricsSeries(
     1,
     CONTENT_LIMITS.metricsPerItem,
   );
-  let where: SQL = sql`WHERE m.content_id = ${item.id}`;
+  let where: SQL = sql`WHERE m.content_id = ${item.id} AND ${workspaceSql(opts.scope, "m.workspace_id")}`;
   if (opts.days !== undefined) {
     if (!Number.isFinite(opts.days) || opts.days < 0) {
       throw new ContentError(
@@ -916,10 +984,10 @@ export interface ContentOverview {
  */
 export async function getContentOverview(
   conn: Conn,
-  opts: { days?: number; now?: Date } = {},
+  opts: { days?: number; now?: Date; scope?: WorkspaceScope } = {},
 ): Promise<ContentOverview> {
   let days: number | null = null;
-  let where: SQL = sql``;
+  let where: SQL = sql` WHERE ${workspaceSql(opts.scope, "i.workspace_id")}`;
   if (opts.days !== undefined) {
     if (!Number.isFinite(opts.days) || opts.days < 0) {
       throw new ContentError(
@@ -929,7 +997,7 @@ export async function getContentOverview(
     }
     days = Math.floor(opts.days);
     const cutoff = resolveNow(opts).getTime() - days * 24 * 60 * 60 * 1000;
-    where = sql` WHERE i.published_at IS NOT NULL AND i.published_at >= ${new Date(cutoff).toISOString()}`;
+    where = sql`${where} AND i.published_at IS NOT NULL AND i.published_at >= ${new Date(cutoff).toISOString()}`;
   }
 
   const itemRows = await rawAll<ItemSqlRow>(
@@ -943,7 +1011,8 @@ export async function getContentOverview(
   if (days !== null) {
     const rows = await rawAll<{ n: number | string }>(
       conn,
-      sql`SELECT COUNT(*) AS n FROM content_items i WHERE i.published_at IS NULL`,
+      sql`SELECT COUNT(*) AS n FROM content_items i
+          WHERE i.published_at IS NULL AND ${workspaceSql(opts.scope, "i.workspace_id")}`,
     );
     excludedUndated = num(rows[0]?.n ?? 0);
   }
@@ -961,7 +1030,7 @@ export async function getContentOverview(
     };
   }
 
-  const summaries = await enrichSummaries(conn, items);
+  const summaries = await enrichSummaries(conn, items, opts.scope);
 
   let totalViews = 0;
   let withMetrics = 0;
@@ -1114,27 +1183,35 @@ export async function importContent(
       source,
     };
     if (dryRun) {
-      if (await itemRowByUrlNorm(conn, row.urlNorm)) summary.existing++;
+      if (await itemRowByUrlNorm(conn, row.urlNorm, opts.scope))
+        summary.existing++;
       else summary.created++;
       continue;
     }
-    const { created } = await upsertContentItem(conn, input, { now });
+    const { created } = await upsertContentItem(conn, input, {
+      now,
+      scope: opts.scope,
+    });
     if (created) summary.created++;
     else summary.existing++;
   }
 
   if (!dryRun) {
-    await writeActivityLog(conn, {
-      action: "content.imported",
-      entityType: "content",
-      entityId: null,
-      metadata: {
-        items: summary.items,
-        created: summary.created,
-        existing: summary.existing,
-        source,
+    await writeActivityLog(
+      conn,
+      {
+        action: "content.imported",
+        entityType: "content",
+        entityId: null,
+        metadata: {
+          items: summary.items,
+          created: summary.created,
+          existing: summary.existing,
+          source,
+        },
       },
-    });
+      opts.scope,
+    );
   }
   return summary;
 }
@@ -1166,6 +1243,7 @@ function toMention(r: MentionSqlRow): ContentMention {
 export async function addContentMention(
   conn: Conn,
   input: { contentId: string; contactId: string; context?: string | null },
+  scope?: WorkspaceScope,
 ): Promise<{ mention: ContentMention; created: boolean }> {
   const contentId = input.contentId?.trim() ?? "";
   const contactId = input.contactId?.trim() ?? "";
@@ -1175,10 +1253,10 @@ export async function addContentMention(
       "Both contentId and contactId are required.",
     );
   }
-  const item = await itemRowById(conn, contentId);
+  const item = await itemRowById(conn, contentId, scope);
   if (!item)
     throw new ContentError("not_found", `No content with id "${contentId}".`);
-  const contact = await getContactById(conn, contactId);
+  const contact = await getContactById(conn, contactId, scope);
   if (!contact) {
     throw new ContentError(
       "not_found",
@@ -1193,7 +1271,9 @@ export async function addContentMention(
                c.email AS email, m.context AS context
         FROM content_mentions m
         JOIN contacts c ON c.id = m.contact_id
-        WHERE m.content_id = ${item.id} AND m.contact_id = ${contact.id}`,
+        WHERE m.content_id = ${item.id} AND m.contact_id = ${contact.id}
+          AND ${workspaceSql(scope, "m.workspace_id")}
+          AND ${workspaceSql(scope, "c.workspace_id")}`,
   );
   if (existing[0]) {
     if (context !== null && context !== existing[0].context) {
@@ -1223,18 +1303,27 @@ export async function addContentMention(
     return { mention: toMention(existing[0]), created: false };
   }
 
-  const row = { contentId: item.id, contactId: contact.id, context };
+  const row = {
+    contentId: item.id,
+    contactId: contact.id,
+    context,
+    workspaceId: resolveScope(scope).workspaceId,
+  };
   if (conn.dialect === "sqlite") {
     await conn.db.insert(conn.schema.contentMentions).values(row);
   } else {
     await conn.db.insert(conn.schema.contentMentions).values(row);
   }
-  await writeActivityLog(conn, {
-    action: "content.mention_added",
-    entityType: "content",
-    entityId: item.id,
-    metadata: { contactId: contact.id, context },
-  });
+  await writeActivityLog(
+    conn,
+    {
+      action: "content.mention_added",
+      entityType: "content",
+      entityId: item.id,
+      metadata: { contactId: contact.id, context },
+    },
+    scope,
+  );
   return {
     mention: {
       contentId: item.id,
@@ -1251,6 +1340,7 @@ export async function addContentMention(
 export async function removeContentMention(
   conn: Conn,
   input: { contentId: string; contactId: string },
+  scope?: WorkspaceScope,
 ): Promise<{ contentId: string; contactId: string; removed: boolean }> {
   const contentId = input.contentId?.trim() ?? "";
   const contactId = input.contactId?.trim() ?? "";
@@ -1263,35 +1353,34 @@ export async function removeContentMention(
   const existing = await rawAll<{ content_id: string }>(
     conn,
     sql`SELECT content_id FROM content_mentions m
-        WHERE m.content_id = ${contentId} AND m.contact_id = ${contactId} LIMIT 1`,
+        WHERE m.content_id = ${contentId} AND m.contact_id = ${contactId}
+          AND ${workspaceSql(scope, "m.workspace_id")}
+        LIMIT 1`,
   );
+  const wsMentions = workspaceSql(scope, "content_mentions.workspace_id");
   if (conn.dialect === "sqlite") {
-    await conn.db
-      .delete(conn.schema.contentMentions)
-      .where(
-        and(
-          eq(conn.schema.contentMentions.contentId, contentId),
-          eq(conn.schema.contentMentions.contactId, contactId),
-        ),
-      );
+    await conn.db.run(
+      sql`DELETE FROM content_mentions WHERE content_id = ${contentId}
+          AND contact_id = ${contactId} AND ${wsMentions}`,
+    );
   } else {
-    await conn.db
-      .delete(conn.schema.contentMentions)
-      .where(
-        and(
-          eq(conn.schema.contentMentions.contentId, contentId),
-          eq(conn.schema.contentMentions.contactId, contactId),
-        ),
-      );
+    await conn.db.execute(
+      sql`DELETE FROM content_mentions WHERE content_id = ${contentId}
+          AND contact_id = ${contactId} AND ${wsMentions}`,
+    );
   }
   const removed = existing.length > 0;
   if (removed) {
-    await writeActivityLog(conn, {
-      action: "content.mention_removed",
-      entityType: "content",
-      entityId: contentId,
-      metadata: { contactId },
-    });
+    await writeActivityLog(
+      conn,
+      {
+        action: "content.mention_removed",
+        entityType: "content",
+        entityId: contentId,
+        metadata: { contactId },
+      },
+      scope,
+    );
   }
   return { contentId, contactId, removed };
 }
@@ -1300,6 +1389,7 @@ export async function removeContentMention(
 export async function listContentMentions(
   conn: Conn,
   contentId: string,
+  scope?: WorkspaceScope,
 ): Promise<ContentMention[]> {
   const rows = await rawAll<MentionSqlRow>(
     conn,
@@ -1308,6 +1398,8 @@ export async function listContentMentions(
         FROM content_mentions m
         JOIN contacts c ON c.id = m.contact_id
         WHERE m.content_id = ${contentId.trim()} AND c.deleted_at IS NULL
+          AND ${workspaceSql(scope, "m.workspace_id")}
+          AND ${workspaceSql(scope, "c.workspace_id")}
         ORDER BY c.full_name ASC`,
   );
   return rows.map(toMention);
@@ -1317,12 +1409,15 @@ export async function listContentMentions(
 export async function listContactContent(
   conn: Conn,
   contactId: string,
+  scope?: WorkspaceScope,
 ): Promise<ContentItem[]> {
   const rows = await rawAll<ItemSqlRow>(
     conn,
     sql`${ITEM_SELECT} FROM content_items i
         JOIN content_mentions m ON m.content_id = i.id
         WHERE m.contact_id = ${contactId.trim()}
+          AND ${workspaceSql(scope, "m.workspace_id")}
+          AND ${workspaceSql(scope, "i.workspace_id")}
         ORDER BY (i.published_at IS NULL), i.published_at DESC, i.title ASC`,
   );
   return rows.map(toItem);
@@ -1330,25 +1425,30 @@ export async function listContactContent(
 
 // ── Status ───────────────────────────────────────────────────────────────
 
-export async function contentStatus(conn: Conn): Promise<ContentStatus> {
+export async function contentStatus(
+  conn: Conn,
+  scope?: WorkspaceScope,
+): Promise<ContentStatus> {
   const [items, snapshots, mentions, withMetrics] = await Promise.all([
     rawAll<{ n: number | string }>(
       conn,
-      sql`SELECT COUNT(*) AS n FROM content_items`,
+      sql`SELECT COUNT(*) AS n FROM content_items WHERE ${workspaceSql(scope)}`,
     ),
     rawAll<{ n: number | string }>(
       conn,
-      sql`SELECT COUNT(*) AS n FROM content_metrics`,
+      sql`SELECT COUNT(*) AS n FROM content_metrics WHERE ${workspaceSql(scope)}`,
     ),
     rawAll<{ n: number | string }>(
       conn,
       sql`SELECT COUNT(*) AS n FROM content_mentions m
           JOIN contacts c ON c.id = m.contact_id
-          WHERE c.deleted_at IS NULL`,
+          WHERE c.deleted_at IS NULL
+            AND ${workspaceSql(scope, "m.workspace_id")}
+            AND ${workspaceSql(scope, "c.workspace_id")}`,
     ),
     rawAll<{ n: number | string }>(
       conn,
-      sql`SELECT COUNT(DISTINCT content_id) AS n FROM content_metrics`,
+      sql`SELECT COUNT(DISTINCT content_id) AS n FROM content_metrics WHERE ${workspaceSql(scope)}`,
     ),
   ]);
   return {

@@ -1,7 +1,6 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useState } from "react";
 
 interface Props {
   token: string;
@@ -10,7 +9,12 @@ interface Props {
   errorMessage: string | null;
 }
 
-export default function InviteClient({ token, status, inviteInfo, errorMessage }: Props) {
+export default function InviteClient({
+  token,
+  status,
+  inviteInfo,
+  errorMessage,
+}: Props) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(errorMessage);
@@ -19,18 +23,18 @@ export default function InviteClient({ token, status, inviteInfo, errorMessage }
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/invites/accept', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/invites/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || 'Failed to accept invite');
+        setError(data.error || "Failed to accept invite");
       } else {
-        setResult('Invite accepted! Redirecting to dashboard...');
+        setResult("Invite accepted! Redirecting to dashboard...");
         setTimeout(() => {
-          window.location.href = '/dashboard';
+          window.location.href = "/dashboard";
         }, 1000);
       }
     } catch (e: unknown) {
@@ -40,7 +44,7 @@ export default function InviteClient({ token, status, inviteInfo, errorMessage }
     }
   }
 
-  if (status === 'already-member') {
+  if (status === "already-member") {
     return (
       <div className="space-y-4">
         <p className="text-green-600">You are already a member.</p>
@@ -51,11 +55,13 @@ export default function InviteClient({ token, status, inviteInfo, errorMessage }
     );
   }
 
-  if (status !== 'valid') {
+  if (status !== "valid") {
     return (
       <div className="space-y-4">
-        <p className="text-red-600">{error || 'Invalid invite.'}</p>
-        <p className="text-sm text-gray-500">Ask an admin for a new invite link.</p>
+        <p className="text-red-600">{error || "Invalid invite."}</p>
+        <p className="text-sm text-gray-500">
+          Ask an admin for a new invite link.
+        </p>
       </div>
     );
   }
@@ -71,7 +77,8 @@ export default function InviteClient({ token, status, inviteInfo, errorMessage }
             <strong>Role:</strong> {inviteInfo.role}
           </p>
           <p>
-            <strong>Expires:</strong> {new Date(inviteInfo.expiresAt).toLocaleString()}
+            <strong>Expires:</strong>{" "}
+            {new Date(inviteInfo.expiresAt).toLocaleString()}
           </p>
         </div>
       )}
@@ -82,7 +89,7 @@ export default function InviteClient({ token, status, inviteInfo, errorMessage }
         disabled={loading}
         className="px-4 py-2 bg-black text-white rounded disabled:opacity-50"
       >
-        {loading ? 'Accepting...' : 'Accept invite'}
+        {loading ? "Accepting..." : "Accept invite"}
       </button>
     </div>
   );

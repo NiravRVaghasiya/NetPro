@@ -16,21 +16,27 @@
 //     an import wait for confirmation on `/edges`. Manual links
 //     (`netpro events link`, the web "Add attendee" form) are `confirmed` —
 //     that is the owner speaking, not an export file.
-import { randomUUID } from 'node:crypto';
-import { and, eq, sql } from 'drizzle-orm';
-import type { SqliteConn, PgConn } from '@netpro/db';
-import { getContactById } from '../ai/resolve-contact';
-import { writeActivityLog } from '../crm/activity';
-import { addEdge } from '../graph/edges';
-import { rawAll } from '../search/indexer';
-import { matchAttendees, type MatchableContact } from './match';
+import { randomUUID } from "node:crypto";
+import { and, eq, sql } from "drizzle-orm";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import { getContactById } from "../ai/resolve-contact";
+import { writeActivityLog } from "../crm/activity";
+import { addEdge } from "../graph/edges";
+import { rawAll } from "../search/indexer";
+import {
+  resolveScope,
+  workspacePredicate,
+  workspaceSql,
+  type WorkspaceScope,
+} from "../workspaces/scope";
+import { matchAttendees, type MatchableContact } from "./match";
 import {
   normalizeEmail,
   normalizeName,
   parseEventDate,
   parseEventsCsv,
   type ParsedEventRow,
-} from './parse';
+} from "./parse";
 import {
   ATTENDANCE_VIAS,
   EVENT_LIMITS,
@@ -49,7 +55,7 @@ import {
   type EventSummary,
   type EventsStatus,
   type UnmatchedAttendee,
-} from './types';
+} from "./types";
 
 type Conn = SqliteConn | PgConn;
 
@@ -57,26 +63,43 @@ type Conn = SqliteConn | PgConn;
 
 function text(value: unknown, max: number, field: string): string | null {
   if (value === undefined || value === null) return null;
-  if (typeof value !== 'string') {
-    throw new EventError('invalid_input', `"${field}" must be a string.`);
+  if (typeof value !== "string") {
+    throw new EventError("invalid_input", `"${field}" must be a string.`);
   }
   const trimmed = value.trim();
   if (trimmed.length > max) {
-    throw new EventError('invalid_input', `"${field}" must be ${max} characters or fewer.`);
+    throw new EventError(
+      "invalid_input",
+      `"${field}" must be ${max} characters or fewer.`,
+    );
   }
-  return trimmed === '' ? null : trimmed;
+  return trimmed === "" ? null : trimmed;
 }
 
-function whitelist<T extends string>(value: unknown, allowed: readonly T[], field: string, fallback: T): T {
-  if (value === undefined || value === null || value === '') return fallback;
-  if (typeof value === 'string' && (allowed as readonly string[]).includes(value)) return value as T;
+function whitelist<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  field: string,
+  fallback: T,
+): T {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (
+    typeof value === "string" &&
+    (allowed as readonly string[]).includes(value)
+  )
+    return value as T;
   throw new EventError(
-    'invalid_input',
-    `Unknown ${field} "${String(value)}". Expected one of: ${allowed.join(', ')}.`
+    "invalid_input",
+    `Unknown ${field} "${String(value)}". Expected one of: ${allowed.join(", ")}.`,
   );
 }
 
-function clampInt(value: number | undefined, fallback: number, min: number, max: number): number {
+function clampInt(
+  value: number | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
   if (value === undefined || !Number.isFinite(value)) return fallback;
   return Math.min(Math.max(Math.floor(value), min), max);
 }
@@ -88,21 +111,23 @@ function likePattern(query: string): string {
 }
 
 function num(value: unknown): number {
-  const n = typeof value === 'number' ? value : Number(value);
+  const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : 0;
 }
 
 function bool(value: unknown): boolean {
-  return value === true || value === 1 || value === '1' || value === 't';
+  return value === true || value === 1 || value === "1" || value === "t";
 }
 
 function parseJson(value: unknown): Record<string, unknown> | null {
   if (value === null || value === undefined) return null;
-  if (typeof value === 'object') return value as Record<string, unknown>;
-  if (typeof value !== 'string') return null;
+  if (typeof value === "object") return value as Record<string, unknown>;
+  if (typeof value !== "string") return null;
   try {
     const parsed: unknown = JSON.parse(value);
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : null;
   } catch {
     return null;
   }
@@ -140,20 +165,30 @@ function toSummary(r: EventSqlRow): EventSummary {
 const EVENT_SELECT = sql`SELECT e.id AS id, e.name AS name, e.location AS location,
   e.starts_at AS starts_at, e.ends_at AS ends_at, e.source AS source, e.created_at AS created_at`;
 
-const COUNT_SUBQUERY = sql`, (SELECT COUNT(*) FROM event_attendees a
+function countSubquery(scope: WorkspaceScope | undefined) {
+  return sql`, (SELECT COUNT(*) FROM event_attendees a
      JOIN contacts c ON c.id = a.contact_id
-     WHERE a.event_id = e.id AND c.deleted_at IS NULL) AS attendee_count`;
+     WHERE a.event_id = e.id AND c.deleted_at IS NULL
+       AND ${workspaceSql(scope, "a.workspace_id")} AND ${workspaceSql(scope, "c.workspace_id")}) AS attendee_count`;
+}
 
 // ── Reads ────────────────────────────────────────────────────────────────
 
-/** Every live contact, in the shape the matcher needs (id, name, email). */
-export async function loadMatchableContacts(conn: Conn): Promise<MatchableContact[]> {
-  const rows = await rawAll<{ id: string; full_name: string; email: string | null }>(
+/** Every live contact in scope, in the shape the matcher needs (id, name, email). */
+export async function loadMatchableContacts(
+  conn: Conn,
+  scope?: WorkspaceScope,
+): Promise<MatchableContact[]> {
+  const rows = await rawAll<{
+    id: string;
+    full_name: string;
+    email: string | null;
+  }>(
     conn,
     sql`SELECT id, full_name, email FROM contacts
-        WHERE deleted_at IS NULL
+        WHERE deleted_at IS NULL AND ${workspaceSql(scope, "contacts.workspace_id")}
         ORDER BY id
-        LIMIT ${EVENT_LIMITS.contacts}`
+        LIMIT ${EVENT_LIMITS.contacts}`,
   );
   return rows.map((r) => ({ id: r.id, fullName: r.full_name, email: r.email }));
 }
@@ -165,6 +200,8 @@ export interface ListEventsOptions {
   limit?: number;
   offset?: number;
   now?: Date;
+  /** v3.0 Phase 2 — workspace scope. Absent = bootstrap workspace. */
+  scope?: WorkspaceScope;
 }
 
 export interface ListEventsResult {
@@ -174,17 +211,15 @@ export interface ListEventsResult {
   offset: number;
 }
 
-function buildEventFilters(
-  opts: ListEventsOptions
-): { where: SQL; } {
-  const parts: SQL[] = [];
+function buildEventFilters(opts: ListEventsOptions): { where: SQL } {
   const q = opts.query?.trim();
+  const parts: SQL[] = [workspaceSql(opts.scope, "e.workspace_id")];
   if (q) parts.push(sql`lower(e.name) LIKE ${likePattern(q)} ESCAPE '\\'`);
   if (opts.upcoming === true) {
     const nowIso = resolveNow(opts).toISOString();
     parts.push(sql`e.starts_at IS NOT NULL AND e.starts_at >= ${nowIso}`);
   }
-  const where = parts.length === 0 ? sql`` : sql` WHERE ${sql.join(parts, sql` AND `)}`;
+  const where = sql` WHERE ${sql.join(parts, sql` AND `)}`;
   return { where };
 }
 
@@ -193,7 +228,7 @@ type SQL = ReturnType<typeof sql>;
 /** Events with network-attendee counts, newest first (no date last). */
 export async function listEvents(
   conn: Conn,
-  opts: ListEventsOptions = {}
+  opts: ListEventsOptions = {},
 ): Promise<ListEventsResult> {
   const limit = clampInt(opts.limit, 50, 1, 200);
   const offset = clampInt(opts.offset, 0, 0, 100_000);
@@ -201,13 +236,13 @@ export async function listEvents(
 
   const rows = await rawAll<EventSqlRow>(
     conn,
-    sql`${EVENT_SELECT}${COUNT_SUBQUERY} FROM events e${where}
+    sql`${EVENT_SELECT}${countSubquery(opts.scope)} FROM events e${where}
         ORDER BY (e.starts_at IS NULL), e.starts_at DESC, e.name ASC
-        LIMIT ${limit} OFFSET ${offset}`
+        LIMIT ${limit} OFFSET ${offset}`,
   );
   const counted = await rawAll<{ n: number | string }>(
     conn,
-    sql`SELECT COUNT(*) AS n FROM events e${where}`
+    sql`SELECT COUNT(*) AS n FROM events e${where}`,
   );
   return {
     events: rows.map(toSummary),
@@ -217,21 +252,38 @@ export async function listEvents(
   };
 }
 
-export async function countEvents(conn: Conn, opts: ListEventsOptions = {}): Promise<number> {
+export async function countEvents(
+  conn: Conn,
+  opts: ListEventsOptions = {},
+): Promise<number> {
   const { where } = buildEventFilters(opts);
-  const rows = await rawAll<{ n: number | string }>(conn, sql`SELECT COUNT(*) AS n FROM events e${where}`);
+  const rows = await rawAll<{ n: number | string }>(
+    conn,
+    sql`SELECT COUNT(*) AS n FROM events e${where}`,
+  );
   return num(rows[0]?.n ?? 0);
 }
 
-async function eventRowById(conn: Conn, id: string): Promise<EventRecord | null> {
-  const rows = await rawAll<EventSqlRow>(conn, sql`${EVENT_SELECT} FROM events e WHERE e.id = ${id}`);
+async function eventRowById(
+  conn: Conn,
+  id: string,
+  scope?: WorkspaceScope,
+): Promise<EventRecord | null> {
+  const rows = await rawAll<EventSqlRow>(
+    conn,
+    sql`${EVENT_SELECT} FROM events e WHERE e.id = ${id} AND ${workspaceSql(scope, "e.workspace_id")}`,
+  );
   return rows[0] ? toEvent(rows[0]) : null;
 }
 
-async function eventRowsByName(conn: Conn, name: string): Promise<EventRecord[]> {
+async function eventRowsByName(
+  conn: Conn,
+  name: string,
+  scope?: WorkspaceScope,
+): Promise<EventRecord[]> {
   const rows = await rawAll<EventSqlRow>(
     conn,
-    sql`${EVENT_SELECT} FROM events e WHERE lower(e.name) = ${name.trim().toLowerCase()}`
+    sql`${EVENT_SELECT} FROM events e WHERE lower(e.name) = ${name.trim().toLowerCase()} AND ${workspaceSql(scope, "e.workspace_id")}`,
   );
   return rows.map(toEvent);
 }
@@ -241,22 +293,30 @@ async function eventRowsByName(conn: Conn, name: string): Promise<EventRecord[]>
  * Ambiguity is an error, never a coin flip — the message starts with
  * "Ambiguous" so the web layer can map it to 400 like the contact resolver.
  */
-export async function resolveEventRef(conn: Conn, selector: string): Promise<EventRecord> {
+export async function resolveEventRef(
+  conn: Conn,
+  selector: string,
+  scope?: WorkspaceScope,
+): Promise<EventRecord> {
   const trimmed = selector.trim();
-  if (!trimmed) throw new EventError('invalid_input', 'An event id or name is required.');
-  const byId = await eventRowById(conn, trimmed);
+  if (!trimmed)
+    throw new EventError("invalid_input", "An event id or name is required.");
+  const byId = await eventRowById(conn, trimmed, scope);
   if (byId) return byId;
-  const byName = await eventRowsByName(conn, trimmed);
+  const byName = await eventRowsByName(conn, trimmed, scope);
   if (byName.length === 1) return byName[0]!;
   if (byName.length > 1) {
     throw new EventError(
-      'conflict',
+      "conflict",
       `Ambiguous event "${trimmed}" — ${byName.length} events share that name. Use the id (${byName
         .map((e) => e.id.slice(0, 8))
-        .join(', ')}).`
+        .join(", ")}).`,
     );
   }
-  throw new EventError('not_found', `No event found with id or name "${trimmed}".`);
+  throw new EventError(
+    "not_found",
+    `No event found with id or name "${trimmed}".`,
+  );
 }
 
 interface AttendeeSqlRow extends Record<string, unknown> {
@@ -271,8 +331,11 @@ interface AttendeeSqlRow extends Record<string, unknown> {
   relationship_score: number | string | null;
 }
 
-function toAttendee(r: AttendeeSqlRow): AttendeeRecord & { industry: string | null } {
-  const score = r.relationship_score === null ? null : num(r.relationship_score);
+function toAttendee(
+  r: AttendeeSqlRow,
+): AttendeeRecord & { industry: string | null } {
+  const score =
+    r.relationship_score === null ? null : num(r.relationship_score);
   return {
     contactId: r.contact_id,
     fullName: r.full_name,
@@ -286,7 +349,11 @@ function toAttendee(r: AttendeeSqlRow): AttendeeRecord & { industry: string | nu
   };
 }
 
-async function attendeeRows(conn: Conn, eventId: string): Promise<Array<AttendeeRecord & { industry: string | null }>> {
+async function attendeeRows(
+  conn: Conn,
+  eventId: string,
+  scope?: WorkspaceScope,
+): Promise<Array<AttendeeRecord & { industry: string | null }>> {
   const rows = await rawAll<AttendeeSqlRow>(
     conn,
     sql`SELECT a.contact_id AS contact_id, c.full_name AS full_name, c.email AS email,
@@ -296,7 +363,8 @@ async function attendeeRows(conn: Conn, eventId: string): Promise<Array<Attendee
         FROM event_attendees a
         JOIN contacts c ON c.id = a.contact_id
         WHERE a.event_id = ${eventId} AND c.deleted_at IS NULL
-        ORDER BY (c.relationship_score IS NULL), c.relationship_score DESC, c.full_name ASC`
+          AND ${workspaceSql(scope, "a.workspace_id")} AND ${workspaceSql(scope, "c.workspace_id")}
+        ORDER BY (c.relationship_score IS NULL), c.relationship_score DESC, c.full_name ASC`,
   );
   return rows.map(toAttendee);
 }
@@ -309,7 +377,7 @@ function tally(values: Array<string | null>, limit = 5): string[] {
     counts.set(v, (counts.get(v) ?? 0) + 1);
   }
   return [...counts.entries()]
-    .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, limit)
     .map(([value]) => value);
 }
@@ -319,11 +387,15 @@ function tally(values: Array<string | null>, limit = 5): string[] {
  * lines from the last import that matched nothing (kept so the owner can
  * link them by hand rather than losing them).
  */
-export async function getEvent(conn: Conn, eventId: string): Promise<EventDetail | null> {
-  const event = await eventRowById(conn, eventId.trim());
+export async function getEvent(
+  conn: Conn,
+  eventId: string,
+  scope?: WorkspaceScope,
+): Promise<EventDetail | null> {
+  const event = await eventRowById(conn, eventId.trim(), scope);
   if (!event) return null;
-  const rows = await attendeeRows(conn, event.id);
-  const bucket = await loadUnmatchedBucket(conn, event.id);
+  const rows = await attendeeRows(conn, event.id, scope);
+  const bucket = await loadUnmatchedBucket(conn, event.id, scope);
   return {
     event,
     attendees: rows.map(({ industry: _industry, ...rest }) => rest),
@@ -335,14 +407,18 @@ export async function getEvent(conn: Conn, eventId: string): Promise<EventDetail
 }
 
 /** Events one contact went to (newest first) — used by the contact page. */
-export async function listContactEvents(conn: Conn, contactId: string): Promise<EventSummary[]> {
+export async function listContactEvents(
+  conn: Conn,
+  contactId: string,
+  scope?: WorkspaceScope,
+): Promise<EventSummary[]> {
   const rows = await rawAll<EventSqlRow>(
     conn,
-    sql`${EVENT_SELECT}${COUNT_SUBQUERY}
+    sql`${EVENT_SELECT}${countSubquery(scope)}
         FROM events e
         JOIN event_attendees a ON a.event_id = e.id
-        WHERE a.contact_id = ${contactId.trim()}
-        ORDER BY (e.starts_at IS NULL), e.starts_at DESC, e.name ASC`
+        WHERE a.contact_id = ${contactId.trim()} AND ${workspaceSql(scope, "a.workspace_id")}
+        ORDER BY (e.starts_at IS NULL), e.starts_at DESC, e.name ASC`,
   );
   return rows.map(toSummary);
 }
@@ -353,7 +429,7 @@ export async function listContactEvents(conn: Conn, contactId: string): Promise<
 // are parked in `activity_log` (one row per event, replaced on each run)
 // instead of in a new table. `getEvent` reads the newest one back.
 
-const BUCKET_ACTION = 'events.unmatched';
+const BUCKET_ACTION = "events.unmatched";
 
 interface Bucket extends Record<string, unknown> {
   unmatched: unknown;
@@ -366,31 +442,42 @@ async function saveUnmatchedBucket(
   conn: Conn,
   eventId: string,
   unmatched: UnmatchedAttendee[],
-  ambiguous: AttendeeRef[]
+  ambiguous: AttendeeRef[],
+  scope?: WorkspaceScope,
 ): Promise<void> {
-  await writeActivityLog(conn, {
-    action: BUCKET_ACTION,
-    entityType: 'event',
-    entityId: eventId,
-    metadata: { unmatched, ambiguous, at: new Date().toISOString() },
-  });
+  await writeActivityLog(
+    conn,
+    {
+      action: BUCKET_ACTION,
+      entityType: "event",
+      entityId: eventId,
+      metadata: { unmatched, ambiguous, at: new Date().toISOString() },
+    },
+    scope,
+  );
 }
 
 async function loadUnmatchedBucket(
   conn: Conn,
-  eventId: string
+  eventId: string,
+  scope?: WorkspaceScope,
 ): Promise<{ unmatched: UnmatchedAttendee[]; ambiguous: AttendeeRef[] }> {
   const rows = await rawAll<Bucket>(
     conn,
     sql`SELECT metadata FROM activity_log
         WHERE action = ${BUCKET_ACTION} AND entity_type = 'event' AND entity_id = ${eventId}
+          AND ${workspaceSql(scope, "activity_log.workspace_id")}
         ORDER BY created_at DESC, id DESC
-        LIMIT 1`
+        LIMIT 1`,
   );
   const meta = parseJson(rows[0]?.metadata);
   if (!meta) return { unmatched: [], ambiguous: [] };
-  const unmatched = Array.isArray(meta.unmatched) ? (meta.unmatched as UnmatchedAttendee[]) : [];
-  const ambiguous = Array.isArray(meta.ambiguous) ? (meta.ambiguous as AttendeeRef[]) : [];
+  const unmatched = Array.isArray(meta.unmatched)
+    ? (meta.unmatched as UnmatchedAttendee[])
+    : [];
+  const ambiguous = Array.isArray(meta.ambiguous)
+    ? (meta.ambiguous as AttendeeRef[])
+    : [];
   return { unmatched, ambiguous };
 }
 
@@ -413,49 +500,63 @@ export interface UpsertEventResult {
 export async function upsertEvent(
   conn: Conn,
   input: UpsertEventInput,
-  opts: EventOptions = {}
+  opts: EventOptions = {},
 ): Promise<UpsertEventResult> {
-  const name = text(input.name, EVENT_LIMITS.name, 'name');
-  if (!name) throw new EventError('invalid_input', 'Event name is required.');
-  const source = whitelist(input.source, EVENT_SOURCES, 'source', 'manual');
+  const name = text(input.name, EVENT_LIMITS.name, "name");
+  if (!name) throw new EventError("invalid_input", "Event name is required.");
+  const source = whitelist(input.source, EVENT_SOURCES, "source", "manual");
 
-  const startsRaw = text(input.startsAt, 64, 'startsAt');
-  const endsRaw = text(input.endsAt, 64, 'endsAt');
+  const startsRaw = text(input.startsAt, 64, "startsAt");
+  const endsRaw = text(input.endsAt, 64, "endsAt");
   const startsAt = startsRaw === null ? null : parseEventDate(startsRaw);
   const endsAt = endsRaw === null ? null : parseEventDate(endsRaw);
   if (startsRaw !== null && startsAt === null) {
-    throw new EventError('invalid_input', `"${startsRaw}" is not a date NetPro can read (use YYYY-MM-DD).`);
+    throw new EventError(
+      "invalid_input",
+      `"${startsRaw}" is not a date NetPro can read (use YYYY-MM-DD).`,
+    );
   }
   if (endsRaw !== null && endsAt === null) {
-    throw new EventError('invalid_input', `"${endsRaw}" is not a date NetPro can read (use YYYY-MM-DD).`);
+    throw new EventError(
+      "invalid_input",
+      `"${endsRaw}" is not a date NetPro can read (use YYYY-MM-DD).`,
+    );
   }
   if (startsAt && endsAt && endsAt < startsAt) {
-    throw new EventError('invalid_input', 'An event cannot end before it starts.');
+    throw new EventError(
+      "invalid_input",
+      "An event cannot end before it starts.",
+    );
   }
 
-  const existing = await eventRowsByName(conn, name);
+  const existing = await eventRowsByName(conn, name, opts.scope);
   if (existing.length > 0) return { event: existing[0]!, created: false };
 
   const row: EventRecord = {
     id: randomUUID(),
+    workspaceId: resolveScope(opts.scope).workspaceId,
     name,
-    location: text(input.location, EVENT_LIMITS.location, 'location'),
+    location: text(input.location, EVENT_LIMITS.location, "location"),
     startsAt,
     endsAt,
     source,
     createdAt: resolveNow(opts).toISOString(),
   };
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     await conn.db.insert(conn.schema.events).values(row);
   } else {
     await conn.db.insert(conn.schema.events).values(row);
   }
-  await writeActivityLog(conn, {
-    action: 'event.created',
-    entityType: 'event',
-    entityId: row.id,
-    metadata: { name: row.name, source },
-  });
+  await writeActivityLog(
+    conn,
+    {
+      action: "event.created",
+      entityType: "event",
+      entityId: row.id,
+      metadata: { name: row.name, source },
+    },
+    opts.scope,
+  );
   return { event: row, created: true };
 }
 
@@ -483,16 +584,22 @@ export interface LinkAttendeeResult {
   edgeCapReached: boolean;
 }
 
-async function isLinked(conn: Conn, eventId: string, contactId: string): Promise<boolean> {
-  if (conn.dialect === 'sqlite') {
+async function isLinked(
+  conn: Conn,
+  eventId: string,
+  contactId: string,
+  scope?: WorkspaceScope,
+): Promise<boolean> {
+  if (conn.dialect === "sqlite") {
     const rows = await conn.db
       .select({ contactId: conn.schema.eventAttendees.contactId })
       .from(conn.schema.eventAttendees)
       .where(
         and(
           eq(conn.schema.eventAttendees.eventId, eventId),
-          eq(conn.schema.eventAttendees.contactId, contactId)
-        )
+          eq(conn.schema.eventAttendees.contactId, contactId),
+          workspacePredicate(scope, conn.schema.eventAttendees.workspaceId),
+        ),
       )
       .limit(1);
     return rows.length > 0;
@@ -503,19 +610,25 @@ async function isLinked(conn: Conn, eventId: string, contactId: string): Promise
     .where(
       and(
         eq(conn.schema.eventAttendees.eventId, eventId),
-        eq(conn.schema.eventAttendees.contactId, contactId)
-      )
+        eq(conn.schema.eventAttendees.contactId, contactId),
+        workspacePredicate(scope, conn.schema.eventAttendees.workspaceId),
+      ),
     )
     .limit(1);
   return rows.length > 0;
 }
 
-async function attendeeIds(conn: Conn, eventId: string): Promise<string[]> {
+async function attendeeIds(
+  conn: Conn,
+  eventId: string,
+  scope?: WorkspaceScope,
+): Promise<string[]> {
   const rows = await rawAll<{ contact_id: string }>(
     conn,
     sql`SELECT a.contact_id AS contact_id FROM event_attendees a
         JOIN contacts c ON c.id = a.contact_id
-        WHERE a.event_id = ${eventId} AND c.deleted_at IS NULL`
+        WHERE a.event_id = ${eventId} AND c.deleted_at IS NULL
+          AND ${workspaceSql(scope, "a.workspace_id")} AND ${workspaceSql(scope, "c.workspace_id")}`,
   );
   return rows.map((r) => r.contact_id);
 }
@@ -531,8 +644,14 @@ export interface EdgeBudgetState {
   capped: boolean;
 }
 
-export function createEdgeBudget(limit: number = EVENT_LIMITS.edgesPerEvent): EdgeBudgetState {
-  return { remaining: Math.max(0, Math.floor(limit)), created: 0, capped: false };
+export function createEdgeBudget(
+  limit: number = EVENT_LIMITS.edgesPerEvent,
+): EdgeBudgetState {
+  return {
+    remaining: Math.max(0, Math.floor(limit)),
+    created: 0,
+    capped: false,
+  };
 }
 
 /**
@@ -548,9 +667,11 @@ async function linkEventEdges(
   via: AttendanceVia,
   confidence: number,
   budget: EdgeBudgetState,
-  opts: EventOptions
+  opts: EventOptions,
 ): Promise<void> {
-  const others = (await attendeeIds(conn, eventId)).filter((id) => id !== contactId);
+  const others = (await attendeeIds(conn, eventId, opts.scope)).filter(
+    (id) => id !== contactId,
+  );
   for (const otherId of others) {
     if (budget.remaining <= 0) {
       budget.capped = true;
@@ -562,13 +683,13 @@ async function linkEventEdges(
         {
           sourceId: contactId,
           targetId: otherId,
-          relation: 'met_at_event',
-          source: 'event_import',
-          status: via === 'manual' ? 'confirmed' : 'pending',
+          relation: "met_at_event",
+          source: "event_import",
+          status: via === "manual" ? "confirmed" : "pending",
           confidence,
           context: eventName.slice(0, 500),
         },
-        { ...opts, merge: true }
+        { ...opts, merge: true },
       );
       if (result.created) {
         budget.remaining--;
@@ -584,57 +705,76 @@ async function linkEventEdges(
 export async function linkAttendee(
   conn: Conn,
   input: LinkAttendeeInput,
-  opts: EventOptions = {}
+  opts: EventOptions = {},
 ): Promise<LinkAttendeeResult> {
   const eventId = input.eventId?.trim();
   const contactId = input.contactId?.trim();
   if (!eventId || !contactId) {
-    throw new EventError('invalid_input', 'Both eventId and contactId are required.');
+    throw new EventError(
+      "invalid_input",
+      "Both eventId and contactId are required.",
+    );
   }
-  const event = await eventRowById(conn, eventId);
-  if (!event) throw new EventError('not_found', `No event with id "${eventId}".`);
-  const contact = await getContactById(conn, contactId);
+  const event = await eventRowById(conn, eventId, opts.scope);
+  if (!event)
+    throw new EventError("not_found", `No event with id "${eventId}".`);
+  const contact = await getContactById(conn, contactId, opts.scope);
   if (!contact) {
     throw new EventError(
-      'not_found',
-      `No contact with id "${contactId}". Soft-deleted contacts cannot be linked to an event.`
+      "not_found",
+      `No contact with id "${contactId}". Soft-deleted contacts cannot be linked to an event.`,
     );
   }
 
-  const via = whitelist(input.via, ATTENDANCE_VIAS, 'via', 'manual');
+  const via = whitelist(input.via, ATTENDANCE_VIAS, "via", "manual");
   const now = resolveNow(opts);
-  const already = await isLinked(conn, event.id, contact.id);
+  const already = await isLinked(conn, event.id, contact.id, opts.scope);
   const budget = input.budget ?? createEdgeBudget();
 
   if (!already) {
-    const role = text(input.role, EVENT_LIMITS.role, 'role');
-    const attended = input.attended ?? !(event.startsAt && event.startsAt > now.toISOString());
+    const role = text(input.role, EVENT_LIMITS.role, "role");
+    const attended =
+      input.attended ?? !(event.startsAt && event.startsAt > now.toISOString());
     const row = {
+      workspaceId: resolveScope(opts.scope).workspaceId,
       eventId: event.id,
       contactId: contact.id,
       role,
       attended,
       discoveredAt: now.toISOString(),
     };
-    if (conn.dialect === 'sqlite') {
+    if (conn.dialect === "sqlite") {
       await conn.db.insert(conn.schema.eventAttendees).values(row);
     } else {
       await conn.db.insert(conn.schema.eventAttendees).values(row);
     }
-    await writeActivityLog(conn, {
-      action: 'event.attendee_linked',
-      entityType: 'event',
-      entityId: event.id,
-      metadata: { contactId: contact.id, via, role },
-    });
+    await writeActivityLog(
+      conn,
+      {
+        action: "event.attendee_linked",
+        entityType: "event",
+        entityId: event.id,
+        metadata: { contactId: contact.id, via, role },
+      },
+      opts.scope,
+    );
   }
 
   let edgesCreated = 0;
   if (input.edges !== false) {
     const confidence =
-      via === 'manual' ? 1 : Math.min(1, Math.max(0, input.confidence ?? 0.9));
+      via === "manual" ? 1 : Math.min(1, Math.max(0, input.confidence ?? 0.9));
     const before = budget.created;
-    await linkEventEdges(conn, event.id, contact.id, event.name, via, confidence, budget, opts);
+    await linkEventEdges(
+      conn,
+      event.id,
+      contact.id,
+      event.name,
+      via,
+      confidence,
+      budget,
+      opts,
+    );
     // Report *this* call's edges, not the running total an import accumulates.
     edgesCreated = budget.created - before;
   }
@@ -651,22 +791,30 @@ export async function linkAttendee(
 /** Remove one attendance row. The edges it produced are facts you confirm elsewhere. */
 export async function unlinkAttendee(
   conn: Conn,
-  input: { eventId: string; contactId: string }
+  input: { eventId: string; contactId: string },
+  opts: EventOptions = {},
 ): Promise<{ eventId: string; contactId: string; removed: boolean }> {
   const eventId = input.eventId?.trim();
   const contactId = input.contactId?.trim();
   if (!eventId || !contactId) {
-    throw new EventError('invalid_input', 'Both eventId and contactId are required.');
+    throw new EventError(
+      "invalid_input",
+      "Both eventId and contactId are required.",
+    );
   }
-  const removed = await isLinked(conn, eventId, contactId);
-  if (conn.dialect === 'sqlite') {
+  const removed = await isLinked(conn, eventId, contactId, opts.scope);
+  if (conn.dialect === "sqlite") {
     await conn.db
       .delete(conn.schema.eventAttendees)
       .where(
         and(
           eq(conn.schema.eventAttendees.eventId, eventId),
-          eq(conn.schema.eventAttendees.contactId, contactId)
-        )
+          eq(conn.schema.eventAttendees.contactId, contactId),
+          workspacePredicate(
+            opts.scope,
+            conn.schema.eventAttendees.workspaceId,
+          ),
+        ),
       );
   } else {
     await conn.db
@@ -674,32 +822,62 @@ export async function unlinkAttendee(
       .where(
         and(
           eq(conn.schema.eventAttendees.eventId, eventId),
-          eq(conn.schema.eventAttendees.contactId, contactId)
-        )
+          eq(conn.schema.eventAttendees.contactId, contactId),
+          workspacePredicate(
+            opts.scope,
+            conn.schema.eventAttendees.workspaceId,
+          ),
+        ),
       );
   }
   if (removed) {
-    await writeActivityLog(conn, {
-      action: 'event.attendee_unlinked',
-      entityType: 'event',
-      entityId: eventId,
-      metadata: { contactId },
-    });
+    await writeActivityLog(
+      conn,
+      {
+        action: "event.attendee_unlinked",
+        entityType: "event",
+        entityId: eventId,
+        metadata: { contactId },
+      },
+      opts.scope,
+    );
   }
   return { eventId, contactId, removed };
 }
 
 /** Delete an event and its attendance rows (FK cascade). */
-export async function removeEvent(conn: Conn, eventId: string): Promise<EventRecord> {
+export async function removeEvent(
+  conn: Conn,
+  eventId: string,
+  opts: EventOptions = {},
+): Promise<EventRecord> {
   const id = eventId.trim();
-  const event = await eventRowById(conn, id);
-  if (!event) throw new EventError('not_found', `No event with id "${id}".`);
-  if (conn.dialect === 'sqlite') {
-    await conn.db.delete(conn.schema.events).where(eq(conn.schema.events.id, id));
+  const event = await eventRowById(conn, id, opts.scope);
+  if (!event) throw new EventError("not_found", `No event with id "${id}".`);
+  if (conn.dialect === "sqlite") {
+    await conn.db
+      .delete(conn.schema.events)
+      .where(
+        and(
+          eq(conn.schema.events.id, id),
+          workspacePredicate(opts.scope, conn.schema.events.workspaceId),
+        ),
+      );
   } else {
-    await conn.db.delete(conn.schema.events).where(eq(conn.schema.events.id, id));
+    await conn.db
+      .delete(conn.schema.events)
+      .where(
+        and(
+          eq(conn.schema.events.id, id),
+          workspacePredicate(opts.scope, conn.schema.events.workspaceId),
+        ),
+      );
   }
-  await writeActivityLog(conn, { action: 'event.removed', entityType: 'event', entityId: id });
+  await writeActivityLog(
+    conn,
+    { action: "event.removed", entityType: "event", entityId: id },
+    opts.scope,
+  );
   return event;
 }
 
@@ -781,19 +959,23 @@ function toUnmatched(match: AttendeeMatch): UnmatchedAttendee {
  */
 export async function importEvents(
   conn: Conn,
-  opts: ImportEventsOptions = {}
+  opts: ImportEventsOptions = {},
 ): Promise<ImportEventsSummary> {
   const dryRun = opts.dryRun === true;
   const summary = emptySummary(dryRun);
   const parsed =
     opts.rows !== undefined
-      ? { rows: opts.rows, errors: [], warnings: [] as Array<{ row: number; reason: string }> }
-      : parseEventsCsv(opts.csv ?? '');
+      ? {
+          rows: opts.rows,
+          errors: [],
+          warnings: [] as Array<{ row: number; reason: string }>,
+        }
+      : parseEventsCsv(opts.csv ?? "");
   summary.errors = parsed.errors;
   summary.warnings = parsed.warnings;
   if (parsed.rows.length === 0) return summary;
 
-  const contacts = await loadMatchableContacts(conn);
+  const contacts = await loadMatchableContacts(conn, opts.scope);
   const now = resolveNow(opts);
   let capReached = false;
 
@@ -802,16 +984,16 @@ export async function importEvents(
     const budget = createEdgeBudget();
     let event: EventRecord;
     if (dryRun) {
-      const found = await eventRowsByName(conn, row.name);
+      const found = await eventRowsByName(conn, row.name, opts.scope);
       event =
         found[0] ??
         ({
-          id: 'dry-run',
+          id: "dry-run",
           name: row.name,
           location: row.location,
           startsAt: row.startsAt,
           endsAt: row.endsAt,
-          source: 'import',
+          source: "import",
           createdAt: now.toISOString(),
         } satisfies EventRecord);
       summary.events++;
@@ -825,9 +1007,9 @@ export async function importEvents(
           location: row.location,
           startsAt: row.startsAt,
           endsAt: row.endsAt,
-          source: opts.source ?? 'import',
+          source: opts.source ?? "import",
         },
-        { now }
+        { now, scope: opts.scope },
       );
       event = upserted.event;
       summary.events++;
@@ -844,7 +1026,7 @@ export async function importEvents(
 
     const unmatchedRefs: UnmatchedAttendee[] = [];
     for (const match of result.matches) {
-      if (match.status === 'ambiguous') {
+      if (match.status === "ambiguous") {
         unmatchedRefs.push(toUnmatched(match));
         summary.ambiguousRefs.push({
           event: row.name,
@@ -853,11 +1035,11 @@ export async function importEvents(
         });
         continue;
       }
-      if (match.status === 'unmatched') {
+      if (match.status === "unmatched") {
         unmatchedRefs.push(toUnmatched(match));
         continue;
       }
-      if (match.status === 'review' && opts.includeReview !== true) {
+      if (match.status === "review" && opts.includeReview !== true) {
         unmatchedRefs.push(toUnmatched(match));
         continue;
       }
@@ -873,12 +1055,12 @@ export async function importEvents(
           eventId: event.id,
           contactId: match.contactId,
           role: match.ref.role ?? null,
-          via: 'import',
+          via: "import",
           confidence: match.confidence,
           edges: opts.edges !== false,
           budget,
         },
-        { now }
+        { now, scope: opts.scope },
       );
       if (link.created) summary.attendees++;
       else summary.duplicates++;
@@ -887,28 +1069,38 @@ export async function importEvents(
     }
 
     summary.unmatchedRefs.push(...unmatchedRefs);
-    if (!dryRun && event.id !== 'dry-run') {
+    if (!dryRun && event.id !== "dry-run") {
       const ambiguousRefs = result.matches
-        .filter((m) => m.status === 'ambiguous')
+        .filter((m) => m.status === "ambiguous")
         .map((m) => m.ref);
-      await saveUnmatchedBucket(conn, event.id, unmatchedRefs, ambiguousRefs);
+      await saveUnmatchedBucket(
+        conn,
+        event.id,
+        unmatchedRefs,
+        ambiguousRefs,
+        opts.scope,
+      );
     }
   }
 
   summary.edgeCapReached = capReached;
   if (!dryRun) {
-    await writeActivityLog(conn, {
-      action: 'events.imported',
-      entityType: 'event',
-      entityId: null,
-      metadata: {
-        events: summary.events,
-        attendees: summary.attendees,
-        matched: summary.matched,
-        ambiguous: summary.ambiguous,
-        unmatched: summary.unmatchedRefs.length,
+    await writeActivityLog(
+      conn,
+      {
+        action: "events.imported",
+        entityType: "event",
+        entityId: null,
+        metadata: {
+          events: summary.events,
+          attendees: summary.attendees,
+          matched: summary.matched,
+          ambiguous: summary.ambiguous,
+          unmatched: summary.unmatchedRefs.length,
+        },
       },
-    });
+      opts.scope,
+    );
   }
   return summary;
 }
@@ -947,15 +1139,17 @@ export interface MatchEventResult {
 export async function matchEventAttendees(
   conn: Conn,
   eventId: string,
-  opts: MatchEventOptions = {}
+  opts: MatchEventOptions = {},
 ): Promise<MatchEventResult> {
-  const event = await resolveEventRef(conn, eventId);
-  const bucket = await loadUnmatchedBucket(conn, event.id);
-  const refs: AttendeeRef[] = [...bucket.unmatched, ...bucket.ambiguous].map((ref) => ({
-    name: ref?.name ?? null,
-    email: ref?.email ?? null,
-  }));
-  const contacts = await loadMatchableContacts(conn);
+  const event = await resolveEventRef(conn, eventId, opts.scope);
+  const bucket = await loadUnmatchedBucket(conn, event.id, opts.scope);
+  const refs: AttendeeRef[] = [...bucket.unmatched, ...bucket.ambiguous].map(
+    (ref) => ({
+      name: ref?.name ?? null,
+      email: ref?.email ?? null,
+    }),
+  );
+  const contacts = await loadMatchableContacts(conn, opts.scope);
   const result = matchAttendees(refs, contacts, {
     ...(opts.includeReview === true ? { autoConfidence: 0.6 } : {}),
   });
@@ -969,7 +1163,7 @@ export async function matchEventAttendees(
   const remaining: UnmatchedAttendee[] = [];
 
   for (const match of result.matches) {
-    if (match.status !== 'matched' || !match.contactId) {
+    if (match.status !== "matched" || !match.contactId) {
       remaining.push(toUnmatched(match));
       continue;
     }
@@ -980,12 +1174,12 @@ export async function matchEventAttendees(
       {
         eventId: event.id,
         contactId: match.contactId,
-        via: 'import',
+        via: "import",
         confidence: match.confidence,
         edges: opts.edges !== false,
         budget,
       },
-      { now }
+      { now, scope: opts.scope },
     );
     if (link.created) linked++;
     else duplicates++;
@@ -997,14 +1191,19 @@ export async function matchEventAttendees(
       conn,
       event.id,
       remaining,
-      result.matches.filter((m) => m.status === 'ambiguous').map((m) => m.ref)
+      result.matches.filter((m) => m.status === "ambiguous").map((m) => m.ref),
+      opts.scope,
     );
-    await writeActivityLog(conn, {
-      action: 'events.matched',
-      entityType: 'event',
-      entityId: event.id,
-      metadata: { linked, duplicates, edges, remaining: remaining.length },
-    });
+    await writeActivityLog(
+      conn,
+      {
+        action: "events.matched",
+        entityType: "event",
+        entityId: event.id,
+        metadata: { linked, duplicates, edges, remaining: remaining.length },
+      },
+      opts.scope,
+    );
   }
 
   return {
@@ -1046,19 +1245,28 @@ interface AttendeeLite extends Record<string, unknown> {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function utcDayStart(value: Date): number {
-  return Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
+  return Date.UTC(
+    value.getUTCFullYear(),
+    value.getUTCMonth(),
+    value.getUTCDate(),
+  );
 }
 
-function timingScore(startsAt: string | null, now: Date): { score: number; reason: string } {
-  if (!startsAt) return { score: 0.3, reason: 'no date on file' };
+function timingScore(
+  startsAt: string | null,
+  now: Date,
+): { score: number; reason: string } {
+  if (!startsAt) return { score: 0.3, reason: "no date on file" };
   const start = new Date(startsAt).getTime();
-  if (!Number.isFinite(start)) return { score: 0.3, reason: 'no date on file' };
+  if (!Number.isFinite(start)) return { score: 0.3, reason: "no date on file" };
   // Whole UTC days, the same granularity the CLI and the web use to print a
   // date, so "in 7d" and "starts in 7 days" can never disagree.
-  const days = Math.round((utcDayStart(new Date(startsAt)) - utcDayStart(now)) / DAY_MS);
+  const days = Math.round(
+    (utcDayStart(new Date(startsAt)) - utcDayStart(now)) / DAY_MS,
+  );
   if (days >= 0) {
-    if (days === 0) return { score: 1, reason: 'starts today' };
-    if (days === 1) return { score: 1, reason: 'starts tomorrow' };
+    if (days === 0) return { score: 1, reason: "starts today" };
+    if (days === 1) return { score: 1, reason: "starts tomorrow" };
     return { score: days <= 90 ? 1 : 0.8, reason: `starts in ${days} days` };
   }
   const ago = Math.abs(days);
@@ -1078,7 +1286,7 @@ function timingScore(startsAt: string | null, now: Date): { score: number; reaso
  */
 export async function recommendEvents(
   conn: Conn,
-  opts: RecommendOptions = {}
+  opts: RecommendOptions = {},
 ): Promise<EventRecommendation[]> {
   const limit = clampInt(opts.limit, 10, 1, 50);
   const now = resolveNow(opts);
@@ -1087,9 +1295,10 @@ export async function recommendEvents(
   const [events, attendeeRows, industryRows] = await Promise.all([
     rawAll<EventSqlRow>(
       conn,
-      sql`${EVENT_SELECT}${COUNT_SUBQUERY} FROM events e
+      sql`${EVENT_SELECT}${countSubquery(opts.scope)} FROM events e
+          WHERE ${workspaceSql(opts.scope, "e.workspace_id")}
           ORDER BY (e.starts_at IS NULL), e.starts_at DESC, e.name ASC
-          LIMIT ${EVENT_LIMITS.eventsPerImport}`
+          LIMIT ${EVENT_LIMITS.eventsPerImport}`,
     ),
     rawAll<AttendeeLite>(
       conn,
@@ -1099,13 +1308,15 @@ export async function recommendEvents(
           FROM event_attendees a
           JOIN contacts c ON c.id = a.contact_id
           WHERE c.deleted_at IS NULL
-          ORDER BY (c.relationship_score IS NULL), c.relationship_score DESC, c.full_name ASC`
+            AND ${workspaceSql(opts.scope, "a.workspace_id")} AND ${workspaceSql(opts.scope, "c.workspace_id")}
+          ORDER BY (c.relationship_score IS NULL), c.relationship_score DESC, c.full_name ASC`,
     ),
     rawAll<IndustryRow>(
       conn,
       sql`SELECT industry, COUNT(*) AS n FROM contacts
           WHERE deleted_at IS NULL AND industry IS NOT NULL AND industry <> ''
-          GROUP BY industry`
+            AND ${workspaceSql(opts.scope, "contacts.workspace_id")}
+          GROUP BY industry`,
     ),
   ]);
 
@@ -1132,24 +1343,35 @@ export async function recommendEvents(
     const upcoming = event.startsAt !== null && event.startsAt >= nowIso;
     if (attendeeCount === 0 && !upcoming) continue;
 
-    const industries = [...new Set(rows.map((r) => r.industry).filter((i): i is string => Boolean(i)))];
+    const industries = [
+      ...new Set(
+        rows.map((r) => r.industry).filter((i): i is string => Boolean(i)),
+      ),
+    ];
     const industryShare =
       industryTotal === 0 || industries.length === 0
         ? 0
-        : industries.reduce((sum, i) => sum + (networkByIndustry.get(i) ?? 0), 0) / industryTotal;
+        : industries.reduce(
+            (sum, i) => sum + (networkByIndustry.get(i) ?? 0),
+            0,
+          ) / industryTotal;
 
     const peers = Math.min(1, attendeeCount / 5);
     const timing = timingScore(event.startsAt, now);
-    const score = Math.round((0.6 * peers + 0.2 * Math.min(1, industryShare) + 0.2 * timing.score) * 100) / 100;
+    const score =
+      Math.round(
+        (0.6 * peers + 0.2 * Math.min(1, industryShare) + 0.2 * timing.score) *
+          100,
+      ) / 100;
 
     const reasons: string[] = [
       attendeeCount === 0
-        ? 'nobody from your network yet'
-        : `${attendeeCount} ${attendeeCount === 1 ? 'person' : 'people'} in your network`,
+        ? "nobody from your network yet"
+        : `${attendeeCount} ${attendeeCount === 1 ? "person" : "people"} in your network`,
     ];
     if (industries.length > 0 && industryShare > 0) {
       reasons.push(
-        `industries (${industries.slice(0, 3).join(', ')}) cover ${Math.round(industryShare * 100)}% of your network`
+        `industries (${industries.slice(0, 3).join(", ")}) cover ${Math.round(industryShare * 100)}% of your network`,
       );
     }
     reasons.push(timing.reason);
@@ -1172,35 +1394,44 @@ export async function recommendEvents(
     (a, b) =>
       b.score - a.score ||
       b.event.attendeeCount - a.event.attendeeCount ||
-      a.event.name.localeCompare(b.event.name)
+      a.event.name.localeCompare(b.event.name),
   );
   return scored.slice(0, limit);
 }
 
 // ── Status ───────────────────────────────────────────────────────────────
 
-export async function eventsStatus(conn: Conn): Promise<EventsStatus> {
+export async function eventsStatus(
+  conn: Conn,
+  scope?: WorkspaceScope,
+): Promise<EventsStatus> {
   const [events, links, contacts, withAttendees] = await Promise.all([
-    countEvents(conn),
+    countEvents(conn, { scope }),
     rawAll<{ n: number | string }>(
       conn,
       sql`SELECT COUNT(*) AS n FROM event_attendees a
           JOIN contacts c ON c.id = a.contact_id
-          WHERE c.deleted_at IS NULL`
+          WHERE c.deleted_at IS NULL
+            AND ${workspaceSql(scope, "a.workspace_id")} AND ${workspaceSql(scope, "c.workspace_id")}`,
     ),
-    rawAll<{ n: number | string }>(conn, sql`SELECT COUNT(*) AS n FROM contacts WHERE deleted_at IS NULL`),
+    rawAll<{ n: number | string }>(
+      conn,
+      sql`SELECT COUNT(*) AS n FROM contacts WHERE deleted_at IS NULL AND ${workspaceSql(scope, "contacts.workspace_id")}`,
+    ),
     rawAll<{ n: number | string }>(
       conn,
       sql`SELECT COUNT(DISTINCT event_id) AS n FROM event_attendees a
           JOIN contacts c ON c.id = a.contact_id
-          WHERE c.deleted_at IS NULL`
+          WHERE c.deleted_at IS NULL
+            AND ${workspaceSql(scope, "a.workspace_id")} AND ${workspaceSql(scope, "c.workspace_id")}`,
     ),
   ]);
   const attendees = await rawAll<{ n: number | string }>(
     conn,
     sql`SELECT COUNT(DISTINCT contact_id) AS n FROM event_attendees a
         JOIN contacts c ON c.id = a.contact_id
-        WHERE c.deleted_at IS NULL`
+        WHERE c.deleted_at IS NULL
+          AND ${workspaceSql(scope, "a.workspace_id")} AND ${workspaceSql(scope, "c.workspace_id")}`,
   );
   return {
     events,

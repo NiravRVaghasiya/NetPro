@@ -2,6 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 vi.mock("@/lib/auth", () => ({ auth: vi.fn() }));
+vi.mock("@/lib/authz", () => ({
+  requireScope: async () => ({
+    workspaceId: "default",
+    userId: "test-user",
+    role: "owner",
+  }),
+}));
 vi.mock("@/lib/db", () => ({ conn: {} }));
 vi.mock("@netpro/core/src/card/repository", () => ({
   getProfileCardState: vi.fn(),
@@ -9,7 +16,8 @@ vi.mock("@netpro/core/src/card/repository", () => ({
 vi.mock("@netpro/core/src/views", async (importOriginal) => {
   // Only the overview fetch is canned; the tracking panel still needs the
   // real beacon helpers (rate limiter, hashing) from this module.
-  const actual = await importOriginal<typeof import("@netpro/core/src/views")>();
+  const actual =
+    await importOriginal<typeof import("@netpro/core/src/views")>();
   return { ...actual, getViewsOverview: vi.fn() };
 });
 vi.mock("next/navigation", () => ({
@@ -40,8 +48,17 @@ const editorState = {
 
 const emptyOverview = {
   stats: {
-    window: { days: 30, since: "2026-08-09T12:00:00.000Z", until: "2026-09-08T12:00:00.000Z" },
-    totals: { views: 0, uniqueViewers: 0, resolvedContacts: 0, avgDurationMs: null },
+    window: {
+      days: 30,
+      since: "2026-08-09T12:00:00.000Z",
+      until: "2026-09-08T12:00:00.000Z",
+    },
+    totals: {
+      views: 0,
+      uniqueViewers: 0,
+      resolvedContacts: 0,
+      avgDurationMs: null,
+    },
     excluded: { bots: 0, ownerViews: 0 },
     filters: { includeBots: false, includeOwnerViews: false },
     series: [],
@@ -80,9 +97,7 @@ describe("profile view tracking panel (v2.5 phase 2)", () => {
     expect(html).toContain("Profile view tracking");
     expect(html).toContain("Enabled");
     // The snippet is built from the instance's public origin.
-    expect(html).toContain(
-      "https://netpro.example/api/card/pixel.gif?p=blog",
-    );
+    expect(html).toContain("https://netpro.example/api/card/pixel.gif?p=blog");
     expect(html).toContain("Never stored");
     expect(html).toContain("raw IP addresses");
     expect(html).toContain("90 days");
@@ -121,8 +136,17 @@ describe("profile view tracking panel (v2.5 phase 2)", () => {
 describe("view analytics section (v2.5 phase 3)", () => {
   const fullOverview = {
     stats: {
-      window: { days: 7, since: "2026-09-01T12:00:00.000Z", until: "2026-09-08T12:00:00.000Z" },
-      totals: { views: 3, uniqueViewers: 2, resolvedContacts: 1, avgDurationMs: 45000 },
+      window: {
+        days: 7,
+        since: "2026-09-01T12:00:00.000Z",
+        until: "2026-09-08T12:00:00.000Z",
+      },
+      totals: {
+        views: 3,
+        uniqueViewers: 2,
+        resolvedContacts: 1,
+        avgDurationMs: 45000,
+      },
       excluded: { bots: 1, ownerViews: 0 },
       filters: { includeBots: false, includeOwnerViews: false },
       series: [
@@ -145,7 +169,12 @@ describe("view analytics section (v2.5 phase 3)", () => {
           durationMs: 45000,
           isBot: false,
           isOwnerView: false,
-          resolvedContact: { id: "ada", fullName: "Ada Lovelace", company: null, role: null },
+          resolvedContact: {
+            id: "ada",
+            fullName: "Ada Lovelace",
+            company: null,
+            role: null,
+          },
         },
       ],
       total: 3,
@@ -159,7 +188,12 @@ describe("view analytics section (v2.5 phase 3)", () => {
           viewedAt: "2026-09-08T10:00:00.000Z",
           viewedPage: "/card",
           referrer: "https://blog.example/hello",
-          contact: { id: "ada", fullName: "Ada Lovelace", company: null, role: null },
+          contact: {
+            id: "ada",
+            fullName: "Ada Lovelace",
+            company: null,
+            role: null,
+          },
         },
       ],
       total: 1,
@@ -190,24 +224,38 @@ describe("view analytics section (v2.5 phase 3)", () => {
   });
 
   it("forwards ?days= and ?bots= to the overview, clamping to the retention bound", async () => {
-    await CardSettingsPage({ searchParams: Promise.resolve({ days: "7", bots: "1" }) });
-    expect(getViewsOverview).toHaveBeenCalledWith(expect.anything(), {
-      days: 7,
-      limit: 10,
-      includeBots: true,
+    await CardSettingsPage({
+      searchParams: Promise.resolve({ days: "7", bots: "1" }),
     });
+    expect(getViewsOverview).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        days: 7,
+        limit: 10,
+        includeBots: true,
+      },
+      expect.anything(),
+    );
     await CardSettingsPage({ searchParams: Promise.resolve({ days: "365" }) });
-    expect(getViewsOverview).toHaveBeenCalledWith(expect.anything(), {
-      days: 90,
-      limit: 10,
-      includeBots: false,
-    });
+    expect(getViewsOverview).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        days: 90,
+        limit: 10,
+        includeBots: false,
+      },
+      expect.anything(),
+    );
     await CardSettingsPage({ searchParams: Promise.resolve({ days: "soon" }) });
-    expect(getViewsOverview).toHaveBeenCalledWith(expect.anything(), {
-      days: 30,
-      limit: 10,
-      includeBots: false,
-    });
+    expect(getViewsOverview).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        days: 30,
+        limit: 10,
+        includeBots: false,
+      },
+      expect.anything(),
+    );
   });
 
   it("fetches the editor state and the analytics together, after the auth check", async () => {

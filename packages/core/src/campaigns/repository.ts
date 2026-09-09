@@ -6,13 +6,23 @@
 // rows. JSON columns are json-mode on SQLite and plain text on Postgres —
 // every write branch encodes for its dialect, and `parseJsonColumn` is the
 // single read seam.
-import { randomUUID } from 'node:crypto';
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
-import type { SqliteConn, PgConn } from '@netpro/db';
-import { writeActivityLog } from '../crm/activity';
-import { CrmError, optionalText, resolveNow, type CrmOptions } from '../crm/types';
-import { searchContacts } from '../search/query';
-import { validateDripSteps, validateMessageTemplate } from './template';
+import { randomUUID } from "node:crypto";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import { writeActivityLog } from "../crm/activity";
+import {
+  CrmError,
+  optionalText,
+  resolveNow,
+  type CrmOptions,
+} from "../crm/types";
+import {
+  resolveScope,
+  workspacePredicate,
+  type WorkspaceScope,
+} from "../workspaces/scope";
+import { searchContacts } from "../search/query";
+import { validateDripSteps, validateMessageTemplate } from "./template";
 import {
   CAMPAIGN_LIMITS,
   CAMPAIGN_STATUSES,
@@ -23,12 +33,12 @@ import {
   type DripStep,
   type MessageTemplate,
   type RecipientSelection,
-} from './types';
+} from "./types";
 
 /** Parse a JSON-ish column value from either dialect, with a fallback. */
 export function parseJsonColumn<T>(raw: unknown, fallback: T): T {
   if (raw === null || raw === undefined) return fallback;
-  if (typeof raw === 'string') {
+  if (typeof raw === "string") {
     try {
       return JSON.parse(raw) as T;
     } catch {
@@ -46,21 +56,45 @@ export function parseJsonColumn<T>(raw: unknown, fallback: T): T {
 function campaignColumnsSqlite(conn: SqliteConn) {
   const c = conn.schema.campaigns;
   return {
-    id: c.id, name: c.name, description: c.description, status: c.status, type: c.type,
-    template: c.template, steps: c.steps, sendFrom: c.sendFrom, sendVia: c.sendVia,
-    dailyLimit: c.dailyLimit, totalRecipients: c.totalRecipients, sent: c.sent,
-    opened: c.opened, replied: c.replied, bounced: c.bounced,
-    createdAt: c.createdAt, updatedAt: c.updatedAt,
+    id: c.id,
+    name: c.name,
+    description: c.description,
+    status: c.status,
+    type: c.type,
+    template: c.template,
+    steps: c.steps,
+    sendFrom: c.sendFrom,
+    sendVia: c.sendVia,
+    dailyLimit: c.dailyLimit,
+    totalRecipients: c.totalRecipients,
+    sent: c.sent,
+    opened: c.opened,
+    replied: c.replied,
+    bounced: c.bounced,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
   };
 }
 function campaignColumnsPg(conn: PgConn) {
   const c = conn.schema.campaigns;
   return {
-    id: c.id, name: c.name, description: c.description, status: c.status, type: c.type,
-    template: c.template, steps: c.steps, sendFrom: c.sendFrom, sendVia: c.sendVia,
-    dailyLimit: c.dailyLimit, totalRecipients: c.totalRecipients, sent: c.sent,
-    opened: c.opened, replied: c.replied, bounced: c.bounced,
-    createdAt: c.createdAt, updatedAt: c.updatedAt,
+    id: c.id,
+    name: c.name,
+    description: c.description,
+    status: c.status,
+    type: c.type,
+    template: c.template,
+    steps: c.steps,
+    sendFrom: c.sendFrom,
+    sendVia: c.sendVia,
+    dailyLimit: c.dailyLimit,
+    totalRecipients: c.totalRecipients,
+    sent: c.sent,
+    opened: c.opened,
+    replied: c.replied,
+    bounced: c.bounced,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
   };
 }
 
@@ -87,15 +121,18 @@ interface CampaignDbRow {
 export function normalizeCampaign(row: CampaignDbRow): Campaign {
   const status = CAMPAIGN_STATUSES.includes(row.status as CampaignStatus)
     ? (row.status as CampaignStatus)
-    : 'draft';
+    : "draft";
   const steps = parseJsonColumn<DripStep[]>(row.steps, []);
   return {
     id: row.id,
     name: row.name,
     description: row.description,
     status,
-    type: row.type === 'sequence' ? 'sequence' : 'single',
-    template: parseJsonColumn<MessageTemplate>(row.template, { subject: '', body: '' }),
+    type: row.type === "sequence" ? "sequence" : "single",
+    template: parseJsonColumn<MessageTemplate>(row.template, {
+      subject: "",
+      body: "",
+    }),
     steps: Array.isArray(steps) ? steps : [],
     sendFrom: row.sendFrom,
     sendVia: row.sendVia,
@@ -112,23 +149,31 @@ export function normalizeCampaign(row: CampaignDbRow): Campaign {
 
 async function selectCampaign(
   conn: SqliteConn | PgConn,
-  id: string
+  id: string,
+  scope?: WorkspaceScope,
 ): Promise<CampaignDbRow | null> {
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     const c = conn.schema.campaigns;
-    const rows = await conn.db.select(campaignColumnsSqlite(conn)).from(c).where(eq(c.id, id));
+    const rows = await conn.db
+      .select(campaignColumnsSqlite(conn))
+      .from(c)
+      .where(and(eq(c.id, id), workspacePredicate(scope, c.workspaceId)));
     return (rows[0] as CampaignDbRow | undefined) ?? null;
   }
   const c = conn.schema.campaigns;
-  const rows = await conn.db.select(campaignColumnsPg(conn)).from(c).where(eq(c.id, id));
+  const rows = await conn.db
+    .select(campaignColumnsPg(conn))
+    .from(c)
+    .where(and(eq(c.id, id), workspacePredicate(scope, c.workspaceId)));
   return (rows[0] as CampaignDbRow | undefined) ?? null;
 }
 
 export async function getCampaign(
   conn: SqliteConn | PgConn,
-  id: string
+  id: string,
+  scope?: WorkspaceScope,
 ): Promise<Campaign | null> {
-  const row = await selectCampaign(conn, id.trim());
+  const row = await selectCampaign(conn, id.trim(), scope);
   return row ? normalizeCampaign(row) : null;
 }
 
@@ -151,14 +196,14 @@ export interface CreateCampaignResult {
 function validateDailyLimit(value: unknown): number {
   if (value === undefined || value === null) return 50;
   if (
-    typeof value !== 'number' ||
+    typeof value !== "number" ||
     !Number.isInteger(value) ||
     value < 1 ||
     value > CAMPAIGN_LIMITS.dailyLimitMax
   ) {
     throw new CrmError(
-      'invalid_input',
-      `dailyLimit must be a whole number between 1 and ${CAMPAIGN_LIMITS.dailyLimitMax}.`
+      "invalid_input",
+      `dailyLimit must be a whole number between 1 and ${CAMPAIGN_LIMITS.dailyLimitMax}.`,
     );
   }
   return value;
@@ -172,26 +217,34 @@ function validateDailyLimit(value: unknown): number {
 export async function createCampaign(
   conn: SqliteConn | PgConn,
   input: CreateCampaignInput,
-  opts: CrmOptions = {}
+  opts: CrmOptions = {},
+  scope?: WorkspaceScope,
 ): Promise<CreateCampaignResult> {
+  const resolved = resolveScope(scope);
   const now = resolveNow(opts);
-  const name = optionalText(input.name, CAMPAIGN_LIMITS.name, 'name');
+  const name = optionalText(input.name, CAMPAIGN_LIMITS.name, "name");
   if (!name) {
-    throw new CrmError('invalid_input', 'A campaign name is required.');
+    throw new CrmError("invalid_input", "A campaign name is required.");
   }
-  const description = optionalText(input.description, CAMPAIGN_LIMITS.description, 'description') ?? null;
-  const sendFrom = optionalText(input.sendFrom, CAMPAIGN_LIMITS.sendFrom, 'sendFrom') ?? null;
+  const description =
+    optionalText(
+      input.description,
+      CAMPAIGN_LIMITS.description,
+      "description",
+    ) ?? null;
+  const sendFrom =
+    optionalText(input.sendFrom, CAMPAIGN_LIMITS.sendFrom, "sendFrom") ?? null;
   const dailyLimit = validateDailyLimit(input.dailyLimit);
-  const template = validateMessageTemplate(input.template, 'template');
+  const template = validateMessageTemplate(input.template, "template");
   const steps = validateDripSteps(input.steps);
-  const type: CampaignType = steps.length > 0 ? 'sequence' : 'single';
+  const type: CampaignType = steps.length > 0 ? "sequence" : "single";
 
   const row = {
     id: randomUUID(),
-    workspaceId: 'default',
+    workspaceId: resolved.workspaceId,
     name,
     description,
-    status: 'draft' as const,
+    status: "draft" as const,
     type,
     sendFrom,
     sendVia: null,
@@ -204,31 +257,45 @@ export async function createCampaign(
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   };
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     // SQLite json-mode columns take objects; Postgres text columns take strings.
-    await conn.db.insert(conn.schema.campaigns).values({ ...row, template, steps });
-  } else {
     await conn.db
       .insert(conn.schema.campaigns)
-      .values({ ...row, template: JSON.stringify(template), steps: JSON.stringify(steps) });
+      .values({ ...row, template, steps });
+  } else {
+    await conn.db.insert(conn.schema.campaigns).values({
+      ...row,
+      template: JSON.stringify(template),
+      steps: JSON.stringify(steps),
+    });
   }
 
   let added = 0;
   let skippedDuplicates = 0;
   if (input.recipients) {
-    const result = await addRecipients(conn, row.id, input.recipients, { now });
+    const result = await addRecipients(
+      conn,
+      row.id,
+      input.recipients,
+      { now },
+      resolved,
+    );
     added = result.added;
     skippedDuplicates = result.skippedDuplicates;
   }
 
-  await writeActivityLog(conn, {
-    action: 'campaign.created',
-    entityType: 'campaign',
-    entityId: row.id,
-    metadata: { name, type, recipientsAdded: added },
-  });
+  await writeActivityLog(
+    conn,
+    {
+      action: "campaign.created",
+      entityType: "campaign",
+      entityId: row.id,
+      metadata: { name, type, recipientsAdded: added },
+    },
+    resolved,
+  );
 
-  const campaign = (await getCampaign(conn, row.id))!;
+  const campaign = (await getCampaign(conn, row.id, resolved))!;
   return { campaign, added, skippedDuplicates };
 }
 
@@ -247,11 +314,14 @@ export async function addRecipients(
   conn: SqliteConn | PgConn,
   campaignId: string,
   selection: RecipientSelection,
-  opts: CrmOptions = {}
+  opts: CrmOptions = {},
+  scope?: WorkspaceScope,
 ): Promise<AddRecipientsResult> {
+  const resolved = resolveScope(scope);
   const now = resolveNow(opts);
-  const campaign = await getCampaign(conn, campaignId);
-  if (!campaign) throw new CrmError('not_found', `No campaign with id "${campaignId}".`);
+  const campaign = await getCampaign(conn, campaignId, resolved);
+  if (!campaign)
+    throw new CrmError("not_found", `No campaign with id "${campaignId}".`);
 
   const ids: string[] = [];
 
@@ -260,12 +330,12 @@ export async function addRecipients(
     .filter((id) => id.length > 0);
   if (explicit.length > 0) {
     const unique = [...new Set(explicit)];
-    const found = await existingContactIds(conn, unique);
+    const found = await existingContactIds(conn, unique, resolved);
     const missing = unique.filter((id) => !found.has(id));
     if (missing.length > 0) {
       throw new CrmError(
-        'not_found',
-        `Unknown or deleted contact${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}.`
+        "not_found",
+        `Unknown or deleted contact${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}.`,
       );
     }
     ids.push(...unique);
@@ -277,7 +347,12 @@ export async function addRecipients(
       const already = new Set(ids);
       let offset = Math.max(selection.search.offset ?? 0, 0);
       while (ids.length < CAMPAIGN_LIMITS.recipients) {
-        const page = await searchContacts(conn, { ...selection.search, limit: 100, offset });
+        const page = await searchContacts(
+          conn,
+          { ...selection.search, limit: 100, offset },
+          {},
+          resolved,
+        );
         for (const contact of page.contacts) {
           if (!already.has(contact.id)) {
             already.add(contact.id);
@@ -300,18 +375,18 @@ export async function addRecipients(
   const existingCount = await countRecipientRows(conn, campaignId);
   if (existingCount + fresh.length > CAMPAIGN_LIMITS.recipients) {
     throw new CrmError(
-      'invalid_input',
-      `A campaign holds at most ${CAMPAIGN_LIMITS.recipients} recipients (already ${existingCount}).`
+      "invalid_input",
+      `A campaign holds at most ${CAMPAIGN_LIMITS.recipients} recipients (already ${existingCount}).`,
     );
   }
 
   if (fresh.length > 0) {
     const rows = fresh.map((contactId) => ({
       id: randomUUID(),
-      workspaceId: 'default',
+      workspaceId: resolved.workspaceId,
       campaignId,
       contactId,
-      status: 'pending' as const,
+      status: "pending" as const,
       currentStep: 0,
       personalizedVars: null,
       scheduledAt: null,
@@ -321,50 +396,67 @@ export async function addRecipients(
       bouncedAt: null,
       errorMessage: null,
     }));
-    if (conn.dialect === 'sqlite') {
+    if (conn.dialect === "sqlite") {
       await conn.db.insert(conn.schema.campaignRecipients).values(rows);
     } else {
       await conn.db.insert(conn.schema.campaignRecipients).values(rows);
     }
   }
 
-  await refreshCampaignStats(conn, campaignId, now);
-  await writeActivityLog(conn, {
-    action: 'campaign.recipients_added',
-    entityType: 'campaign',
-    entityId: campaignId,
-    metadata: { added: fresh.length, skippedDuplicates },
-  });
+  await refreshCampaignStats(conn, campaignId, now, resolved);
+  await writeActivityLog(
+    conn,
+    {
+      action: "campaign.recipients_added",
+      entityType: "campaign",
+      entityId: campaignId,
+      metadata: { added: fresh.length, skippedDuplicates },
+    },
+    resolved,
+  );
 
   return { added: fresh.length, skippedDuplicates };
 }
 
 async function existingContactIds(
   conn: SqliteConn | PgConn,
-  ids: string[]
+  ids: string[],
+  scope?: WorkspaceScope,
 ): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     const c = conn.schema.contacts;
     const rows = await conn.db
       .select({ id: c.id })
       .from(c)
-      .where(and(inArray(c.id, ids), isNull(c.deletedAt)));
+      .where(
+        and(
+          inArray(c.id, ids),
+          isNull(c.deletedAt),
+          workspacePredicate(scope, c.workspaceId),
+        ),
+      );
     return new Set(rows.map((r) => r.id));
   }
   const c = conn.schema.contacts;
   const rows = await conn.db
     .select({ id: c.id })
     .from(c)
-    .where(and(inArray(c.id, ids), isNull(c.deletedAt)));
+    .where(
+      and(
+        inArray(c.id, ids),
+        isNull(c.deletedAt),
+        workspacePredicate(scope, c.workspaceId),
+      ),
+    );
   return new Set(rows.map((r) => r.id));
 }
 
 async function countRecipientRows(
   conn: SqliteConn | PgConn,
-  campaignId: string
+  campaignId: string,
 ): Promise<number> {
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     const r = conn.schema.campaignRecipients;
     const rows = await conn.db
       .select({ n: sql<number>`count(*)` })
@@ -382,9 +474,9 @@ async function countRecipientRows(
 
 async function recipientContactIds(
   conn: SqliteConn | PgConn,
-  campaignId: string
+  campaignId: string,
 ): Promise<Set<string>> {
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     const r = conn.schema.campaignRecipients;
     const rows = await conn.db
       .select({ contactId: r.contactId })
@@ -413,9 +505,15 @@ export interface CampaignsPage {
   offset: number;
 }
 
+/**
+ * List campaigns, newest-touched first. Workspace scope is a trailing
+ * argument — same convention as the rest of the CRM core (absent =
+ * bootstrap workspace).
+ */
 export async function listCampaigns(
   conn: SqliteConn | PgConn,
-  options: ListCampaignsOptions = {}
+  options: ListCampaignsOptions = {},
+  scope?: WorkspaceScope,
 ): Promise<CampaignsPage> {
   const limit = Math.min(Math.max(options.limit ?? 25, 1), 100);
   const offset = Math.max(options.offset ?? 0, 0);
@@ -423,9 +521,12 @@ export async function listCampaigns(
     ? (options.status as CampaignStatus)
     : undefined;
 
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     const c = conn.schema.campaigns;
-    const where = status ? eq(c.status, status) : undefined;
+    const where = and(
+      status ? eq(c.status, status) : undefined,
+      workspacePredicate(scope, c.workspaceId),
+    );
     const rows = await conn.db
       .select(campaignColumnsSqlite(conn))
       .from(c)
@@ -445,7 +546,10 @@ export async function listCampaigns(
     };
   }
   const c = conn.schema.campaigns;
-  const where = status ? eq(c.status, status) : undefined;
+  const where = and(
+    status ? eq(c.status, status) : undefined,
+    workspacePredicate(scope, c.workspaceId),
+  );
   const rows = await conn.db
     .select(campaignColumnsPg(conn))
     .from(c)
@@ -483,15 +587,18 @@ export async function updateCampaignDraft(
   conn: SqliteConn | PgConn,
   id: string,
   patch: UpdateCampaignDraftInput,
-  opts: CrmOptions = {}
+  opts: CrmOptions = {},
+  scope?: WorkspaceScope,
 ): Promise<Campaign> {
+  const resolved = resolveScope(scope);
   const now = resolveNow(opts);
-  const campaign = await getCampaign(conn, id);
-  if (!campaign) throw new CrmError('not_found', `No campaign with id "${id}".`);
-  if (campaign.status !== 'draft') {
+  const campaign = await getCampaign(conn, id, resolved);
+  if (!campaign)
+    throw new CrmError("not_found", `No campaign with id "${id}".`);
+  if (campaign.status !== "draft") {
     throw new CrmError(
-      'conflict',
-      `Campaign "${campaign.name}" is ${campaign.status} — only draft campaigns can be edited.`
+      "conflict",
+      `Campaign "${campaign.name}" is ${campaign.status} — only draft campaigns can be edited.`,
     );
   }
 
@@ -504,30 +611,38 @@ export async function updateCampaignDraft(
     type?: CampaignType;
   } = { updatedAt: now.toISOString() };
   if (patch.name !== undefined) {
-    const name = optionalText(patch.name, CAMPAIGN_LIMITS.name, 'name');
-    if (!name) throw new CrmError('invalid_input', 'A campaign name is required.');
+    const name = optionalText(patch.name, CAMPAIGN_LIMITS.name, "name");
+    if (!name)
+      throw new CrmError("invalid_input", "A campaign name is required.");
     scalarUpdates.name = name;
   }
   if (patch.description !== undefined) {
     scalarUpdates.description =
-      optionalText(patch.description, CAMPAIGN_LIMITS.description, 'description') ?? null;
+      optionalText(
+        patch.description,
+        CAMPAIGN_LIMITS.description,
+        "description",
+      ) ?? null;
   }
   if (patch.sendFrom !== undefined) {
-    scalarUpdates.sendFrom = optionalText(patch.sendFrom, CAMPAIGN_LIMITS.sendFrom, 'sendFrom') ?? null;
+    scalarUpdates.sendFrom =
+      optionalText(patch.sendFrom, CAMPAIGN_LIMITS.sendFrom, "sendFrom") ??
+      null;
   }
-  if (patch.dailyLimit !== undefined) scalarUpdates.dailyLimit = validateDailyLimit(patch.dailyLimit);
+  if (patch.dailyLimit !== undefined)
+    scalarUpdates.dailyLimit = validateDailyLimit(patch.dailyLimit);
 
   let templatePatch: MessageTemplate | undefined;
   let stepsPatch: DripStep[] | undefined;
   if (patch.template !== undefined) {
-    templatePatch = validateMessageTemplate(patch.template, 'template');
+    templatePatch = validateMessageTemplate(patch.template, "template");
   }
   if (patch.steps !== undefined) {
     stepsPatch = validateDripSteps(patch.steps);
-    scalarUpdates.type = stepsPatch.length > 0 ? 'sequence' : 'single';
+    scalarUpdates.type = stepsPatch.length > 0 ? "sequence" : "single";
   }
 
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     // SQLite json-mode columns take objects; Postgres text columns take strings.
     await conn.db
       .update(conn.schema.campaigns)
@@ -536,7 +651,12 @@ export async function updateCampaignDraft(
         ...(templatePatch ? { template: templatePatch } : {}),
         ...(stepsPatch ? { steps: stepsPatch } : {}),
       })
-      .where(eq(conn.schema.campaigns.id, campaign.id));
+      .where(
+        and(
+          eq(conn.schema.campaigns.id, campaign.id),
+          workspacePredicate(resolved, conn.schema.campaigns.workspaceId),
+        ),
+      );
   } else {
     await conn.db
       .update(conn.schema.campaigns)
@@ -545,17 +665,26 @@ export async function updateCampaignDraft(
         ...(templatePatch ? { template: JSON.stringify(templatePatch) } : {}),
         ...(stepsPatch ? { steps: JSON.stringify(stepsPatch) } : {}),
       })
-      .where(eq(conn.schema.campaigns.id, campaign.id));
+      .where(
+        and(
+          eq(conn.schema.campaigns.id, campaign.id),
+          workspacePredicate(resolved, conn.schema.campaigns.workspaceId),
+        ),
+      );
   }
 
-  await writeActivityLog(conn, {
-    action: 'campaign.updated',
-    entityType: 'campaign',
-    entityId: campaign.id,
-    metadata: { fields: Object.keys(patch) },
-  });
+  await writeActivityLog(
+    conn,
+    {
+      action: "campaign.updated",
+      entityType: "campaign",
+      entityId: campaign.id,
+      metadata: { fields: Object.keys(patch) },
+    },
+    resolved,
+  );
 
-  return (await getCampaign(conn, campaign.id))!;
+  return (await getCampaign(conn, campaign.id, resolved))!;
 }
 
 /** Validate and apply a lifecycle transition. */
@@ -563,46 +692,63 @@ export async function setCampaignStatus(
   conn: SqliteConn | PgConn,
   id: string,
   status: string,
-  opts: CrmOptions = {}
+  opts: CrmOptions = {},
+  scope?: WorkspaceScope,
 ): Promise<Campaign> {
+  const resolved = resolveScope(scope);
   const now = resolveNow(opts);
   if (!CAMPAIGN_STATUSES.includes(status as CampaignStatus)) {
     throw new CrmError(
-      'invalid_input',
-      `Unknown campaign status "${status}". Expected one of: ${CAMPAIGN_STATUSES.join(', ')}.`
+      "invalid_input",
+      `Unknown campaign status "${status}". Expected one of: ${CAMPAIGN_STATUSES.join(", ")}.`,
     );
   }
-  const campaign = await getCampaign(conn, id);
-  if (!campaign) throw new CrmError('not_found', `No campaign with id "${id}".`);
+  const campaign = await getCampaign(conn, id, resolved);
+  if (!campaign)
+    throw new CrmError("not_found", `No campaign with id "${id}".`);
 
   const next = status as CampaignStatus;
   if (!CAMPAIGN_TRANSITIONS[campaign.status].includes(next)) {
     throw new CrmError(
-      'conflict',
-      `Cannot move a campaign from "${campaign.status}" to "${next}". Allowed: ${CAMPAIGN_TRANSITIONS[campaign.status].join(', ') || 'nothing (archived is final)'}.`
+      "conflict",
+      `Cannot move a campaign from "${campaign.status}" to "${next}". Allowed: ${CAMPAIGN_TRANSITIONS[campaign.status].join(", ") || "nothing (archived is final)"}.`,
     );
   }
 
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     await conn.db
       .update(conn.schema.campaigns)
       .set({ status: next, updatedAt: now.toISOString() })
-      .where(eq(conn.schema.campaigns.id, campaign.id));
+      .where(
+        and(
+          eq(conn.schema.campaigns.id, campaign.id),
+          workspacePredicate(resolved, conn.schema.campaigns.workspaceId),
+        ),
+      );
   } else {
     await conn.db
       .update(conn.schema.campaigns)
       .set({ status: next, updatedAt: now.toISOString() })
-      .where(eq(conn.schema.campaigns.id, campaign.id));
+      .where(
+        and(
+          eq(conn.schema.campaigns.id, campaign.id),
+          workspacePredicate(resolved, conn.schema.campaigns.workspaceId),
+        ),
+      );
   }
 
-  await writeActivityLog(conn, {
-    action: 'campaign.status_changed',
-    entityType: 'campaign',
-    entityId: campaign.id,
-    metadata: { from: campaign.status, to: next },
-  });
+  await writeActivityLog(
+    conn,
+    {
+      action: "campaign.status_changed",
+      entityType: "campaign",
+      entityId: campaign.id,
+      metadata: { from: campaign.status, to: next },
+    },
+    resolved,
+  );
 
-  return (await getCampaign(conn, campaign.id))!;
+  return (await getCampaign(conn, campaign.id, resolved))!;
 }
 
 /**
@@ -613,10 +759,11 @@ export async function setCampaignStatus(
 export async function refreshCampaignStats(
   conn: SqliteConn | PgConn,
   campaignId: string,
-  now: Date
+  now: Date,
+  scope?: WorkspaceScope,
 ): Promise<{ totalRecipients: number; sent: number; replied: number }> {
   let stats: { total: number; sent: number; replied: number };
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     const r = conn.schema.campaignRecipients;
     const rows = await conn.db
       .select({
@@ -625,7 +772,12 @@ export async function refreshCampaignStats(
         replied: sql<number>`count(${r.repliedAt})`,
       })
       .from(r)
-      .where(eq(r.campaignId, campaignId));
+      .where(
+        and(
+          eq(r.campaignId, campaignId),
+          workspacePredicate(scope, r.workspaceId),
+        ),
+      );
     stats = {
       total: Number(rows[0]?.total ?? 0),
       sent: Number(rows[0]?.sent ?? 0),
@@ -640,7 +792,12 @@ export async function refreshCampaignStats(
         replied: sql<number>`count(${r.repliedAt})`,
       })
       .from(r)
-      .where(eq(r.campaignId, campaignId));
+      .where(
+        and(
+          eq(r.campaignId, campaignId),
+          workspacePredicate(scope, r.workspaceId),
+        ),
+      );
     stats = {
       total: Number(rows[0]?.total ?? 0),
       sent: Number(rows[0]?.sent ?? 0),
@@ -654,10 +811,30 @@ export async function refreshCampaignStats(
     replied: stats.replied,
     updatedAt: now.toISOString(),
   };
-  if (conn.dialect === 'sqlite') {
-    await conn.db.update(conn.schema.campaigns).set(updates).where(eq(conn.schema.campaigns.id, campaignId));
+  if (conn.dialect === "sqlite") {
+    await conn.db
+      .update(conn.schema.campaigns)
+      .set(updates)
+      .where(
+        and(
+          eq(conn.schema.campaigns.id, campaignId),
+          workspacePredicate(scope, conn.schema.campaigns.workspaceId),
+        ),
+      );
   } else {
-    await conn.db.update(conn.schema.campaigns).set(updates).where(eq(conn.schema.campaigns.id, campaignId));
+    await conn.db
+      .update(conn.schema.campaigns)
+      .set(updates)
+      .where(
+        and(
+          eq(conn.schema.campaigns.id, campaignId),
+          workspacePredicate(scope, conn.schema.campaigns.workspaceId),
+        ),
+      );
   }
-  return { totalRecipients: stats.total, sent: stats.sent, replied: stats.replied };
+  return {
+    totalRecipients: stats.total,
+    sent: stats.sent,
+    replied: stats.replied,
+  };
 }

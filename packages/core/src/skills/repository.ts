@@ -18,27 +18,33 @@
 // Reads are raw ANSI SQL through the same `rawAll` helper the search indexer
 // uses — one query text for both dialects, no per-dialect duplication.
 
-import { randomUUID } from 'node:crypto';
-import { and, eq, sql } from 'drizzle-orm';
-import type { SqliteConn, PgConn } from '@netpro/db';
-import { writeActivityLog } from '../crm/activity';
-import type { AiProvider } from '../ai/types';
-import { rawAll, reindexSearchIndex } from '../search/indexer';
+import { randomUUID } from "node:crypto";
+import { and, eq, sql } from "drizzle-orm";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import { writeActivityLog } from "../crm/activity";
+import type { AiProvider } from "../ai/types";
+import { rawAll, reindexSearchIndex } from "../search/indexer";
+import {
+  workspaceSql,
+  workspacePredicate,
+  resolveScope,
+  type WorkspaceScope,
+} from "../workspaces/scope";
 import {
   extractSkills,
   extractSkillsWithAi,
   storedSkills,
   type SkillContact,
   type SkillExtraction,
-} from './extract';
-import type { SkillContactRef } from './gap';
-import type { Skill } from './taxonomy';
+} from "./extract";
+import type { SkillContactRef } from "./gap";
+import type { Skill } from "./taxonomy";
 
 type Conn = SqliteConn | PgConn;
 
-export const SKILLS_PROVIDER_HEURISTIC = 'skills_heuristic';
-export const SKILLS_PROVIDER_AI = 'skills_ai';
-export const SKILLS_DATA_TYPE = 'skills';
+export const SKILLS_PROVIDER_HEURISTIC = "skills_heuristic";
+export const SKILLS_PROVIDER_AI = "skills_ai";
+export const SKILLS_DATA_TYPE = "skills";
 
 /** A live contact with the fields both extraction and ranking need. */
 export interface SkillContactRow extends SkillContact, SkillContactRef {
@@ -69,7 +75,8 @@ interface ContactSqlRow extends Record<string, unknown> {
 }
 
 function toRow(r: ContactSqlRow): SkillContactRow {
-  const score = r.relationship_score === null ? null : Number(r.relationship_score);
+  const score =
+    r.relationship_score === null ? null : Number(r.relationship_score);
   return {
     id: r.id,
     fullName: r.full_name,
@@ -89,16 +96,24 @@ function toRow(r: ContactSqlRow): SkillContactRow {
 }
 
 /** Every live contact (soft-deleted excluded), ordered by id for determinism. */
-export async function loadSkillContacts(conn: Conn, opts: { ids?: string[] } = {}): Promise<SkillContactRow[]> {
-  const ids = opts.ids?.map((id) => id.trim()).filter((id) => id !== '');
+export async function loadSkillContacts(
+  conn: Conn,
+  opts: { ids?: string[]; scope?: WorkspaceScope } = {},
+): Promise<SkillContactRow[]> {
+  const ids = opts.ids?.map((id) => id.trim()).filter((id) => id !== "");
   if (opts.ids && (!ids || ids.length === 0)) return [];
-  const scope = ids ? sql` AND id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})` : sql``;
+  const idScope = ids
+    ? sql` AND id IN (${sql.join(
+        ids.map((id) => sql`${id}`),
+        sql`, `,
+      )})`
+    : sql``;
   const rows = await rawAll<ContactSqlRow>(
     conn,
     sql`SELECT id, full_name, email, headline, role, company, department, industry, notes,
                tags, custom_fields, skills, relationship_score, updated_at
         FROM contacts
-        WHERE deleted_at IS NULL${scope}
+        WHERE deleted_at IS NULL AND ${workspaceSql(opts.scope, "contacts.workspace_id")}${idScope}
         ORDER BY id
         LIMIT ${SKILL_CONTACT_LIMIT}`,
   );
@@ -106,8 +121,12 @@ export async function loadSkillContacts(conn: Conn, opts: { ids?: string[] } = {
 }
 
 /** One live contact by id, or null. */
-export async function getSkillContact(conn: Conn, contactId: string): Promise<SkillContactRow | null> {
-  const rows = await loadSkillContacts(conn, { ids: [contactId] });
+export async function getSkillContact(
+  conn: Conn,
+  contactId: string,
+  scope?: WorkspaceScope,
+): Promise<SkillContactRow | null> {
+  const rows = await loadSkillContacts(conn, { ids: [contactId], scope });
   return rows[0] ?? null;
 }
 
@@ -131,12 +150,16 @@ export async function writeExtractedSkills(
   conn: Conn,
   contactId: string,
   extraction: SkillExtraction,
-  opts: { now?: Date; previous?: unknown } = {},
+  opts: { now?: Date; previous?: unknown; scope?: WorkspaceScope } = {},
 ): Promise<WriteSkillsResult> {
+  const resolved = resolveScope(opts.scope);
   const now = (opts.now ?? new Date()).toISOString();
   let previous = opts.previous;
   if (previous === undefined) {
-    const rows = await rawAll<{ skills: unknown }>(conn, sql`SELECT skills FROM contacts WHERE id = ${contactId}`);
+    const rows = await rawAll<{ skills: unknown }>(
+      conn,
+      sql`SELECT skills FROM contacts WHERE id = ${contactId} AND ${workspaceSql(resolved, "contacts.workspace_id")}`,
+    );
     previous = rows[0]?.skills ?? null;
   }
   const before = storedSkills(previous);
@@ -144,20 +167,31 @@ export async function writeExtractedSkills(
 
   if (changed) {
     // SQLite's column is json-mode (array in); Postgres's is plain text (stringified in).
-    if (conn.dialect === 'sqlite') {
+    if (conn.dialect === "sqlite") {
       await conn.db
         .update(conn.schema.contacts)
         .set({ skills: extraction.skills, updatedAt: now })
-        .where(eq(conn.schema.contacts.id, contactId));
+        .where(
+          and(
+            eq(conn.schema.contacts.id, contactId),
+            workspacePredicate(resolved, conn.schema.contacts.workspaceId),
+          ),
+        );
     } else {
       await conn.db
         .update(conn.schema.contacts)
         .set({ skills: JSON.stringify(extraction.skills), updatedAt: now })
-        .where(eq(conn.schema.contacts.id, contactId));
+        .where(
+          and(
+            eq(conn.schema.contacts.id, contactId),
+            workspacePredicate(resolved, conn.schema.contacts.workspaceId),
+          ),
+        );
     }
   }
 
-  const provider = extraction.mode === 'ai' ? SKILLS_PROVIDER_AI : SKILLS_PROVIDER_HEURISTIC;
+  const provider =
+    extraction.mode === "ai" ? SKILLS_PROVIDER_AI : SKILLS_PROVIDER_HEURISTIC;
   const payload = {
     skills: extraction.skills,
     details: extraction.details,
@@ -165,10 +199,15 @@ export async function writeExtractedSkills(
     ...(extraction.aiError ? { aiError: extraction.aiError } : {}),
   };
   const confidence = extraction.details.length
-    ? Math.round((extraction.details.reduce((s, d) => s + d.confidence, 0) / extraction.details.length) * 100) / 100
+    ? Math.round(
+        (extraction.details.reduce((s, d) => s + d.confidence, 0) /
+          extraction.details.length) *
+          100,
+      ) / 100
     : 1;
   const row = {
     id: randomUUID(),
+    workspaceId: resolved.workspaceId,
     contactId,
     provider,
     dataType: SKILLS_DATA_TYPE,
@@ -177,23 +216,33 @@ export async function writeExtractedSkills(
     expiresAt: null,
     stale: false,
   };
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     const e = conn.schema.enrichments;
-    await conn.db.delete(e).where(and(eq(e.contactId, contactId), eq(e.provider, provider)));
+    await conn.db
+      .delete(e)
+      .where(and(eq(e.contactId, contactId), eq(e.provider, provider)));
     await conn.db.insert(e).values({ ...row, rawPayload: payload });
   } else {
     const e = conn.schema.enrichments;
-    await conn.db.delete(e).where(and(eq(e.contactId, contactId), eq(e.provider, provider)));
-    await conn.db.insert(e).values({ ...row, rawPayload: JSON.stringify(payload) });
+    await conn.db
+      .delete(e)
+      .where(and(eq(e.contactId, contactId), eq(e.provider, provider)));
+    await conn.db
+      .insert(e)
+      .values({ ...row, rawPayload: JSON.stringify(payload) });
   }
 
   if (changed) {
-    await writeActivityLog(conn, {
-      action: 'skills.extracted',
-      entityType: 'contact',
-      entityId: contactId,
-      metadata: { mode: extraction.mode, skills: extraction.skills, before },
-    });
+    await writeActivityLog(
+      conn,
+      {
+        action: "skills.extracted",
+        entityType: "contact",
+        entityId: contactId,
+        metadata: { mode: extraction.mode, skills: extraction.skills, before },
+      },
+      resolved,
+    );
   }
   return { contactId, skills: extraction.skills, changed };
 }
@@ -202,25 +251,42 @@ export interface SkillsEvidenceRow {
   provider: string;
   fetchedAt: string;
   confidence: number | null;
-  payload: { skills: Skill[]; details: SkillExtraction['details']; mode: SkillExtraction['mode']; aiError?: string };
+  payload: {
+    skills: Skill[];
+    details: SkillExtraction["details"];
+    mode: SkillExtraction["mode"];
+    aiError?: string;
+  };
 }
 
 /** The stored evidence rows for a contact (heuristic and/or AI), newest first. */
-export async function getSkillsEvidence(conn: Conn, contactId: string): Promise<SkillsEvidenceRow[]> {
-  const rows = await rawAll<{ provider: string; fetched_at: string; confidence: number | string | null; raw_payload: unknown }>(
+export async function getSkillsEvidence(
+  conn: Conn,
+  contactId: string,
+  scope?: WorkspaceScope,
+): Promise<SkillsEvidenceRow[]> {
+  const rows = await rawAll<{
+    provider: string;
+    fetched_at: string;
+    confidence: number | string | null;
+    raw_payload: unknown;
+  }>(
     conn,
     sql`SELECT provider, fetched_at, confidence, raw_payload
         FROM enrichments
-        WHERE contact_id = ${contactId} AND data_type = ${SKILLS_DATA_TYPE}`,
+        WHERE contact_id = ${contactId} AND data_type = ${SKILLS_DATA_TYPE}
+          AND ${workspaceSql(scope, "enrichments.workspace_id")}`,
   );
   return rows
     .map((r) => {
       const raw = r.raw_payload;
-      let payload: SkillsEvidenceRow['payload'];
+      let payload: SkillsEvidenceRow["payload"];
       try {
-        payload = (typeof raw === 'string' ? JSON.parse(raw) : raw) as SkillsEvidenceRow['payload'];
+        payload = (
+          typeof raw === "string" ? JSON.parse(raw) : raw
+        ) as SkillsEvidenceRow["payload"];
       } catch {
-        payload = { skills: [], details: [], mode: 'heuristic' };
+        payload = { skills: [], details: [], mode: "heuristic" };
       }
       return {
         provider: r.provider,
@@ -244,12 +310,16 @@ export interface SkillsProfile {
 }
 
 /** What the contact page shows: stored verdict, fresh extraction, and the evidence trail. */
-export async function getSkillsProfile(conn: Conn, contactId: string): Promise<SkillsProfile | null> {
-  const contact = await getSkillContact(conn, contactId);
+export async function getSkillsProfile(
+  conn: Conn,
+  contactId: string,
+  scope?: WorkspaceScope,
+): Promise<SkillsProfile | null> {
+  const contact = await getSkillContact(conn, contactId, scope);
   if (!contact) return null;
   const stored = storedSkills(contact.skills);
   const current = extractSkills({ ...contact, skills: null });
-  const evidence = await getSkillsEvidence(conn, contact.id);
+  const evidence = await getSkillsEvidence(conn, contact.id, scope);
   return {
     contact,
     stored,
@@ -263,13 +333,15 @@ export interface ExtractBatchOptions {
   /** Restrict to these contacts (default: every live contact). */
   contactIds?: string[];
   /** `ai` runs the optional model pass on top of the heuristics (needs `provider`). */
-  mode?: 'heuristic' | 'ai';
+  mode?: "heuristic" | "ai";
   provider?: AiProvider | null;
   model?: string;
   /** Preview only — nothing is written. */
   dryRun?: boolean;
   now?: Date;
   limit?: number;
+  /** v3.0 Phase 2 — workspace scope. Absent = bootstrap workspace. */
+  scope?: WorkspaceScope;
 }
 
 export interface ExtractBatchSummary {
@@ -279,12 +351,17 @@ export interface ExtractBatchSummary {
   unchanged: number;
   /** Contacts with at least one skill after extraction. */
   withSkills: number;
-  mode: 'heuristic' | 'ai';
+  mode: "heuristic" | "ai";
   /** AI failures by contact; heuristics were still applied for these. */
   aiErrors: Array<{ contactId: string; error: string }>;
   dryRun: boolean;
   /** The first 200 changes, for review output. */
-  changes: Array<{ contactId: string; fullName: string; before: Skill[]; after: Skill[] }>;
+  changes: Array<{
+    contactId: string;
+    fullName: string;
+    before: Skill[];
+    after: Skill[];
+  }>;
   /**
    * Search-index rows refreshed for changed contacts (the keyword arm indexes
    * the verdict). Absent when the index could not be written — an unmigrated
@@ -300,13 +377,22 @@ export const BATCH_CHANGES_LIMIT = 200;
  * Heuristic by default; the AI pass is opt-in per call and degrades to
  * heuristics per contact when the provider fails (recorded in `aiErrors`).
  */
-export async function extractSkillsBatch(conn: Conn, opts: ExtractBatchOptions = {}): Promise<ExtractBatchSummary> {
-  const mode = opts.mode === 'ai' ? 'ai' : 'heuristic';
-  if (mode === 'ai' && !opts.provider) {
-    throw new Error('AI extraction requested but no AI provider is configured.');
+export async function extractSkillsBatch(
+  conn: Conn,
+  opts: ExtractBatchOptions = {},
+): Promise<ExtractBatchSummary> {
+  const mode = opts.mode === "ai" ? "ai" : "heuristic";
+  if (mode === "ai" && !opts.provider) {
+    throw new Error(
+      "AI extraction requested but no AI provider is configured.",
+    );
   }
-  let contacts = await loadSkillContacts(conn, { ids: opts.contactIds });
-  if (opts.limit && opts.limit > 0) contacts = contacts.slice(0, Math.floor(opts.limit));
+  let contacts = await loadSkillContacts(conn, {
+    ids: opts.contactIds,
+    scope: opts.scope,
+  });
+  if (opts.limit && opts.limit > 0)
+    contacts = contacts.slice(0, Math.floor(opts.limit));
 
   const summary: ExtractBatchSummary = {
     scanned: 0,
@@ -327,10 +413,17 @@ export async function extractSkillsBatch(conn: Conn, opts: ExtractBatchOptions =
     // recomputing, so it must not feed back into itself.
     const input: SkillContact = { ...contact, skills: null };
     const extraction =
-      mode === 'ai'
-        ? await extractSkillsWithAi(input, { provider: opts.provider!, model: opts.model })
+      mode === "ai"
+        ? await extractSkillsWithAi(input, {
+            provider: opts.provider!,
+            model: opts.model,
+          })
         : extractSkills(input);
-    if (extraction.aiError) summary.aiErrors.push({ contactId: contact.id, error: extraction.aiError });
+    if (extraction.aiError)
+      summary.aiErrors.push({
+        contactId: contact.id,
+        error: extraction.aiError,
+      });
     if (extraction.skills.length > 0) summary.withSkills += 1;
 
     if (sameSkills(before, extraction.skills)) {
@@ -339,18 +432,31 @@ export async function extractSkillsBatch(conn: Conn, opts: ExtractBatchOptions =
       summary.updated += 1;
       changedIds.push(contact.id);
       if (summary.changes.length < BATCH_CHANGES_LIMIT) {
-        summary.changes.push({ contactId: contact.id, fullName: contact.fullName, before, after: extraction.skills });
+        summary.changes.push({
+          contactId: contact.id,
+          fullName: contact.fullName,
+          before,
+          after: extraction.skills,
+        });
       }
     }
     if (!opts.dryRun) {
-      await writeExtractedSkills(conn, contact.id, extraction, { now: opts.now, previous: contact.skills });
+      await writeExtractedSkills(conn, contact.id, extraction, {
+        now: opts.now,
+        previous: contact.skills,
+        scope: opts.scope,
+      });
     }
   }
 
   if (!opts.dryRun && changedIds.length > 0) {
     try {
       // Keyword-only: a skills run must never spend an embedding call.
-      const result = await reindexSearchIndex(conn, { contactIds: changedIds });
+      const result = await reindexSearchIndex(
+        conn,
+        { contactIds: changedIds },
+        opts.scope,
+      );
       summary.indexed = { indexed: result.indexed, skipped: result.skipped };
     } catch {
       summary.indexed = undefined;
@@ -368,14 +474,22 @@ export interface SkillsStatus {
 }
 
 /** Cheap counts for the status line / health payload. */
-export async function skillsStatus(conn: Conn): Promise<SkillsStatus> {
-  const rows = await rawAll<{ contacts: unknown; with_skills: unknown; never_extracted: unknown }>(
+export async function skillsStatus(
+  conn: Conn,
+  scope?: WorkspaceScope,
+): Promise<SkillsStatus> {
+  const rows = await rawAll<{
+    contacts: unknown;
+    with_skills: unknown;
+    never_extracted: unknown;
+  }>(
     conn,
     sql`SELECT
           count(*) AS contacts,
           sum(CASE WHEN skills IS NOT NULL AND skills <> '[]' AND skills <> '' THEN 1 ELSE 0 END) AS with_skills,
           sum(CASE WHEN skills IS NULL THEN 1 ELSE 0 END) AS never_extracted
-        FROM contacts WHERE deleted_at IS NULL`,
+        FROM contacts
+        WHERE deleted_at IS NULL AND ${workspaceSql(scope, "contacts.workspace_id")}`,
   );
   const row = rows[0];
   return {

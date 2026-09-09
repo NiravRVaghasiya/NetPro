@@ -45,19 +45,20 @@
 // needs host extraction, which SQL cannot do portably — so the queries group
 // by the stored `scheme://host/path` value and the folding to domains
 // happens in JS (`foldReferrerHosts`).
-import { sql, type SQL } from 'drizzle-orm';
-import type { SqliteConn, PgConn } from '@netpro/db';
-import { rawAll } from '../search/indexer';
+import { sql, type SQL } from "drizzle-orm";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import { rawAll } from "../search/indexer";
+import { workspaceSql, type WorkspaceScope } from "../workspaces/scope";
 
 type Conn = SqliteConn | PgConn;
 
-export type ViewsErrorCode = 'invalid_input' | 'not_found' | 'conflict';
+export type ViewsErrorCode = "invalid_input" | "not_found" | "conflict";
 
 export class ViewsError extends Error {
   readonly code: ViewsErrorCode;
   constructor(code: ViewsErrorCode, message: string) {
     super(message);
-    this.name = 'ViewsError';
+    this.name = "ViewsError";
     this.code = code;
   }
 }
@@ -84,6 +85,8 @@ export interface ViewStatsOptions {
   includeOwnerViews?: boolean;
   /** Clock override for tests. Defaults to now. */
   now?: Date;
+  /** v3.0 Phase 2 — workspace scope. Absent = bootstrap workspace. */
+  scope?: WorkspaceScope;
 }
 
 export interface RecentViewsOptions extends ViewStatsOptions {
@@ -98,6 +101,8 @@ export interface ViewerContactMatchesOptions {
   limit?: number;
   /** Clock override for tests. Defaults to now. */
   now?: Date;
+  /** v3.0 Phase 2 — workspace scope. Absent = bootstrap workspace. */
+  scope?: WorkspaceScope;
 }
 
 export interface TopReferrersOptions {
@@ -111,6 +116,8 @@ export interface TopReferrersOptions {
   includeOwnerViews?: boolean;
   /** Clock override for tests. Defaults to now. */
   now?: Date;
+  /** v3.0 Phase 2 — workspace scope. Absent = bootstrap workspace. */
+  scope?: WorkspaceScope;
 }
 
 export interface ViewDayPoint {
@@ -201,20 +208,35 @@ export interface ViewsOverview {
 
 function checkDays(days: number | undefined, fallback: number): number {
   const value = days ?? fallback;
-  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 1 || value > VIEWS_MAX_DAYS) {
+  if (
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > VIEWS_MAX_DAYS
+  ) {
     throw new ViewsError(
-      'invalid_input',
+      "invalid_input",
       `days must be an integer between 1 and ${VIEWS_MAX_DAYS}, got ${String(days)}.`,
     );
   }
   return value;
 }
 
-function checkLimit(limit: number | undefined, fallback: number, max: number, what: string): number {
+function checkLimit(
+  limit: number | undefined,
+  fallback: number,
+  max: number,
+  what: string,
+): number {
   const value = limit ?? fallback;
-  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 1 || value > max) {
+  if (
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > max
+  ) {
     throw new ViewsError(
-      'invalid_input',
+      "invalid_input",
       `${what} must be an integer between 1 and ${max}, got ${String(limit)}.`,
     );
   }
@@ -224,7 +246,10 @@ function checkLimit(limit: number | undefined, fallback: number, max: number, wh
 function checkOffset(offset: number | undefined): number {
   const value = offset ?? 0;
   if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
-    throw new ViewsError('invalid_input', `offset must be a non-negative integer, got ${String(offset)}.`);
+    throw new ViewsError(
+      "invalid_input",
+      `offset must be a non-negative integer, got ${String(offset)}.`,
+    );
   }
   return value;
 }
@@ -245,9 +270,16 @@ interface WindowClause {
 function windowClause(
   sinceIso: string,
   untilIso: string,
-  opts: { includeBots?: boolean; includeOwnerViews?: boolean },
+  opts: {
+    includeBots?: boolean;
+    includeOwnerViews?: boolean;
+    scope?: WorkspaceScope;
+  },
 ): SQL {
-  const parts: SQL[] = [sql`viewed_at >= ${sinceIso} AND viewed_at <= ${untilIso}`];
+  const parts: SQL[] = [
+    sql`viewed_at >= ${sinceIso} AND viewed_at <= ${untilIso}`,
+    workspaceSql(opts.scope),
+  ];
   if (!opts.includeBots) parts.push(sql`is_bot = false`);
   if (!opts.includeOwnerViews) parts.push(sql`is_owner_view = false`);
   return sql.join(parts, sql` AND `);
@@ -271,11 +303,13 @@ const UNIQUE_VIEWER = sql`COALESCE(viewer_fingerprint, viewer_ip, session_id)`;
  * sites send me readers". Unparseable values (hand-inserted, pre-Phase-2
  * rows) survive as their own bucket rather than vanishing.
  */
-export function foldReferrerHosts(rows: Array<{ referrer: string | null; count: number }>): Map<string, number> {
+export function foldReferrerHosts(
+  rows: Array<{ referrer: string | null; count: number }>,
+): Map<string, number> {
   const folded = new Map<string, number>();
   for (const row of rows) {
     if (row.referrer === null) {
-      folded.set('(direct)', (folded.get('(direct)') ?? 0) + row.count);
+      folded.set("(direct)", (folded.get("(direct)") ?? 0) + row.count);
       continue;
     }
     let host = row.referrer;
@@ -290,23 +324,47 @@ export function foldReferrerHosts(rows: Array<{ referrer: string | null; count: 
   return folded;
 }
 
-function toShares(folded: Map<string, number>, total: number, limit: number): ViewCount[] {
+function toShares(
+  folded: Map<string, number>,
+  total: number,
+  limit: number,
+): ViewCount[] {
   return [...folded.entries()]
-    .map(([value, count]) => ({ value, count, share: total > 0 ? count / total : 0 }))
-    .sort((a, b) => b.count - a.count || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0))
+    .map(([value, count]) => ({
+      value,
+      count,
+      share: total > 0 ? count / total : 0,
+    }))
+    .sort(
+      (a, b) =>
+        b.count - a.count ||
+        (a.value < b.value ? -1 : a.value > b.value ? 1 : 0),
+    )
     .slice(0, limit);
 }
 
 // ── getViewStats ──────────────────────────────────────────────────────────
 
-export async function getViewStats(conn: Conn, options: ViewStatsOptions = {}): Promise<ViewStats> {
+export async function getViewStats(
+  conn: Conn,
+  options: ViewStatsOptions = {},
+): Promise<ViewStats> {
   const days = checkDays(options.days, VIEWS_DEFAULT_DAYS);
-  const limit = checkLimit(options.limit, VIEWS_DEFAULT_LIMIT, VIEWS_MAX_LIMIT, 'limit');
+  const limit = checkLimit(
+    options.limit,
+    VIEWS_DEFAULT_LIMIT,
+    VIEWS_MAX_LIMIT,
+    "limit",
+  );
   const includeBots = options.includeBots ?? false;
   const includeOwnerViews = options.includeOwnerViews ?? false;
   const now = options.now ?? new Date();
   const { sinceIso, untilIso } = windowFor(now, days);
-  const where = windowClause(sinceIso, untilIso, { includeBots, includeOwnerViews });
+  const where = windowClause(sinceIso, untilIso, {
+    includeBots,
+    includeOwnerViews,
+    scope: options.scope,
+  });
 
   const totalsRows = await rawAll<{
     views: number;
@@ -335,11 +393,16 @@ export async function getViewStats(conn: Conn, options: ViewStatsOptions = {}): 
     sql`SELECT COUNT(*) FILTER (WHERE is_bot = true) AS bots,
                COUNT(*) FILTER (WHERE is_owner_view = true) AS owner_views
         FROM profile_views
-        WHERE viewed_at >= ${sinceIso} AND viewed_at <= ${untilIso}`,
+        WHERE viewed_at >= ${sinceIso} AND viewed_at <= ${untilIso}
+          AND ${workspaceSql(options.scope)}`,
   );
   const excludedRaw = excludedRows[0] ?? { bots: 0, owner_views: 0 };
 
-  const seriesRows = await rawAll<{ day: string; views: number; unique_viewers: number }>(
+  const seriesRows = await rawAll<{
+    day: string;
+    views: number;
+    unique_viewers: number;
+  }>(
     conn,
     sql`SELECT substr(viewed_at, 1, 10) AS day,
                COUNT(*) AS views,
@@ -375,12 +438,19 @@ export async function getViewStats(conn: Conn, options: ViewStatsOptions = {}): 
   // Zero-fill every UTC day in the window so charts never skip quiet days.
   // (COUNT arrives as a string on Postgres — normalize everything here.)
   const byDay = new Map(
-    seriesRows.map((r) => [r.day, { views: Number(r.views), unique: Number(r.unique_viewers) }]),
+    seriesRows.map((r) => [
+      r.day,
+      { views: Number(r.views), unique: Number(r.unique_viewers) },
+    ]),
   );
   const series: ViewDayPoint[] = [];
-  const startDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const startDay = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
   for (let i = days - 1; i >= 0; i--) {
-    const date = new Date(startDay.getTime() - i * 86_400_000).toISOString().slice(0, 10);
+    const date = new Date(startDay.getTime() - i * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
     const row = byDay.get(date);
     series.push({ date, views: row?.views ?? 0, unique: row?.unique ?? 0 });
   }
@@ -388,12 +458,16 @@ export async function getViewStats(conn: Conn, options: ViewStatsOptions = {}): 
   const views = Number(totals.views);
   const countryFolded = new Map<string, number>();
   for (const row of countryRows) {
-    const key = row.country && row.country.trim() !== '' ? row.country : '(unknown)';
+    const key =
+      row.country && row.country.trim() !== "" ? row.country : "(unknown)";
     countryFolded.set(key, (countryFolded.get(key) ?? 0) + Number(row.count));
   }
   const pageFolded = new Map<string, number>();
   for (const row of pageRows) {
-    pageFolded.set(row.viewed_page, (pageFolded.get(row.viewed_page) ?? 0) + Number(row.count));
+    pageFolded.set(
+      row.viewed_page,
+      (pageFolded.get(row.viewed_page) ?? 0) + Number(row.count),
+    );
   }
 
   return {
@@ -413,7 +487,13 @@ export async function getViewStats(conn: Conn, options: ViewStatsOptions = {}): 
     },
     filters: { includeBots, includeOwnerViews },
     series,
-    byReferrer: toShares(foldReferrerHosts(referrerRows.map((r) => ({ ...r, count: Number(r.count) }))), views, limit),
+    byReferrer: toShares(
+      foldReferrerHosts(
+        referrerRows.map((r) => ({ ...r, count: Number(r.count) })),
+      ),
+      views,
+      limit,
+    ),
     byCountry: toShares(countryFolded, views, limit),
     byPage: toShares(pageFolded, views, limit),
   };
@@ -460,9 +540,17 @@ function toRecentView(row: RecentRow): RecentView {
   };
 }
 
-export async function getRecentViews(conn: Conn, options: RecentViewsOptions = {}): Promise<RecentViewsResult> {
+export async function getRecentViews(
+  conn: Conn,
+  options: RecentViewsOptions = {},
+): Promise<RecentViewsResult> {
   const days = checkDays(options.days, VIEWS_DEFAULT_DAYS);
-  const limit = checkLimit(options.limit, VIEWS_DEFAULT_LIMIT, VIEWS_MAX_TIMELINE_LIMIT, 'limit');
+  const limit = checkLimit(
+    options.limit,
+    VIEWS_DEFAULT_LIMIT,
+    VIEWS_MAX_TIMELINE_LIMIT,
+    "limit",
+  );
   const offset = checkOffset(options.offset);
   const includeBots = options.includeBots ?? false;
   const includeOwnerViews = options.includeOwnerViews ?? false;
@@ -471,7 +559,10 @@ export async function getRecentViews(conn: Conn, options: RecentViewsOptions = {
 
   // Filters qualify the profile_views alias explicitly — the join must not
   // change which rows qualify, only decorate them.
-  const parts: SQL[] = [sql`v.viewed_at >= ${sinceIso} AND v.viewed_at <= ${untilIso}`];
+  const parts: SQL[] = [
+    sql`v.viewed_at >= ${sinceIso} AND v.viewed_at <= ${untilIso}`,
+    workspaceSql(options.scope, "v.workspace_id"),
+  ];
   if (!includeBots) parts.push(sql`v.is_bot = false`);
   if (!includeOwnerViews) parts.push(sql`v.is_owner_view = false`);
   const where = sql.join(parts, sql` AND `);
@@ -488,6 +579,7 @@ export async function getRecentViews(conn: Conn, options: RecentViewsOptions = {
                c.company AS contact_company, c.role AS contact_role
         FROM profile_views v
         LEFT JOIN contacts c ON c.id = v.resolved_contact AND c.deleted_at IS NULL
+          AND ${workspaceSql(options.scope, "c.workspace_id")}
         WHERE ${where}
         ORDER BY v.viewed_at DESC, v.id DESC
         LIMIT ${limit} OFFSET ${offset}`,
@@ -502,9 +594,17 @@ export async function getRecentViews(conn: Conn, options: RecentViewsOptions = {
 
 // ── getTopReferrers ───────────────────────────────────────────────────────
 
-export async function getTopReferrers(conn: Conn, options: TopReferrersOptions = {}): Promise<ViewCount[]> {
+export async function getTopReferrers(
+  conn: Conn,
+  options: TopReferrersOptions = {},
+): Promise<ViewCount[]> {
   const days = checkDays(options.days, VIEWS_DEFAULT_DAYS);
-  const limit = checkLimit(options.limit, VIEWS_DEFAULT_LIMIT, VIEWS_MAX_LIMIT, 'limit');
+  const limit = checkLimit(
+    options.limit,
+    VIEWS_DEFAULT_LIMIT,
+    VIEWS_MAX_LIMIT,
+    "limit",
+  );
   const now = options.now ?? new Date();
   const { sinceIso, untilIso } = windowFor(now, days);
   const where = windowClause(sinceIso, untilIso, options);
@@ -515,7 +615,9 @@ export async function getTopReferrers(conn: Conn, options: TopReferrersOptions =
         WHERE ${where}
         GROUP BY referrer`,
   );
-  const folded = foldReferrerHosts(rows.map((r) => ({ ...r, count: Number(r.count) })));
+  const folded = foldReferrerHosts(
+    rows.map((r) => ({ ...r, count: Number(r.count) })),
+  );
   const total = [...folded.values()].reduce((a, b) => a + b, 0);
   return toShares(folded, total, limit);
 }
@@ -538,7 +640,12 @@ export async function getViewerContactMatches(
   options: ViewerContactMatchesOptions = {},
 ): Promise<ViewerContactMatchesResult> {
   const days = checkDays(options.days, VIEWS_DEFAULT_DAYS);
-  const limit = checkLimit(options.limit, VIEWS_DEFAULT_LIMIT, VIEWS_MAX_LIMIT, 'limit');
+  const limit = checkLimit(
+    options.limit,
+    VIEWS_DEFAULT_LIMIT,
+    VIEWS_MAX_LIMIT,
+    "limit",
+  );
   const now = options.now ?? new Date();
   const { sinceIso, untilIso } = windowFor(now, days);
 
@@ -547,12 +654,14 @@ export async function getViewerContactMatches(
   // "your contact viewed your card".
   const where = sql`v.viewed_at >= ${sinceIso} AND v.viewed_at <= ${untilIso}
     AND v.is_bot = false AND v.is_owner_view = false
-    AND v.resolved_contact IS NOT NULL`;
+    AND v.resolved_contact IS NOT NULL
+    AND ${workspaceSql(options.scope, "v.workspace_id")}`;
   const totalRows = await rawAll<{ total: number }>(
     conn,
     sql`SELECT COUNT(*) AS total
         FROM profile_views v
         JOIN contacts c ON c.id = v.resolved_contact AND c.deleted_at IS NULL
+          AND ${workspaceSql(options.scope, "c.workspace_id")}
         WHERE ${where}`,
   );
   const rows = await rawAll<MatchRow>(
@@ -562,6 +671,7 @@ export async function getViewerContactMatches(
                c.company AS contact_company, c.role AS contact_role
         FROM profile_views v
         JOIN contacts c ON c.id = v.resolved_contact AND c.deleted_at IS NULL
+          AND ${workspaceSql(options.scope, "c.workspace_id")}
         WHERE ${where}
         ORDER BY v.viewed_at DESC, v.id DESC
         LIMIT ${limit}`,
@@ -593,6 +703,8 @@ export interface ViewsOverviewOptions {
   includeBots?: boolean;
   includeOwnerViews?: boolean;
   now?: Date;
+  /** v3.0 Phase 2 — workspace scope. Absent = bootstrap workspace. */
+  scope?: WorkspaceScope;
 }
 
 /**
@@ -601,11 +713,16 @@ export interface ViewsOverviewOptions {
  * the timeline page and the match list together — callers that need
  * different sizes call the pieces directly.
  */
-export async function getViewsOverview(conn: Conn, options: ViewsOverviewOptions = {}): Promise<ViewsOverview> {
+export async function getViewsOverview(
+  conn: Conn,
+  options: ViewsOverviewOptions = {},
+  scope?: WorkspaceScope,
+): Promise<ViewsOverview> {
+  const scoped = { ...options, scope: scope ?? options.scope };
   const [stats, recent, matches] = await Promise.all([
-    getViewStats(conn, options),
-    getRecentViews(conn, options),
-    getViewerContactMatches(conn, options),
+    getViewStats(conn, scoped),
+    getRecentViews(conn, scoped),
+    getViewerContactMatches(conn, scoped),
   ]);
   return { stats, recent, matches };
 }
