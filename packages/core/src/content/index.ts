@@ -20,3 +20,6 @@ export * from "./urls";
 export * from "./parse";
 export * from "./providers";
 export * from "./repository";
+// v2.5 Phase 6 — the 365-day content-snapshot retention query (the latest
+// snapshot per item always survives); scheduled by `../retention`.
+export * from "./retention";

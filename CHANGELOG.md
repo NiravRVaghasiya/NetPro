@@ -244,6 +244,57 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
   `listContentSummaries`, so the list surfaces read engagement with three
   batched `IN` queries, never per-item round-trips.
 
+### Added — v2.5 Phase 6: Cross-cutting — dashboard integration, retention & performance
+
+- **Dashboard integration:** the content overview joins `getNetworkOverview`
+  as a first-class `content` block (all-time, beside the Phase 3 `views`
+  block), with `includeContent` / `?content=0` on `GET /api/analytics` — the
+  same opt-out pattern as `graph=0` and `views=0`, so API clients can slim
+  the payload while the dashboard reads the full thing. `/dashboard` now
+  renders its "Content" strip from `overview.content` (one shared payload,
+  no second `getContentOverview` round-trip), and the strips gain the
+  two-step onboarding empty states: **"Add your first content"** (link to
+  `/content`) when the library is empty, and **"Publish your card and share
+  the link"** (link to the tracking panel) when there are no views.
+- **Retention & privacy — the daily purge job** (`@netpro/core/retention`,
+  in-memory, no queue infra, no migration): `purgeExpiredContentMetrics`
+  (new, beside Phase 1's `purgeExpiredProfileViews`) deletes `content_metrics`
+  snapshots older than 365 days — **but the latest snapshot per content item
+  always survives**, even when it predates the window (ties for newest all
+  survive; ambiguous latest is not guessable) — and `runRetentionPurge`
+  composes both purges (90 d views / 365 d snapshots) behind a 24 h guard:
+  it reads the newest `retention.purge` row from `activity_log` and skips
+  when younger than the interval. Every run writes exactly one audit row
+  with the deleted counts (never one row per row). The web process starts
+  the schedule in `instrumentation.ts` after the startup migrations,
+  independent of `NETPRO_AUTO_MIGRATE` (it is DML, not DDL), with a 24 h
+  unref'd interval for long-lived containers: a Docker instance purges at
+  boot + daily, serverless cold-start storms collapse into one purge per
+  day (a same-second race deletes twice, idempotently, and logs twice).
+  Operator knobs: `NETPRO_DISABLE_RETENTION`, `NETPRO_VIEW_RETENTION_DAYS`,
+  `NETPRO_CONTENT_METRIC_RETENTION_DAYS` (garbage/zero/negative values fall
+  back to the defaults — a typo must not widen the window). The Settings →
+  Card tracking panel now documents the *effective* windows (and the
+  content-snapshot horizon) from that same config, so UI and job agree.
+  `GET /api/card/pixel.gif` keeps its guarantees under test: no `Set-Cookie`,
+  no raw IP in any stored column — and now a regression test that the raw IP
+  never reaches the server logs either.
+- **Performance budget (recorded on SQLite at 10k views + 1k content items
+  + 5k metrics, 500 contacts / 100 edges):** `GET /api/analytics`
+  (full dashboard payload, graph included) **~53 ms** (budget 500 ms),
+  `GET /api/card/views` **~10 ms** (budget 100 ms), `GET /api/content`
+  **~1–2 ms** (budget 100 ms). No new indexes were needed. The budget
+  ships as a hermetic test (`perf.budget.test.ts`) with 10× smoke-alarm
+  assertions, so a 10× regression fails the build and 15% jitter does not.
+- **Docs:** `docs/getting-started.md` gains the content cookbook (add /
+  CSV + feed import / manual snapshots / analyze) and the profile-views
+  guide (embed snippet, signed `?v=` links, DNT behaviour, operator
+  controls); `docs/deployment.md` gains the content-provider env table
+  (`DEVTO_API_KEY` / `TWITTER_BEARER_TOKEN` / `GITHUB_TOKEN` — reserved,
+  disabled stubs) and the retention section (windows, cadence, concurrency
+  notes, knobs); `.env.example` documents both.
+- No database migration and no new runtime dependencies.
+
 ## [2.0.0] - 2026-09-08
 
 ### Added — v2.0 Phase 6: Event matcher

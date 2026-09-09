@@ -88,6 +88,23 @@ describe("GET /api/card/pixel.gif (v2.5 phase 2)", () => {
     expect(JSON.stringify(row)).not.toContain(IP);
   });
 
+  it("never logs the raw IP, even in server logs (v2.5 phase 6)", async () => {
+    const lines: string[] = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      lines.push(args.join(" "));
+    });
+    const infoSpy = vi.spyOn(console, "info").mockImplementation((...args: unknown[]) => {
+      lines.push(args.join(" "));
+    });
+    try {
+      await GET(request());
+      for (const line of lines) expect(line).not.toContain(IP);
+    } finally {
+      logSpy.mockRestore();
+      infoSpy.mockRestore();
+    }
+  });
+
   it("labels bots and owner sessions without changing the response", async () => {
     vi.mocked(auth).mockResolvedValue({ user: { id: "owner" } } as never);
     const response = await GET(

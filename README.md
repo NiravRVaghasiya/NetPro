@@ -184,7 +184,7 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   CI also pins the promise that **no `pgvector` extension is required** —
   embeddings are portable JSON, so a managed Postgres works as-is.
 
-- **v2.5 — “The Observer”: Phases 1–5 shipped.** Migration `0006` and the
+- **v2.5 — “The Observer”: Phases 1–6 shipped.** Migration `0006` and the
   `@netpro/core/views` module made the producer-less `profile_views` table
   trustworthy and privacy-preserving — daily-salted HMAC viewer hashing (no
   raw IPs ever stored; legacy values blanked on upgrade), a vendored bot
@@ -217,7 +217,18 @@ plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)):
   id-or-URL selectors, series + snapshot routes, mention links), the
   `/content` library and `/content/[id]` detail pages (latest snapshot +
   history + contacts), a Content section on `/contacts/[id]`, and a
-  "Content" strip on `/dashboard` — see the
+  "Content" strip on `/dashboard`. Phase 6 tied it all together: the
+  content overview joins `getNetworkOverview` (the dashboard's "Content"
+  strip and `GET /api/analytics` read one shared payload; `?content=0`
+  opts out), the dashboard's strips gained two-step onboarding empty
+  states, and a **daily retention job** (web process, in-memory, audited
+  in `activity_log`) purges raw profile views past 90 days and content
+  snapshots past 365 days — the latest snapshot per piece always
+  survives — with `NETPRO_DISABLE_RETENTION` / `NETPRO_VIEW_RETENTION_DAYS`
+  / `NETPRO_CONTENT_METRIC_RETENTION_DAYS` operator knobs; the plan's
+  performance budgets were measured at 10k views / 1k content / 5k
+  metrics (~53 ms dashboard / ~10 ms views / ~2 ms content on SQLite) and
+  ship as hermetic budget tests — see the
   [v2.5 implementation plan](docs/superpowers/plans/2026-09-08-v2.5-implementation-plan.md).
 
 **Deferred from v2.0 (deliberate, not forgotten):** live event discovery
@@ -266,7 +277,7 @@ for the draft-only campaign decisions.
 - `apps/web` — Next.js app (App Router), Auth.js v5 with GitHub OAuth
 - `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|reindex|outreach|analyze|path|track|edge|campaign|export|card|migrate|skills|events|content`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
-- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths), the Phase 3 pathfinder surface (ranking, first-ask, per-contact graph position), the v2.0 skills taxonomy/gap analyzer, the Phase 6 event matcher (CSV import, attendee matching, recommendations), the v2.5 profile-view beacon + viewer analytics (privacy-hardened ingestion, windowed stats, timelines, known-visitor matches), and the v2.5 content tracker data model (URL identity, CSV/feed import, metrics snapshots, mentions, provider interface)
+- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths), the Phase 3 pathfinder surface (ranking, first-ask, per-contact graph position), the v2.0 skills taxonomy/gap analyzer, the Phase 6 event matcher (CSV import, attendee matching, recommendations), the v2.5 profile-view beacon + viewer analytics (privacy-hardened ingestion, windowed stats, timelines, known-visitor matches), the v2.5 content tracker data model (URL identity, CSV/feed import, metrics snapshots, mentions, provider interface), and the v2.5 daily retention purge (90-day views / 365-day snapshots with latest-per-piece survival, at-most-once-per-24 h, audit-logged)
 - `packages/ui` — shared React components
 - `packages/config` — shared ESLint and Tailwind configs
 

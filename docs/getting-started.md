@@ -507,6 +507,90 @@ next CLI database open or web server startup. The web editor uses the web
 app’s configured database; the offline `card` command never reads or changes
 that database.
 
+## Profile views (v2.5)
+
+Your published card counts its visitors with a privacy-preserving beacon — no
+cookies, no third parties, and no raw IP address ever stored (only a 16-hex
+hash that rotates salt every UTC day, so it cannot be reversed or tracked
+across days). Bots and your own views are labeled and excluded from the
+numbers; `DNT: 1` / `Sec-GPC: 1` visitors are still counted but stored in
+minimal mode. Raw view rows are kept for **90 days**, then purged by a daily
+job.
+
+See your numbers:
+
+```bash
+# From the CLI: summary, per-day bars, top referrers, recent views, known visitors
+node apps/cli/dist/index.js card --views --days 30
+node apps/cli/dist/index.js analyze --views      # the views section of the report
+```
+
+In the web app: the **Dashboard** renders a "Profile views" strip (totals,
+sparkline, top referrers, recent views), and **Settings → Card** has the full
+analytics tables (7/30/90-day windows, show/hide-bots). `GET /api/card/views`
+is the owner-only API behind both.
+
+Track where views come from:
+
+1. **Embed the pixel** — copy the snippet from **Settings → Card → Tracking**
+   (built from your instance's origin) and paste it before `</body>` on your
+   blog or portfolio. It is one 1-pixel request, no JavaScript:
+
+   ```html
+   <img src="https://your-app.example.com/api/card/pixel.gif?p=blog" width="1" height="1" alt="">
+   ```
+
+2. **Share a signed link** — `https://your-app.example.com/card?v=…`
+   (minted on **Settings → Card**) attributes visits to a specific contact in
+   your "known visitors" list. Tokens are signed by your instance, expire
+   after 30 days, and a link to an unknown or deleted contact is ignored.
+   HTML cards can opt into the pixel with
+   `card --generate --pixel-url https://your-app.example.com`.
+
+Operator controls (server environment): `NETPRO_DISABLE_VIEWS=true` keeps the
+beacons answering but stores nothing; `NETPRO_VIEW_SALT` sets the hash salt
+(default: `NEXTAUTH_SECRET`). See [deployment.md](deployment.md) for details.
+
+## Content tracker (v2.5)
+
+Track what you publish and how each piece performs — one piece per normalized
+URL, re-imports are idempotent, and snapshots are append-only (`null` means
+"not reported", never zero).
+
+```bash
+node apps/cli/dist/index.js content list                 # newest-published first
+node apps/cli/dist/index.js content list --platform blog --tag js --days 30
+
+# Add one piece (idempotent on the URL)
+node apps/cli/dist/index.js content add https://blog.example/my-post \
+  --title "My post" --platform blog --type article --published-at 2026-08-01
+
+# Bulk-import a CSV (url,title[,platform,type,published_at,author,tags]) or a feed
+node apps/cli/dist/index.js content import posts.csv --dry-run   # preview first
+node apps/cli/dist/index.js content import https://blog.example/feed.xml
+# Any RSS 2.0 / Atom feed works; titles, dates and links are mapped for you.
+
+# Record engagement (a snapshot, appended — never an update)
+node apps/cli/dist/index.js content fetch my-post --manual --views 120 --likes 12
+
+# Inspect one piece (detail + snapshot history) and get the library at a glance
+node apps/cli/dist/index.js content show my-post --metrics
+node apps/cli/dist/index.js content analyze --days 30
+```
+
+In the web app: the **Content** page (`/content`) lists and filters your
+library with an "At a glance" overview; each piece (`/content/[id]`) shows
+its snapshot history, the contacts it involves (mentions), and forms to
+record numbers. The dashboard renders a "Content" strip, and contacts pages
+list the content a person is part of.
+
+**Providers:** v2.5 ships `manual` (always available) and `rss` (import)
+built in. `devto`, `twitter`, and `github` are **disabled stubs** —
+`content fetch` names the key that would enable each (`DEVTO_API_KEY`,
+`TWITTER_BEARER_TOKEN`, `GITHUB_TOKEN`) and nothing calls any external API
+until a provider is implemented. Engagement is recorded by you, at your
+discretion.
+
 ## Verify everything
 
 ```bash

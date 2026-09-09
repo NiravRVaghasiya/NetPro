@@ -14,6 +14,7 @@ import {
   topValues,
 } from "./metrics";
 import { getNetworkGraph, type NetworkGraph } from "../graph/network";
+import { getContentOverview, type ContentOverview } from "../content/repository";
 import { getViewsOverview, type ViewsOverview } from "../views/analytics";
 import {
   resolveAnalyticsOptions,
@@ -28,8 +29,9 @@ export const TOP_VALUES_LIMIT = 5;
  * Build the full network overview: metrics, composite score, growth,
  * top companies/industries, clusters, the dormant-ties list, the
  * graph-analytics section (`includeGraph: false` opts out — v2.0 Phase 2),
- * and the viewer-analytics section (`includeViews: false` opts out —
- * v2.5 Phase 3).
+ * the viewer-analytics section (`includeViews: false` opts out —
+ * v2.5 Phase 3), and the content-tracker overview
+ * (`includeContent: false` opts out — v2.5 Phase 6).
  */
 export async function getNetworkOverview(
   conn: SqliteConn | PgConn,
@@ -60,15 +62,25 @@ export async function getNetworkOverview(
           now,
         });
 
-  const [metrics, growth, clusters, dormant, rows, graph, views] = await Promise.all([
-    computeNetworkMetrics(conn, options),
-    getGrowthSummary(conn, options),
-    detectClusters(conn, options),
-    getDormantContacts(conn, options),
-    projectContacts(conn),
-    graphPromise,
-    viewsPromise,
-  ]);
+  // v2.5 Phase 6 — the content strip reads the same all-time overview the
+  // `/content` page and dashboard shared before; all-time (no window) so the
+  // dashboard numbers are unchanged by the fold-in.
+  const contentPromise: Promise<ContentOverview | undefined> =
+    options.includeContent === false
+      ? Promise.resolve(undefined)
+      : getContentOverview(conn, { now });
+
+  const [metrics, growth, clusters, dormant, rows, graph, views, content] =
+    await Promise.all([
+      computeNetworkMetrics(conn, options),
+      getGrowthSummary(conn, options),
+      detectClusters(conn, options),
+      getDormantContacts(conn, options),
+      projectContacts(conn),
+      graphPromise,
+      viewsPromise,
+      contentPromise,
+    ]);
 
   const score = computeNetworkScore({
     totalContacts: metrics.totalContacts,
@@ -87,6 +99,7 @@ export async function getNetworkOverview(
     dormant,
     ...(graph ? { graph } : {}),
     ...(views ? { views } : {}),
+    ...(content ? { content } : {}),
     generatedAt: now.toISOString(),
   };
 }

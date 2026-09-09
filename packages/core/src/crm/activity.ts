@@ -12,6 +12,12 @@ export interface ActivityEntry {
   entityType?: string | null;
   entityId?: string | null;
   metadata?: Record<string, unknown> | null;
+  /**
+   * Audit timestamp. Defaults to the real clock; callers with an injected
+   * clock (tests, batch jobs run against a `now` override) pass it through
+   * so the audit row and the operation agree on "when".
+   */
+  createdAt?: string | null;
 }
 
 export async function writeActivityLog(
@@ -23,7 +29,7 @@ export async function writeActivityLog(
     action: entry.action,
     entityType: entry.entityType ?? null,
     entityId: entry.entityId ?? null,
-    createdAt: new Date().toISOString(),
+    createdAt: entry.createdAt ?? new Date().toISOString(),
   };
   try {
     // metadata is JSON-mode text on SQLite (object in) and plain text on

@@ -6,7 +6,7 @@ import {
   type NetworkOverview,
 } from "@netpro/core/src/analytics";
 import type { ViewsOverview } from "@netpro/core/src/views";
-import { getContentOverview, type ContentOverview } from "@netpro/core/src/content";
+import type { ContentOverview } from "@netpro/core/src/content";
 import { listFollowUps } from "@netpro/core/src/crm";
 import { formatCount, platformLabel } from "@/lib/content";
 
@@ -355,9 +355,24 @@ function ProfileViewsSection({ views }: { views: ViewsOverview | undefined }) {
   );
 }
 
-/** v2.5 Phase 5 — the content tracker at a glance, when it has rows. */
-function ContentSection({ content }: { content: ContentOverview }) {
-  if (content.items === 0) return null;
+/**
+ * v2.5 Phase 5 — the content tracker at a glance; v2.5 Phase 6 — reads the
+ * overview's `content` block (one shared payload) and renders the
+ * "Add your first content" onboarding step until the library has rows.
+ */
+function ContentSection({ content }: { content: ContentOverview | undefined }) {
+  if (!content) return null;
+  if (content.items === 0) {
+    return (
+      <section style={{ marginTop: "1.5rem" }}>
+        <h2>Content</h2>
+        <p style={{ color: "#9ca3af" }}>
+          No content tracked yet. <Link href="/content">Add your first content</Link> — a
+          blog post, article or video — and record its numbers to see engagement here.
+        </p>
+      </section>
+    );
+  }
   return (
     <section style={{ marginTop: "1.5rem" }}>
       <h2>Content</h2>
@@ -396,10 +411,12 @@ function ContentSection({ content }: { content: ContentOverview }) {
 
 export default async function DashboardPage() {
   // limit 1: only the pending counts are consumed, for the follow-up card.
-  const [overview, followUps, content] = await Promise.all([
+  // v2.5 Phase 6 — the "Content" strip reads `overview.content` (the
+  // all-time overview folded into the shared payload) instead of a second
+  // `getContentOverview` round-trip, so page and API can't disagree.
+  const [overview, followUps] = await Promise.all([
     getNetworkOverview(conn),
     listFollowUps(conn, { view: "pending", limit: 1 }),
-    getContentOverview(conn),
   ]);
   const m = overview.metrics;
   const g = overview.growth;
@@ -414,7 +431,7 @@ export default async function DashboardPage() {
           <Link href="/import">Import your connections</Link> to see network
           analytics here.
         </p>
-        <ContentSection content={content} />
+        <ContentSection content={overview.content} />
       </div>
     );
   }
@@ -511,7 +528,7 @@ export default async function DashboardPage() {
 
       <ProfileViewsSection views={overview.views} />
 
-      <ContentSection content={content} />
+      <ContentSection content={overview.content} />
 
       <section style={{ marginTop: "1.5rem" }}>
         <h2>Dormant ties</h2>

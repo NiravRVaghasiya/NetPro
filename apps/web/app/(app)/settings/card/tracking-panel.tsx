@@ -1,11 +1,16 @@
 // apps/web/app/(app)/settings/card/tracking-panel.tsx — v2.5 Phase 2: the
 // owner-facing privacy documentation and embed snippet for profile-view
-// tracking. Server-rendered, dumb by design (the page resolves the origin)
-// so it renders in unit tests without request headers.
+// tracking; v2.5 Phase 6: the retention windows it documents read the same
+// env config the purge job uses, so the panel can never promise a different
+// horizon than the database honours. Server-rendered, dumb by design (the
+// page resolves the origin) so it renders in unit tests without request
+// headers.
 import { viewsDisabled } from "@/lib/beacon";
+import { retentionConfig } from "@/lib/retention";
 
 export function CardTrackingPanel({ origin }: { origin: string }) {
   const enabled = !viewsDisabled();
+  const retention = retentionConfig();
   const pixelSnippet = `<img src="${origin}/api/card/pixel.gif?p=blog" width="1" height="1" alt="">`;
   return (
     <section className="space-y-4 rounded-xl border border-[#dce3dc] bg-[#f4f6f0] p-5 sm:p-6">
@@ -29,7 +34,9 @@ export function CardTrackingPanel({ origin }: { origin: string }) {
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <h3 className="font-semibold text-[#183c30]">Stored (90 days, then purged)</h3>
+            <h3 className="font-semibold text-[#183c30]">
+              Stored ({retention.viewRetentionDays} days, then purged)
+            </h3>
             <ul className="list-disc space-y-1 pl-5">
               <li>a 16-character salted hash of IP + browser (rotates daily — never reversible)</li>
               <li>bot / owner-view labels (excluded from your counts)</li>
@@ -47,6 +54,12 @@ export function CardTrackingPanel({ origin }: { origin: string }) {
             </ul>
           </div>
         </div>
+        <p className="text-xs text-[#627366]">
+          A daily job enforces the window (at most one run per 24 h, audited in
+          the activity log). The content tracker’s engagement snapshots are kept
+          for {retention.contentMetricRetentionDays} days — the latest snapshot
+          per piece always survives, even when it is older.
+        </p>
         <div>
           <h3 className="font-semibold text-[#183c30]">Embed on your blog or portfolio</h3>
           <p className="mb-2">

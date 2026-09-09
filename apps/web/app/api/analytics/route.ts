@@ -9,15 +9,19 @@ function num(value: string | null): number | undefined {
 }
 
 /**
- * GET /api/analytics?days=&activeDays=&months=&limit=&graph=&views=
+ * GET /api/analytics?days=&activeDays=&months=&limit=&graph=&views=&content=
  * Returns the full NetworkOverview JSON the dashboard renders — including
- * the v2.0 graph-analytics section unless `graph=0` opts out, and the v2.5
- * viewer-analytics section unless `views=0` opts out.
+ * the v2.0 graph-analytics section unless `graph=0` opts out, the v2.5
+ * viewer-analytics section unless `views=0` opts out, and the v2.5
+ * content-tracker overview (v2.5 Phase 6) unless `content=0` opts out.
+ * The opt-outs keep the payload small for API clients that only need some
+ * sections; the dashboard consumes the full payload.
  */
 export async function GET(request: Request) {
   const p = new URL(request.url).searchParams;
   const graph = p.get("graph");
   const views = p.get("views");
+  const content = p.get("content");
 
   try {
     const overview = await getNetworkOverview(conn, {
@@ -27,6 +31,7 @@ export async function GET(request: Request) {
       limit: num(p.get("limit")),
       includeGraph: graph === null ? true : graph !== "0",
       includeViews: views === null ? true : views !== "0",
+      includeContent: content === null ? true : content !== "0",
     });
     return NextResponse.json(overview);
   } catch (error) {

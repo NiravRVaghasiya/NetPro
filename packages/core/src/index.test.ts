@@ -95,5 +95,11 @@ describe("@netpro/core module boundaries", () => {
     expect(core.content.MANUAL_PROVIDER.enabled).toBe(true);
     expect(core.content.RSS_PROVIDER.enabled).toBe(true);
     expect(core.content.DEVTO_PROVIDER.enabled).toBe(false);
+    // Real since v2.5 Phase 6 (content-snapshot retention + the daily purge).
+    expect(typeof core.content.purgeExpiredContentMetrics).toBe("function");
+    expect(core.content.CONTENT_METRIC_RETENTION_DAYS).toBe(365);
+    expect(typeof core.retention.runRetentionPurge).toBe("function");
+    expect(core.retention.RETENTION_PURGE_ACTION).toBe("retention.purge");
+    expect(core.retention.RETENTION_PURGE_INTERVAL_MS).toBe(24 * 60 * 60 * 1000);
   });
 });
