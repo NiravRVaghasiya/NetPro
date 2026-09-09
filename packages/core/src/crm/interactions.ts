@@ -13,6 +13,11 @@ import { getContactById, type ContactRef } from '../ai/resolve-contact';
 import { writeActivityLog } from './activity';
 import { relationshipScoreColumn, type ScoredInteraction } from './scoring';
 import {
+  resolveScope,
+  workspacePredicate,
+  type WorkspaceScope,
+} from '../workspaces/scope';
+import {
   CRM_LIMITS,
   CrmError,
   DEFAULT_DIRECTIONS,
@@ -48,6 +53,8 @@ export interface LogInteractionInput {
 export interface InteractionRow {
   id: string;
   workspaceId?: string;
+  /** v3.0 Phase 2 — workspace user id that logged this, null for system path. */
+  createdByUser?: string | null;
   contactId: string;
   type: string;
   direction: string | null;
@@ -144,20 +151,31 @@ export function validateInteractionInput(
 
 async function campaignExists(
   conn: SqliteConn | PgConn,
-  campaignId: string
+  campaignId: string,
+  scope?: WorkspaceScope
 ): Promise<boolean> {
   if (conn.dialect === 'sqlite') {
     const rows = await conn.db
       .select({ id: conn.schema.campaigns.id })
       .from(conn.schema.campaigns)
-      .where(eq(conn.schema.campaigns.id, campaignId))
+      .where(
+        and(
+          eq(conn.schema.campaigns.id, campaignId),
+          workspacePredicate(scope, conn.schema.campaigns.workspaceId),
+        ),
+      )
       .limit(1);
     return rows.length > 0;
   }
   const rows = await conn.db
     .select({ id: conn.schema.campaigns.id })
     .from(conn.schema.campaigns)
-    .where(eq(conn.schema.campaigns.id, campaignId))
+    .where(
+      and(
+        eq(conn.schema.campaigns.id, campaignId),
+        workspacePredicate(scope, conn.schema.campaigns.workspaceId),
+      ),
+    )
     .limit(1);
   return rows.length > 0;
 }
@@ -169,20 +187,31 @@ async function campaignExists(
  */
 async function loadScoredInteractions(
   conn: SqliteConn | PgConn,
-  contactId: string
+  contactId: string,
+  scope?: WorkspaceScope
 ): Promise<ScoredInteraction[]> {
   if (conn.dialect === 'sqlite') {
     const i = conn.schema.interactions;
     return conn.db
       .select({ type: i.type, direction: i.direction, occurredAt: i.occurredAt })
       .from(i)
-      .where(eq(i.contactId, contactId));
+      .where(
+        and(
+          eq(i.contactId, contactId),
+          workspacePredicate(scope, i.workspaceId),
+        ),
+      );
   }
   const i = conn.schema.interactions;
   return conn.db
     .select({ type: i.type, direction: i.direction, occurredAt: i.occurredAt })
     .from(i)
-    .where(eq(i.contactId, contactId));
+    .where(
+      and(
+        eq(i.contactId, contactId),
+        workspacePredicate(scope, i.workspaceId),
+      ),
+    );
 }
 
 /**
@@ -193,9 +222,10 @@ async function loadScoredInteractions(
 export async function recomputeContactStats(
   conn: SqliteConn | PgConn,
   contactId: string,
-  now: Date
+  now: Date,
+  scope?: WorkspaceScope
 ): Promise<ContactStats> {
-  const history = await loadScoredInteractions(conn, contactId);
+  const history = await loadScoredInteractions(conn, contactId, scope);
 
   let lastInteraction: string | null = null;
   for (const i of history) {
@@ -212,12 +242,22 @@ export async function recomputeContactStats(
     await conn.db
       .update(conn.schema.contacts)
       .set({ ...stats, updatedAt })
-      .where(eq(conn.schema.contacts.id, contactId));
+      .where(
+        and(
+          eq(conn.schema.contacts.id, contactId),
+          workspacePredicate(scope, conn.schema.contacts.workspaceId),
+        ),
+      );
   } else {
     await conn.db
       .update(conn.schema.contacts)
       .set({ ...stats, updatedAt })
-      .where(eq(conn.schema.contacts.id, contactId));
+      .where(
+        and(
+          eq(conn.schema.contacts.id, contactId),
+          workspacePredicate(scope, conn.schema.contacts.workspaceId),
+        ),
+      );
   }
   return stats;
 }
@@ -225,7 +265,8 @@ export async function recomputeContactStats(
 /** Read back the denormalized stats for one contact (timeline views). */
 export async function getContactStats(
   conn: SqliteConn | PgConn,
-  contactId: string
+  contactId: string,
+  scope?: WorkspaceScope
 ): Promise<ContactStats | null> {
   if (conn.dialect === 'sqlite') {
     const c = conn.schema.contacts;
@@ -236,7 +277,12 @@ export async function getContactStats(
         relationshipScore: c.relationshipScore,
       })
       .from(c)
-      .where(eq(c.id, contactId));
+      .where(
+        and(
+          eq(c.id, contactId),
+          workspacePredicate(scope, c.workspaceId),
+        ),
+      );
     const row = rows[0];
     if (!row) return null;
     return {
@@ -253,7 +299,12 @@ export async function getContactStats(
       relationshipScore: c.relationshipScore,
     })
     .from(c)
-    .where(eq(c.id, contactId));
+    .where(
+      and(
+        eq(c.id, contactId),
+        workspacePredicate(scope, c.workspaceId),
+      ),
+    );
   const row = rows[0];
   if (!row) return null;
   return {
@@ -274,13 +325,15 @@ export async function getContactStats(
 export async function logInteraction(
   conn: SqliteConn | PgConn,
   input: LogInteractionInput,
-  opts: CrmOptions = {}
+  opts: CrmOptions = {},
+  scope?: WorkspaceScope
 ): Promise<LogInteractionResult> {
   const now = resolveNow(opts);
+  const resolved = resolveScope(scope);
   const normalized = validateInteractionInput(input, now);
   const contactId = input.contactId.trim();
 
-  const contact = await getContactById(conn, contactId);
+  const contact = await getContactById(conn, contactId, scope);
   if (!contact) {
     throw new CrmError(
       'not_found',
@@ -290,13 +343,14 @@ export async function logInteraction(
 
   const campaignId =
     optionalText(input.campaignId, 200, 'campaignId') ?? null;
-  if (campaignId !== null && !(await campaignExists(conn, campaignId))) {
+  if (campaignId !== null && !(await campaignExists(conn, campaignId, scope))) {
     throw new CrmError('not_found', `No campaign with id "${campaignId}".`);
   }
 
   const interaction: InteractionRow = {
     id: randomUUID(),
-    workspaceId: 'default',
+    workspaceId: resolved.workspaceId,
+    createdByUser: resolved.userId === 'system' ? null : resolved.userId,
     contactId: contact.id,
     type: normalized.type,
     direction: normalized.direction,
@@ -314,13 +368,17 @@ export async function logInteraction(
     await conn.db.insert(conn.schema.interactions).values(interaction);
   }
 
-  const stats = await recomputeContactStats(conn, contact.id, now);
-  await writeActivityLog(conn, {
-    action: 'interaction.logged',
-    entityType: 'contact',
-    entityId: contact.id,
-    metadata: { interactionId: interaction.id, type: interaction.type },
-  });
+  const stats = await recomputeContactStats(conn, contact.id, now, scope);
+  await writeActivityLog(
+    conn,
+    {
+      action: 'interaction.logged',
+      entityType: 'contact',
+      entityId: contact.id,
+      metadata: { interactionId: interaction.id, type: interaction.type },
+    },
+    scope,
+  );
 
   return { interaction, stats, contact };
 }
@@ -342,7 +400,8 @@ const MAX_LIST_LIMIT = 200;
  */
 export async function listInteractions(
   conn: SqliteConn | PgConn,
-  options: ListInteractionsOptions = {}
+  options: ListInteractionsOptions = {},
+  scope?: WorkspaceScope
 ): Promise<InteractionWithContact[]> {
   const limit = Math.min(Math.max(options.limit ?? 20, 1), MAX_LIST_LIMIT);
   const offset = Math.max(options.offset ?? 0, 0);
@@ -351,8 +410,12 @@ export async function listInteractions(
     const i = conn.schema.interactions;
     const c = conn.schema.contacts;
     const where = options.contactId
-      ? and(eq(i.contactId, options.contactId), isNull(c.deletedAt))
-      : isNull(c.deletedAt);
+      ? and(
+          eq(i.contactId, options.contactId),
+          isNull(c.deletedAt),
+          workspacePredicate(scope, i.workspaceId),
+        )
+      : and(isNull(c.deletedAt), workspacePredicate(scope, i.workspaceId));
     return conn.db
       .select({
         id: i.id,
@@ -378,8 +441,12 @@ export async function listInteractions(
   const i = conn.schema.interactions;
   const c = conn.schema.contacts;
   const where = options.contactId
-    ? and(eq(i.contactId, options.contactId), isNull(c.deletedAt))
-    : isNull(c.deletedAt);
+    ? and(
+        eq(i.contactId, options.contactId),
+        isNull(c.deletedAt),
+        workspacePredicate(scope, i.workspaceId),
+      )
+    : and(isNull(c.deletedAt), workspacePredicate(scope, i.workspaceId));
   return conn.db
     .select({
       id: i.id,
@@ -405,20 +472,27 @@ export async function listInteractions(
 /** Total interaction count (optionally for one contact) — pagination helper. */
 export async function countInteractions(
   conn: SqliteConn | PgConn,
-  contactId?: string
+  contactId?: string,
+  scope?: WorkspaceScope
 ): Promise<number> {
   if (conn.dialect === 'sqlite') {
     const i = conn.schema.interactions;
+    const where = contactId
+      ? and(eq(i.contactId, contactId), workspacePredicate(scope, i.workspaceId))
+      : workspacePredicate(scope, i.workspaceId);
     const rows = await conn.db
       .select({ n: sql<number>`count(*)` })
       .from(i)
-      .where(contactId ? eq(i.contactId, contactId) : undefined);
+      .where(where);
     return Number(rows[0]?.n ?? 0);
   }
   const i = conn.schema.interactions;
+  const where = contactId
+    ? and(eq(i.contactId, contactId), workspacePredicate(scope, i.workspaceId))
+    : workspacePredicate(scope, i.workspaceId);
   const rows = await conn.db
     .select({ n: sql<number>`count(*)` })
     .from(i)
-    .where(contactId ? eq(i.contactId, contactId) : undefined);
+    .where(where);
   return Number(rows[0]?.n ?? 0);
 }

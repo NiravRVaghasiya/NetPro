@@ -872,3 +872,90 @@ describe("workspaces migration (v3.0 phase 1)", () => {
     }
   });
 });
+
+describe("authorship migration (v3.0 phase 2)", () => {
+  it("adds created_by_user and author indexes to interactions and follow_ups", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: folder });
+      for (const table of ["interactions", "follow_ups"]) {
+        const cols = sqlite
+          .prepare(`PRAGMA table_info(${table})`)
+          .all()
+          .map((r) => (r as { name: string }).name);
+        expect(cols).toEqual(expect.arrayContaining(["created_by_user"]));
+      }
+      const idx = sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%_author'",
+        )
+        .all()
+        .map((r) => (r as { name: string }).name)
+        .sort();
+      expect(idx).toEqual(["idx_followups_author", "idx_interactions_author"]);
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe("workspace default migration (v3.0 phase 2)", () => {
+  it("backfills NULL workspace_id rows written after 0008 before the column had a default", () => {
+    // Phase 1 (0008) added the nullable `workspace_id` and backfilled rows that
+    // already existed, but attached no DB-level DEFAULT. So a write made after
+    // 0008 — typically a Postgres Drizzle insert that relies on the `DEFAULT`
+    // keyword — lands as NULL, which the Phase 2 scoped reads then hide. This
+    // migration (0011) backfills those rows into the bootstrap workspace.
+    const temporary = mkdtempSync(join(tmpdir(), "netpro-migration-0011-"));
+    const sqlite = new Database(":memory:");
+    try {
+      const journal = JSON.parse(
+        readFileSync(join(folder, "meta/_journal.json"), "utf8"),
+      ) as { entries: Array<{ idx: number; tag: string }> };
+      const upTo0008 = journal.entries.filter((e) => e.idx < 9);
+      expect(upTo0008.map((e) => e.idx)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+      mkdirSync(join(temporary, "meta"));
+      writeFileSync(
+        join(temporary, "meta/_journal.json"),
+        JSON.stringify({ ...journal, entries: upTo0008 }),
+      );
+      for (const entry of upTo0008) {
+        copyFileSync(
+          join(folder, `${entry.tag}.sql`),
+          join(temporary, `${entry.tag}.sql`),
+        );
+      }
+
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: temporary });
+
+      // A contact written after 0008 without a workspace: NULL, not 'default'.
+      sqlite
+        .prepare(
+          "INSERT INTO contacts (id, full_name, source, created_at, updated_at, workspace_id) VALUES (?,?,?,?,?,NULL)",
+        )
+        .run("legacy-nullws", "No Workspace Yet", "test", "2026-01-01", "2026-01-01");
+
+      migrate(db, { migrationsFolder: folder });
+
+      // 0011 restored it to the bootstrap workspace, so a single-owner install
+      // keeps seeing its own data.
+      expect(
+        sqlite.prepare("SELECT workspace_id FROM contacts WHERE id = 'legacy-nullws'").get(),
+      ).toEqual({ workspace_id: "default" });
+      expect(
+        sqlite.prepare("SELECT count(*) AS n FROM __drizzle_migrations").get(),
+      ).toEqual({ n: journal.entries.length });
+
+      // Re-running is a no-op — the backfill only touches NULL rows.
+      migrate(db, { migrationsFolder: folder });
+      expect(
+        sqlite.prepare("SELECT workspace_id FROM contacts WHERE id = 'legacy-nullws'").get(),
+      ).toEqual({ workspace_id: "default" });
+    } finally {
+      sqlite.close();
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  });
+});

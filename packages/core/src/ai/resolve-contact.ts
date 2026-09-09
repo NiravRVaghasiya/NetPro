@@ -9,6 +9,7 @@
 import { isNull, or, eq, and, sql } from "drizzle-orm";
 import type { SqliteConn, PgConn } from "@netpro/db";
 import type { RecipientInput } from "./prompt";
+import { workspacePredicate, type WorkspaceScope } from "../workspaces/scope";
 
 export interface ContactRef {
   id: string;
@@ -27,6 +28,7 @@ export interface ContactRef {
 async function findCandidates(
   conn: SqliteConn | PgConn,
   selector: string,
+  scope?: WorkspaceScope,
 ): Promise<ContactRef[]> {
   const trimmed = selector.trim();
   // Drizzle's typed builders need dialect-narrowed tables (same pattern as
@@ -51,6 +53,7 @@ async function findCandidates(
       .where(
         and(
           isNull(t.deletedAt),
+          workspacePredicate(scope, t.workspaceId),
           or(
             eq(t.email, trimmed),
             eq(t.id, trimmed),
@@ -78,6 +81,7 @@ async function findCandidates(
     .where(
       and(
         isNull(t.deletedAt),
+        workspacePredicate(scope, t.workspaceId),
         or(
           eq(t.email, trimmed),
           eq(t.id, trimmed),
@@ -98,9 +102,10 @@ function describe(ref: ContactRef): string {
 export async function resolveContactRef(
   conn: SqliteConn | PgConn,
   selector: string,
+  scope?: WorkspaceScope,
 ): Promise<ContactRef> {
   const trimmed = selector.trim();
-  const candidates = await findCandidates(conn, trimmed);
+  const candidates = await findCandidates(conn, trimmed, scope);
 
   const byEmail = candidates.find((c) => c.email === trimmed);
   if (byEmail) return byEmail;
@@ -131,6 +136,7 @@ export async function resolveContactRef(
 export async function getContactById(
   conn: SqliteConn | PgConn,
   id: string,
+  scope?: WorkspaceScope,
 ): Promise<ContactRef | null> {
   if (conn.dialect === "sqlite") {
     const t = conn.schema.contacts;
@@ -149,7 +155,13 @@ export async function getContactById(
         notes: t.notes,
       })
       .from(t)
-      .where(and(isNull(t.deletedAt), eq(t.id, id.trim())));
+      .where(
+        and(
+          isNull(t.deletedAt),
+          workspacePredicate(scope, t.workspaceId),
+          eq(t.id, id.trim()),
+        ),
+      );
     return (rows[0] ?? null) as ContactRef | null;
   }
   const t = conn.schema.contacts;
@@ -168,7 +180,13 @@ export async function getContactById(
       notes: t.notes,
     })
     .from(t)
-    .where(and(isNull(t.deletedAt), eq(t.id, id.trim())));
+    .where(
+      and(
+        isNull(t.deletedAt),
+        workspacePredicate(scope, t.workspaceId),
+        eq(t.id, id.trim()),
+      ),
+    );
   return (rows[0] ?? null) as ContactRef | null;
 }
 

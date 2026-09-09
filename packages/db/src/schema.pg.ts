@@ -100,6 +100,8 @@ export const contacts = pgTable('contacts', {
 export const interactions = pgTable('interactions', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
+  // v3.0 Phase 2 — authorship: who logged this interaction.
+  createdByUser: text('created_by_user'),
   contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
 
   type: text('type').notNull(),
@@ -119,6 +121,7 @@ export const interactions = pgTable('interactions', {
   campaignIdx: index('idx_interactions_campaign').on(t.campaignId),
   workspaceIdx: index('idx_interactions_workspace').on(t.workspaceId),
   workspaceContactIdx: index('idx_interactions_workspace_contact').on(t.workspaceId, t.contactId),
+  authorIdx: index('idx_interactions_author').on(t.createdByUser),
 }));
 
 export const edges = pgTable('edges', {
@@ -409,6 +412,8 @@ export const profileViews = pgTable('profile_views', {
 export const followUps = pgTable('follow_ups', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').default('default').references(() => workspaces.id, { onDelete: 'cascade' }),
+  // v3.0 Phase 2 — authorship: who created this follow-up.
+  createdByUser: text('created_by_user'),
   contactId: text('contact_id').notNull().references(() => contacts.id, { onDelete: 'cascade' }),
 
   reason: text('reason'),
@@ -428,6 +433,7 @@ export const followUps = pgTable('follow_ups', {
   contactIdx: index('idx_followups_contact').on(t.contactId),
   workspaceIdx: index('idx_followups_workspace').on(t.workspaceId),
   workspaceStatusDueIdx: index('idx_followups_workspace_status_due').on(t.workspaceId, t.status, t.dueAt),
+  authorIdx: index('idx_followups_author').on(t.createdByUser),
 }));
 
 export const activityLog = pgTable('activity_log', {

@@ -6,6 +6,7 @@
 // never roll back the user's logged interaction.
 import { randomUUID } from 'node:crypto';
 import type { SqliteConn, PgConn } from '@netpro/db';
+import { resolveScope, type WorkspaceScope } from '../workspaces/scope';
 
 export interface ActivityEntry {
   action: string;
@@ -22,11 +23,13 @@ export interface ActivityEntry {
 
 export async function writeActivityLog(
   conn: SqliteConn | PgConn,
-  entry: ActivityEntry
+  entry: ActivityEntry,
+  scope?: WorkspaceScope
 ): Promise<void> {
+  const resolved = resolveScope(scope);
   const row = {
     id: randomUUID(),
-    workspaceId: 'default',
+    workspaceId: resolved.workspaceId,
     action: entry.action,
     entityType: entry.entityType ?? null,
     entityId: entry.entityId ?? null,

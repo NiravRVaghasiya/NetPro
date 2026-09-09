@@ -7,6 +7,31 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
 
 ## [Unreleased] — v3.0 platform work
 
+### Added — Phase 2 (part): workspace-scoped CRM engine
+
+- Scope helpers in `@netpro/core/workspaces` (`bootstrapScope`, `resolveScope`,
+  `workspacePredicate`) — every CRM query now carries an explicit
+  `workspace_id` predicate, resolved to the bootstrap workspace when no scope is
+  supplied (single-owner installs behave exactly as before).
+- The shared CRM (contacts/interactions/follow-ups/timeline/activity/contact
+  resolution) is now workspace-scoped end to end: resolves, lists, stats,
+  recompute, follow-up buckets and lifecycle, and the activity log all filter by
+  scope, and writes stamp `workspace_id` + the author from the authenticated
+  principal.
+- Authorship migration `0010_authorship` (both dialects): `created_by_user` on
+  `interactions` and `follow_ups` plus author indexes.
+- Workspace default migration `0011_workspace_default` (both dialects):
+  backfills any `workspace_id` NULLs into the bootstrap workspace and, on
+  PostgreSQL, attaches a DB-level `DEFAULT 'default'` to `workspace_id` on
+  every data table. Phase 1's `0008` left the column nullable with no default,
+  so Postgres inserts that omitted `workspace_id` produced NULL, which the
+  scoped queries then hid; this keeps single-owner installs v2.5-compatible.
+- Web: `requireScope()` in `apps/web/lib/authz.ts`; the CRM API routes
+  (`/api/interactions`, `/api/follow-ups`, `/api/contacts`, `/api/contacts/[id]`)
+  now derive the scope from the session and pass it into core.
+- Cross-tenant scope-guard suite (`workspaces/scope-guard.test.ts`) asserting no
+  workspace can read another's CRM rows, on the hermetic SQLite fixture.
+
 ### Added — Phase 4: encrypted web key vault
 
 - Personal and workspace provider credentials in `/settings/keys`, encrypted

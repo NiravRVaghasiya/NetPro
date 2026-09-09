@@ -544,6 +544,34 @@ workspace membership alone retains that user's encrypted personal rows for
 possible rejoining; revoked users cannot access the authenticated vault API.
 
 **Scope boundary:** this phase scopes the vault, not the rest of the CRM.
-Phase 2's application-wide query scoping and per-user GDPR export/deletion are
-still pending. Do not treat this feature as certification of multi-tenant
-isolation for existing contact/search/analytics routes.
+
+## Workspace-scoped CRM engine (v3.0 Phase 2)
+
+Phase 2 begins the application-wide query scoping with the shared CRM. Every
+CRM query (contacts, interactions, follow-ups, timeline, activity log, contact
+resolution) now carries an explicit `workspace_id` predicate, and CRM writes
+stamp the workspace plus a `created_by_user` author from the authenticated
+principal. The scope is resolved server-side from the session — a request can
+never supply its own `workspace_id`. Web CRM API routes
+(`/api/interactions`, `/api/follow-ups`, `/api/contacts`,
+`/api/contacts/[id]`) call the new `requireScope()` helper and pass it down.
+
+- **Single-owner compatibility:** with no scope specified (e.g. the CLI,
+  which talks to the database directly), every query resolves to the bootstrap
+  `default` workspace — identical behavior to v2.5. Operator-grade CLI commands
+  can address any workspace once a `--workspace` selection is added.
+- **Workspace default:** migration `0011_workspace_default` backfills any rows
+  whose `workspace_id` is `NULL` into the bootstrap workspace (both dialects)
+  and, on PostgreSQL, attaches a DB-level `DEFAULT 'default'` to `workspace_id`
+  on every data table. Phase 1's `0008` added the column as *nullable* with no
+  default, so a new Postgres insert that omitted `workspace_id` produced NULL —
+  which the scoped queries then hid. This migration closes that gap so a fresh
+  or upgrading single-owner install keeps seeing its own data.
+- **Authorship:** migration `0010_authorship` adds `created_by_user` to
+  `interactions` and `follow_ups` (both dialects) plus author indexes. Existing
+  rows are left `NULL`; new writes record the workspace user id.
+- **Still pending in Phase 2:** query scoping for analytics, search, views,
+  content, graph, events, campaigns; scoped retention/reindex/beacons; CLI
+  `--workspace` + config binding; and per-user vs per-workspace GDPR. Until
+  those land, do not treat the CRM scoping as certification of multi-tenant
+  isolation for the other routes.

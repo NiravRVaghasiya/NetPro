@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('@/lib/authz', () => ({ requireScope: async () => ({ workspaceId: 'default', role: 'owner', userId: 'system' }) }));
 
 const fixture = await vi.hoisted(async () => {
   const { createTestSqliteConn } = await import('@netpro/db/src/testing');

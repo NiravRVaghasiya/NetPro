@@ -26,12 +26,15 @@ import {
   DAY_MS,
   type CrmOptions,
 } from './types';
+import { resolveScope, workspacePredicate, type WorkspaceScope } from '../workspaces/scope';
 
 export interface FollowUpRow {
   id: string;
   contactId: string;
   contactName: string;
   contactCompany: string | null;
+  /** v3.0 Phase 2 — workspace user id that created this, null for system path. */
+  createdByUser?: string | null;
   reason: string | null;
   dueAt: string;
   snoozedUntil: string | null;
@@ -74,6 +77,7 @@ interface FollowUpDbRow {
   contactId: string;
   contactName: string;
   contactCompany: string | null;
+  createdByUser?: string | null;
   reason: string | null;
   dueAt: string;
   snoozedUntil: string | null;
@@ -90,6 +94,7 @@ function toFollowUpRow(row: FollowUpDbRow): FollowUpRow {
     contactId: row.contactId,
     contactName: row.contactName,
     contactCompany: row.contactCompany,
+    createdByUser: row.createdByUser ?? null,
     reason: row.reason,
     dueAt: row.dueAt,
     snoozedUntil: row.snoozedUntil,
@@ -120,14 +125,16 @@ export interface CreateFollowUpInput {
 export async function createFollowUp(
   conn: SqliteConn | PgConn,
   input: CreateFollowUpInput,
-  opts: CrmOptions = {}
+  opts: CrmOptions = {},
+  scope?: WorkspaceScope
 ): Promise<FollowUpRow> {
   const now = resolveNow(opts);
+  const resolved = resolveScope(scope);
 
   if (!input.contactId || typeof input.contactId !== 'string' || !input.contactId.trim()) {
     throw new CrmError('invalid_input', 'A contactId is required to create a follow-up.');
   }
-  const contact = await getContactById(conn, input.contactId.trim());
+  const contact = await getContactById(conn, input.contactId.trim(), scope);
   if (!contact) {
     throw new CrmError(
       'not_found',
@@ -156,7 +163,8 @@ export async function createFollowUp(
 
   const row = {
     id: randomUUID(),
-    workspaceId: 'default',
+    workspaceId: resolved.workspaceId,
+    createdByUser: resolved.userId === 'system' ? null : resolved.userId,
     contactId: contact.id,
     reason,
     dueAt,
@@ -174,21 +182,30 @@ export async function createFollowUp(
     await conn.db.insert(conn.schema.followUps).values(row);
   }
 
-  await writeActivityLog(conn, {
-    action: 'followup.created',
-    entityType: 'contact',
-    entityId: contact.id,
-    metadata: { followUpId: row.id, dueAt, recurring: row.recurring },
-  });
+  await writeActivityLog(
+    conn,
+    {
+      action: 'followup.created',
+      entityType: 'contact',
+      entityId: contact.id,
+      metadata: { followUpId: row.id, dueAt, recurring: row.recurring },
+    },
+    scope,
+  );
 
-  return toFollowUpRow({ ...row, contactName: contact.fullName, contactCompany: contact.company });
+  return toFollowUpRow({
+    ...row,
+    contactName: contact.fullName,
+    contactCompany: contact.company,
+  });
 }
 
 const MAX_LIST_LIMIT = 200;
 
 async function selectPendingRows(
   conn: SqliteConn | PgConn,
-  contactId?: string
+  contactId?: string,
+  scope?: WorkspaceScope
 ): Promise<FollowUpDbRow[]> {
   if (conn.dialect === 'sqlite') {
     const f = conn.schema.followUps;
@@ -199,6 +216,7 @@ async function selectPendingRows(
         contactId: f.contactId,
         contactName: c.fullName,
         contactCompany: c.company,
+        createdByUser: f.createdByUser,
         reason: f.reason,
         dueAt: f.dueAt,
         snoozedUntil: f.snoozedUntil,
@@ -210,7 +228,14 @@ async function selectPendingRows(
       })
       .from(f)
       .innerJoin(c, eq(f.contactId, c.id))
-      .where(and(eq(f.status, 'pending'), isNull(c.deletedAt), contactId ? eq(f.contactId, contactId) : undefined));
+      .where(
+        and(
+          eq(f.status, 'pending'),
+          isNull(c.deletedAt),
+          workspacePredicate(scope, f.workspaceId),
+          contactId ? eq(f.contactId, contactId) : undefined,
+        ),
+      );
   }
   const f = conn.schema.followUps;
   const c = conn.schema.contacts;
@@ -220,6 +245,7 @@ async function selectPendingRows(
       contactId: f.contactId,
       contactName: c.fullName,
       contactCompany: c.company,
+      createdByUser: f.createdByUser,
       reason: f.reason,
       dueAt: f.dueAt,
       snoozedUntil: f.snoozedUntil,
@@ -231,14 +257,22 @@ async function selectPendingRows(
     })
     .from(f)
     .innerJoin(c, eq(f.contactId, c.id))
-    .where(and(eq(f.status, 'pending'), isNull(c.deletedAt), contactId ? eq(f.contactId, contactId) : undefined));
+    .where(
+      and(
+        eq(f.status, 'pending'),
+        isNull(c.deletedAt),
+        workspacePredicate(scope, f.workspaceId),
+        contactId ? eq(f.contactId, contactId) : undefined,
+      ),
+    );
 }
 
 async function selectByStatus(
   conn: SqliteConn | PgConn,
   status: string,
   contactId: string | undefined,
-  limit: number
+  limit: number,
+  scope?: WorkspaceScope
 ): Promise<FollowUpDbRow[]> {
   if (conn.dialect === 'sqlite') {
     const f = conn.schema.followUps;
@@ -249,6 +283,7 @@ async function selectByStatus(
         contactId: f.contactId,
         contactName: c.fullName,
         contactCompany: c.company,
+        createdByUser: f.createdByUser,
         reason: f.reason,
         dueAt: f.dueAt,
         snoozedUntil: f.snoozedUntil,
@@ -260,7 +295,13 @@ async function selectByStatus(
       })
       .from(f)
       .innerJoin(c, eq(f.contactId, c.id))
-      .where(and(eq(f.status, status), contactId ? eq(f.contactId, contactId) : undefined))
+      .where(
+        and(
+          eq(f.status, status),
+          workspacePredicate(scope, f.workspaceId),
+          contactId ? eq(f.contactId, contactId) : undefined,
+        ),
+      )
       .orderBy(desc(f.completedAt))
       .limit(limit);
   }
@@ -272,6 +313,7 @@ async function selectByStatus(
       contactId: f.contactId,
       contactName: c.fullName,
       contactCompany: c.company,
+      createdByUser: f.createdByUser,
       reason: f.reason,
       dueAt: f.dueAt,
       snoozedUntil: f.snoozedUntil,
@@ -283,7 +325,13 @@ async function selectByStatus(
     })
     .from(f)
     .innerJoin(c, eq(f.contactId, c.id))
-    .where(and(eq(f.status, status), contactId ? eq(f.contactId, contactId) : undefined))
+    .where(
+      and(
+        eq(f.status, status),
+        workspacePredicate(scope, f.workspaceId),
+        contactId ? eq(f.contactId, contactId) : undefined,
+      ),
+    )
     .orderBy(desc(f.completedAt))
     .limit(limit);
 }
@@ -298,18 +346,22 @@ async function selectByStatus(
  */
 export async function listFollowUps(
   conn: SqliteConn | PgConn,
-  options: { view?: FollowUpView; contactId?: string; limit?: number } & CrmOptions = {}
+  options: { view?: FollowUpView; contactId?: string; limit?: number } & CrmOptions = {},
+  scope?: WorkspaceScope
 ): Promise<FollowUpSummary> {
   const now = resolveNow(options);
   const view = options.view ?? 'pending';
   const limit = Math.min(Math.max(options.limit ?? 50, 1), MAX_LIST_LIMIT);
 
   if (view === 'completed' || view === 'cancelled') {
-    const rows = await selectByStatus(conn, view, options.contactId, limit);
-    return { followUps: rows.map(toFollowUpRow), counts: await pendingCounts(conn, options.contactId, now) };
+    const rows = await selectByStatus(conn, view, options.contactId, limit, scope);
+    return {
+      followUps: rows.map(toFollowUpRow),
+      counts: await pendingCounts(conn, options.contactId, now, scope),
+    };
   }
 
-  const pending = (await selectPendingRows(conn, options.contactId)).map(toFollowUpRow);
+  const pending = (await selectPendingRows(conn, options.contactId, scope)).map(toFollowUpRow);
   pending.sort((a, b) =>
     a.effectiveDueAt === b.effectiveDueAt
       ? a.contactName.localeCompare(b.contactName)
@@ -340,7 +392,7 @@ export async function listFollowUps(
   else if (view === 'due-today') rows = pending.filter((r) => bucketOf(r) === 'dueToday');
   else if (view === 'upcoming') rows = pending.filter((r) => bucketOf(r) === 'upcoming');
   else if (view === 'all') {
-    const others = (await selectByStatus(conn, 'completed', options.contactId, limit)).map(
+    const others = (await selectByStatus(conn, 'completed', options.contactId, limit, scope)).map(
       toFollowUpRow
     );
     rows = [...pending, ...others];
@@ -352,9 +404,10 @@ export async function listFollowUps(
 async function pendingCounts(
   conn: SqliteConn | PgConn,
   contactId: string | undefined,
-  now: Date
+  now: Date,
+  scope?: WorkspaceScope
 ): Promise<FollowUpCounts> {
-  const pending = (await selectPendingRows(conn, contactId)).map(toFollowUpRow);
+  const pending = (await selectPendingRows(conn, contactId, scope)).map(toFollowUpRow);
   const todayStart = startOfUtcDay(now);
   const tomorrowStart = new Date(todayStart.getTime() + DAY_MS);
   const counts: FollowUpCounts = { overdue: 0, dueToday: 0, upcoming: 0, pending: pending.length };
@@ -369,7 +422,8 @@ async function pendingCounts(
 
 async function selectById(
   conn: SqliteConn | PgConn,
-  id: string
+  id: string,
+  scope?: WorkspaceScope
 ): Promise<FollowUpDbRow | null> {
   if (conn.dialect === 'sqlite') {
     const f = conn.schema.followUps;
@@ -380,6 +434,7 @@ async function selectById(
         contactId: f.contactId,
         contactName: c.fullName,
         contactCompany: c.company,
+        createdByUser: f.createdByUser,
         reason: f.reason,
         dueAt: f.dueAt,
         snoozedUntil: f.snoozedUntil,
@@ -391,7 +446,12 @@ async function selectById(
       })
       .from(f)
       .innerJoin(c, eq(f.contactId, c.id))
-      .where(eq(f.id, id));
+      .where(
+        and(
+          eq(f.id, id),
+          workspacePredicate(scope, f.workspaceId),
+        ),
+      );
     return rows[0] ?? null;
   }
   const f = conn.schema.followUps;
@@ -402,6 +462,7 @@ async function selectById(
       contactId: f.contactId,
       contactName: c.fullName,
       contactCompany: c.company,
+      createdByUser: f.createdByUser,
       reason: f.reason,
       dueAt: f.dueAt,
       snoozedUntil: f.snoozedUntil,
@@ -413,15 +474,21 @@ async function selectById(
     })
     .from(f)
     .innerJoin(c, eq(f.contactId, c.id))
-    .where(eq(f.id, id));
+    .where(
+      and(
+        eq(f.id, id),
+        workspacePredicate(scope, f.workspaceId),
+      ),
+    );
   return rows[0] ?? null;
 }
 
 async function requirePending(
   conn: SqliteConn | PgConn,
-  id: string
+  id: string,
+  scope?: WorkspaceScope
 ): Promise<FollowUpDbRow> {
-  const row = await selectById(conn, id);
+  const row = await selectById(conn, id, scope);
   if (!row) throw new CrmError('not_found', `No follow-up with id "${id}".`);
   if ((row.status ?? 'pending') !== 'pending') {
     throw new CrmError('conflict', `Follow-up "${id}" is already ${row.status}.`);
@@ -444,21 +511,32 @@ export interface CompleteFollowUpResult {
 export async function completeFollowUp(
   conn: SqliteConn | PgConn,
   id: string,
-  opts: CrmOptions = {}
+  opts: CrmOptions = {},
+  scope?: WorkspaceScope
 ): Promise<CompleteFollowUpResult> {
   const now = resolveNow(opts);
-  const row = await requirePending(conn, id);
+  const row = await requirePending(conn, id, scope);
 
   if (conn.dialect === 'sqlite') {
     await conn.db
       .update(conn.schema.followUps)
       .set({ status: 'completed', completedAt: now.toISOString() })
-      .where(eq(conn.schema.followUps.id, id));
+      .where(
+        and(
+          eq(conn.schema.followUps.id, id),
+          workspacePredicate(scope, conn.schema.followUps.workspaceId),
+        ),
+      );
   } else {
     await conn.db
       .update(conn.schema.followUps)
       .set({ status: 'completed', completedAt: now.toISOString() })
-      .where(eq(conn.schema.followUps.id, id));
+      .where(
+        and(
+          eq(conn.schema.followUps.id, id),
+          workspacePredicate(scope, conn.schema.followUps.workspaceId),
+        ),
+      );
   }
 
   let next: FollowUpRow | null = null;
@@ -479,17 +557,22 @@ export async function completeFollowUp(
           reason: row.reason,
           recurrenceRule: row.recurrenceRule,
         },
-        { now }
+        { now },
+        scope,
       );
     }
   }
 
-  await writeActivityLog(conn, {
-    action: 'followup.completed',
-    entityType: 'contact',
-    entityId: row.contactId,
-    metadata: { followUpId: id, nextFollowUpId: next?.id ?? null },
-  });
+  await writeActivityLog(
+    conn,
+    {
+      action: 'followup.completed',
+      entityType: 'contact',
+      entityId: row.contactId,
+      metadata: { followUpId: id, nextFollowUpId: next?.id ?? null },
+    },
+    scope,
+  );
 
   return {
     completed: toFollowUpRow({ ...row, status: 'completed', completedAt: now.toISOString() }),
@@ -509,10 +592,11 @@ export async function snoozeFollowUp(
   conn: SqliteConn | PgConn,
   id: string,
   input: SnoozeFollowUpInput,
-  opts: CrmOptions = {}
+  opts: CrmOptions = {},
+  scope?: WorkspaceScope
 ): Promise<FollowUpRow> {
   const now = resolveNow(opts);
-  const row = await requirePending(conn, id);
+  const row = await requirePending(conn, id, scope);
 
   let until: string;
   if (input.untilIso !== undefined && input.untilIso !== null) {
@@ -533,20 +617,34 @@ export async function snoozeFollowUp(
     await conn.db
       .update(conn.schema.followUps)
       .set({ snoozedUntil: until })
-      .where(eq(conn.schema.followUps.id, id));
+      .where(
+        and(
+          eq(conn.schema.followUps.id, id),
+          workspacePredicate(scope, conn.schema.followUps.workspaceId),
+        ),
+      );
   } else {
     await conn.db
       .update(conn.schema.followUps)
       .set({ snoozedUntil: until })
-      .where(eq(conn.schema.followUps.id, id));
+      .where(
+        and(
+          eq(conn.schema.followUps.id, id),
+          workspacePredicate(scope, conn.schema.followUps.workspaceId),
+        ),
+      );
   }
 
-  await writeActivityLog(conn, {
-    action: 'followup.snoozed',
-    entityType: 'contact',
-    entityId: row.contactId,
-    metadata: { followUpId: id, snoozedUntil: until },
-  });
+  await writeActivityLog(
+    conn,
+    {
+      action: 'followup.snoozed',
+      entityType: 'contact',
+      entityId: row.contactId,
+      metadata: { followUpId: id, snoozedUntil: until },
+    },
+    scope,
+  );
 
   return toFollowUpRow({ ...row, snoozedUntil: until });
 }
@@ -555,29 +653,44 @@ export async function snoozeFollowUp(
 export async function cancelFollowUp(
   conn: SqliteConn | PgConn,
   id: string,
-  opts: CrmOptions = {}
+  opts: CrmOptions = {},
+  scope?: WorkspaceScope
 ): Promise<FollowUpRow> {
   const now = resolveNow(opts);
-  const row = await requirePending(conn, id);
+  const row = await requirePending(conn, id, scope);
 
   if (conn.dialect === 'sqlite') {
     await conn.db
       .update(conn.schema.followUps)
       .set({ status: 'cancelled', completedAt: now.toISOString() })
-      .where(eq(conn.schema.followUps.id, id));
+      .where(
+        and(
+          eq(conn.schema.followUps.id, id),
+          workspacePredicate(scope, conn.schema.followUps.workspaceId),
+        ),
+      );
   } else {
     await conn.db
       .update(conn.schema.followUps)
       .set({ status: 'cancelled', completedAt: now.toISOString() })
-      .where(eq(conn.schema.followUps.id, id));
+      .where(
+        and(
+          eq(conn.schema.followUps.id, id),
+          workspacePredicate(scope, conn.schema.followUps.workspaceId),
+        ),
+      );
   }
 
-  await writeActivityLog(conn, {
-    action: 'followup.cancelled',
-    entityType: 'contact',
-    entityId: row.contactId,
-    metadata: { followUpId: id },
-  });
+  await writeActivityLog(
+    conn,
+    {
+      action: 'followup.cancelled',
+      entityType: 'contact',
+      entityId: row.contactId,
+      metadata: { followUpId: id },
+    },
+    scope,
+  );
 
   return toFollowUpRow({ ...row, status: 'cancelled', completedAt: now.toISOString() });
 }
@@ -585,9 +698,10 @@ export async function cancelFollowUp(
 /** Fetch one follow-up with its contact name, or null. */
 export async function getFollowUp(
   conn: SqliteConn | PgConn,
-  id: string
+  id: string,
+  scope?: WorkspaceScope
 ): Promise<FollowUpRow | null> {
-  const row = await selectById(conn, id);
+  const row = await selectById(conn, id, scope);
   return row ? toFollowUpRow(row) : null;
 }
 
@@ -602,13 +716,14 @@ function escapeLike(value: string): string {
  */
 export async function resolveFollowUpId(
   conn: SqliteConn | PgConn,
-  idOrPrefix: string
+  idOrPrefix: string,
+  scope?: WorkspaceScope
 ): Promise<string> {
   const trimmed = idOrPrefix.trim();
   if (!trimmed) {
     throw new CrmError('invalid_input', 'A follow-up id (or unique prefix) is required.');
   }
-  const exact = await getFollowUp(conn, trimmed);
+  const exact = await getFollowUp(conn, trimmed, scope);
   if (exact) return exact.id;
 
   const pattern = `${escapeLike(trimmed)}%`;
@@ -618,13 +733,25 @@ export async function resolveFollowUpId(
     matches = await conn.db
       .select({ id: f.id })
       .from(f)
-      .where(and(eq(f.status, 'pending'), sql`${f.id} LIKE ${pattern} ESCAPE '\\'`));
+      .where(
+        and(
+          eq(f.status, 'pending'),
+          workspacePredicate(scope, f.workspaceId),
+          sql`${f.id} LIKE ${pattern} ESCAPE '\\'`,
+        ),
+      );
   } else {
     const f = conn.schema.followUps;
     matches = await conn.db
       .select({ id: f.id })
       .from(f)
-      .where(and(eq(f.status, 'pending'), sql`${f.id} LIKE ${pattern} ESCAPE '\\'`));
+      .where(
+        and(
+          eq(f.status, 'pending'),
+          workspacePredicate(scope, f.workspaceId),
+          sql`${f.id} LIKE ${pattern} ESCAPE '\\'`,
+        ),
+      );
   }
 
   if (matches.length === 1) return matches[0]!.id;
@@ -644,20 +771,27 @@ export async function resolveFollowUpId(
 /** Total follow-up count by status — pagination/telemetry helper. */
 export async function countFollowUps(
   conn: SqliteConn | PgConn,
-  status?: string
+  status?: string,
+  scope?: WorkspaceScope
 ): Promise<number> {
   if (conn.dialect === 'sqlite') {
     const f = conn.schema.followUps;
+    const where = status
+      ? and(eq(f.status, status), workspacePredicate(scope, f.workspaceId))
+      : workspacePredicate(scope, f.workspaceId);
     const rows = await conn.db
       .select({ n: sql<number>`count(*)` })
       .from(f)
-      .where(status ? eq(f.status, status) : undefined);
+      .where(where);
     return Number(rows[0]?.n ?? 0);
   }
   const f = conn.schema.followUps;
+  const where = status
+    ? and(eq(f.status, status), workspacePredicate(scope, f.workspaceId))
+    : workspacePredicate(scope, f.workspaceId);
   const rows = await conn.db
     .select({ n: sql<number>`count(*)` })
     .from(f)
-    .where(status ? eq(f.status, status) : undefined);
+    .where(where);
   return Number(rows[0]?.n ?? 0);
 }

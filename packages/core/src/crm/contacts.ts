@@ -5,8 +5,9 @@
 // query — the follow-up column is an ANSI correlated subquery (with the
 // snooze rule folded in via CASE), so SQLite and Postgres return identical
 // rows. Shared by `/contacts` and `GET /api/contacts`.
-import { sql, isNull, type SQL, type AnyColumn } from 'drizzle-orm';
+import { sql, isNull, and, type SQL, type AnyColumn } from 'drizzle-orm';
 import type { SqliteConn, PgConn } from '@netpro/db';
+import { resolveScope, workspacePredicate, type WorkspaceScope } from '../workspaces/scope';
 
 export type CrmContactsSort = 'recent' | 'score' | 'name' | 'follow-up';
 
@@ -50,7 +51,10 @@ const MAX_LIMIT = 100;
  * ANSI SQL so it can run as a correlated subquery. The follow_ups table
  * name is identical in both dialects.
  */
-function nextFollowUpSubquery(contactIdColumn: SQL): SQL<string | null> {
+function nextFollowUpSubquery(
+  contactIdColumn: SQL,
+  workspaceId: string,
+): SQL<string | null> {
   return sql<string | null>`(
     SELECT min(
       CASE
@@ -62,13 +66,16 @@ function nextFollowUpSubquery(contactIdColumn: SQL): SQL<string | null> {
     FROM follow_ups
     WHERE follow_ups.contact_id = ${contactIdColumn}
       AND follow_ups.status = 'pending'
+      AND follow_ups.workspace_id = ${workspaceId}
   )`;
 }
 
 export async function listCrmContacts(
   conn: SqliteConn | PgConn,
-  options: ListCrmContactsOptions = {}
+  options: ListCrmContactsOptions = {},
+  scope?: WorkspaceScope
 ): Promise<CrmContactsPage> {
+  const wsId = resolveScope(scope).workspaceId;
   const limit = Math.min(Math.max(options.limit ?? 25, 1), MAX_LIMIT);
   const offset = Math.max(options.offset ?? 0, 0);
   const sort = CRM_CONTACTS_SORTS.includes(options.sort ?? 'recent')
@@ -77,7 +84,7 @@ export async function listCrmContacts(
 
   if (conn.dialect === 'sqlite') {
     const c = conn.schema.contacts;
-    const nextFollowUp = nextFollowUpSubquery(sql`${c.id}`);
+    const nextFollowUp = nextFollowUpSubquery(sql`${c.id}`, wsId);
     const rows = await conn.db
       .select({
         id: c.id,
@@ -93,14 +100,14 @@ export async function listCrmContacts(
         createdAt: c.createdAt,
       })
       .from(c)
-      .where(isNull(c.deletedAt))
+      .where(and(isNull(c.deletedAt), workspacePredicate(scope, c.workspaceId)))
       .orderBy(...crmOrderBy(sort, c.fullName, c.lastInteraction, c.relationshipScore, nextFollowUp))
       .limit(limit)
       .offset(offset);
     const countRows = await conn.db
       .select({ n: sql<number>`count(*)` })
       .from(c)
-      .where(isNull(c.deletedAt));
+      .where(and(isNull(c.deletedAt), workspacePredicate(scope, c.workspaceId)));
     return {
       contacts: rows.map(normalizeRow),
       total: Number(countRows[0]?.n ?? 0),
@@ -111,7 +118,7 @@ export async function listCrmContacts(
   }
 
   const c = conn.schema.contacts;
-  const nextFollowUp = nextFollowUpSubquery(sql`${c.id}`);
+  const nextFollowUp = nextFollowUpSubquery(sql`${c.id}`, wsId);
   const rows = await conn.db
     .select({
       id: c.id,
@@ -127,14 +134,14 @@ export async function listCrmContacts(
       createdAt: c.createdAt,
     })
     .from(c)
-    .where(isNull(c.deletedAt))
+    .where(and(isNull(c.deletedAt), workspacePredicate(scope, c.workspaceId)))
     .orderBy(...crmOrderBy(sort, c.fullName, c.lastInteraction, c.relationshipScore, nextFollowUp))
     .limit(limit)
     .offset(offset);
   const countRows = await conn.db
     .select({ n: sql<number>`count(*)` })
     .from(c)
-    .where(isNull(c.deletedAt));
+    .where(and(isNull(c.deletedAt), workspacePredicate(scope, c.workspaceId)));
   return {
     contacts: rows.map(normalizeRow),
     total: Number(countRows[0]?.n ?? 0),
