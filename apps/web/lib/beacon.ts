@@ -18,6 +18,7 @@
 //     Auth.js rejects anyone else on every JWT read) → `is_owner_view`.
 import { auth } from "@/lib/auth";
 import { conn } from "@/lib/db";
+import { bootstrapScope } from "@netpro/core/src/workspaces";
 import {
   BEACON_RATE_LIMIT,
   createRateLimiter,
@@ -84,7 +85,10 @@ export async function readViewBeaconContext(
 
   // Explicit beacon params beat the referrer's own query string, per field.
   const rawReferrer = input.referrer ?? headers.get("referer");
-  const utm = mergeUtm(parseUtm(new URL(request.url).searchParams), parseUtm(rawReferrer));
+  const utm = mergeUtm(
+    parseUtm(new URL(request.url).searchParams),
+    parseUtm(rawReferrer),
+  );
 
   // A valid session is the owner's session; there is no other kind.
   const session = await auth();
@@ -97,11 +101,21 @@ export async function readViewBeaconContext(
     if (candidate) resolvedContact = await findLiveContactId(conn, candidate);
   }
 
+  // The workspace a view belongs to comes off the *card being viewed* —
+  // never off the request (the beacon is public; the request carries no
+  // tenancy). Today there is exactly one published card surface (`/card`),
+  // owned by the bootstrap workspace; when multi-card support lands the
+  // lookup gains a `cardId` in the request and the workspace comes off
+  // that specific card row instead. Until then the bootstrap scope is the
+  // only place a view can land.
+  const workspaceId = bootstrapScope().workspaceId;
+
   const now = new Date();
   const baseSalt = viewBaseSalt();
   return {
     record: {
       viewedPage: input.page ?? "/card",
+      workspaceId,
       ip,
       userAgent: headers.get("user-agent"),
       acceptLanguage: headers.get("accept-language"),

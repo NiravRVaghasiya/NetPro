@@ -1,8 +1,21 @@
-import { randomUUID } from 'node:crypto';
-import { eq, and } from 'drizzle-orm';
-import type { SqliteConn, PgConn } from '@netpro/db';
-import { parseLinkedInCSV } from './linkedin-csv';
-import { normalizeName, normalizeCompany, normalizeTitle, parseLinkedInDate, generateFingerprint, mergeContacts, type NormalizedContact } from './normalize';
+import { randomUUID } from "node:crypto";
+import { eq, and } from "drizzle-orm";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import { parseLinkedInCSV } from "./linkedin-csv";
+import {
+  normalizeName,
+  normalizeCompany,
+  normalizeTitle,
+  parseLinkedInDate,
+  generateFingerprint,
+  mergeContacts,
+  type NormalizedContact,
+} from "./normalize";
+import {
+  resolveScope,
+  workspacePredicate,
+  type WorkspaceScope,
+} from "../workspaces/scope";
 
 export interface ImportError {
   row: number;
@@ -25,8 +38,13 @@ export interface ImportSummary {
   indexed?: { indexed: number; skipped: number };
 }
 
-export async function runImport(csv: string, conn: SqliteConn | PgConn): Promise<ImportSummary> {
+export async function runImport(
+  csv: string,
+  conn: SqliteConn | PgConn,
+  scope?: WorkspaceScope,
+): Promise<ImportSummary> {
   const rawContacts = parseLinkedInCSV(csv);
+  const resolved = resolveScope(scope);
   const errors: ImportError[] = [];
   const touched: string[] = [];
   let imported = 0;
@@ -37,22 +55,31 @@ export async function runImport(csv: string, conn: SqliteConn | PgConn): Promise
     try {
       const { firstName, lastName, fullName } = normalizeName(raw);
       if (!fullName) {
-        errors.push({ row, reason: 'missing name' });
+        errors.push({ row, reason: "missing name" });
         continue;
       }
 
       const { company } = normalizeCompany(raw.company);
       const { role, seniority } = normalizeTitle(raw.position);
-      const fingerprint = generateFingerprint({ email: raw.email, fullName, company });
+      const fingerprint = generateFingerprint({
+        email: raw.email,
+        fullName,
+        company,
+      });
 
       const normalized: NormalizedContact = {
-        fullName, firstName, lastName,
-        email: raw.email, company, role, seniority,
+        fullName,
+        firstName,
+        lastName,
+        email: raw.email,
+        company,
+        role,
+        seniority,
         location: raw.location,
         fingerprint,
       };
 
-      const existing = await findExistingContact(conn, normalized);
+      const existing = await findExistingContact(conn, normalized, scope);
 
       // The "Connected On" date is when the relationship started — the only
       // truthful growth timeline and the contact's initial lastInteraction
@@ -61,17 +88,41 @@ export async function runImport(csv: string, conn: SqliteConn | PgConn): Promise
 
       if (existing) {
         const mergedContact = mergeContacts(
-          { ...normalized, fullName: existing.fullName, email: existing.email ?? undefined, company: existing.company ?? undefined, role: existing.role ?? undefined, location: existing.location ?? undefined, fingerprint },
-          normalized
+          {
+            ...normalized,
+            fullName: existing.fullName,
+            email: existing.email ?? undefined,
+            company: existing.company ?? undefined,
+            role: existing.role ?? undefined,
+            location: existing.location ?? undefined,
+            fingerprint,
+          },
+          normalized,
         );
         // Backfill lastInteraction only when the existing row has none —
         // re-imports must never erase a newer recorded interaction.
-        const backfillDate = existing.lastInteraction === null ? connectionDate : undefined;
-        await updateContact(conn, existing.id, mergedContact, raw.linkedinUrl, backfillDate);
+        const backfillDate =
+          existing.lastInteraction === null ? connectionDate : undefined;
+        await updateContact(
+          conn,
+          existing.id,
+          mergedContact,
+          raw.linkedinUrl,
+          backfillDate,
+          scope,
+        );
         touched.push(existing.id);
         merged++;
       } else {
-        touched.push(await insertContact(conn, normalized, raw.linkedinUrl, connectionDate));
+        touched.push(
+          await insertContact(
+            conn,
+            normalized,
+            raw.linkedinUrl,
+            connectionDate,
+            resolved,
+          ),
+        );
         imported++;
       }
     } catch (e) {
@@ -81,10 +132,10 @@ export async function runImport(csv: string, conn: SqliteConn | PgConn): Promise
 
   // Surface LinkedIn "Mutual connections" as pending edges for confirmation.
   // Never auto-insert confirmed graph links from an import.
-  let edgeCandidates: ImportSummary['edgeCandidates'];
+  let edgeCandidates: ImportSummary["edgeCandidates"];
   try {
-    const { ingestMutualCandidates } = await import('../graph/import-edges');
-    edgeCandidates = await ingestMutualCandidates(conn, csv);
+    const { ingestMutualCandidates } = await import("../graph/import-edges");
+    edgeCandidates = await ingestMutualCandidates(conn, csv, { scope });
   } catch {
     edgeCandidates = undefined;
   }
@@ -93,11 +144,15 @@ export async function runImport(csv: string, conn: SqliteConn | PgConn): Promise
   // design: a database that predates migration 0004 (or any index failure)
   // must not turn a successful import into a failed one — search simply falls
   // back to the portable engine until `netpro reindex` runs.
-  let indexed: ImportSummary['indexed'];
+  let indexed: ImportSummary["indexed"];
   if (touched.length > 0) {
     try {
-      const { reindexSearchIndex } = await import('../search/indexer');
-      const result = await reindexSearchIndex(conn, { contactIds: touched });
+      const { reindexSearchIndex } = await import("../search/indexer");
+      const result = await reindexSearchIndex(
+        conn,
+        { contactIds: touched },
+        scope,
+      );
       indexed = { indexed: result.indexed, skipped: result.skipped };
     } catch {
       indexed = undefined;
@@ -113,39 +168,87 @@ export async function runImport(csv: string, conn: SqliteConn | PgConn): Promise
 // `conn.dialect` (rather than casting) collapses each branch to a single concrete
 // connection type, which resolves cleanly. The query logic is intentionally
 // duplicated in each branch — see Task 2 brief / packages/db discriminated union.
-async function findExistingContact(conn: SqliteConn | PgConn, normalized: NormalizedContact) {
-  if (conn.dialect === 'sqlite') {
+// v3.0 Phase 2 — dedupe is per workspace: the same email/name+company may
+// legitimately exist in two workspaces, so each lookup carries the scope.
+async function findExistingContact(
+  conn: SqliteConn | PgConn,
+  normalized: NormalizedContact,
+  scope?: WorkspaceScope,
+) {
+  if (conn.dialect === "sqlite") {
+    const c = conn.schema.contacts;
     if (normalized.email) {
-      const rows = await conn.db.select().from(conn.schema.contacts).where(eq(conn.schema.contacts.email, normalized.email)).limit(1);
+      const rows = await conn.db
+        .select()
+        .from(c)
+        .where(
+          and(
+            eq(c.email, normalized.email),
+            workspacePredicate(scope, c.workspaceId),
+          ),
+        )
+        .limit(1);
       if (rows[0]) return rows[0];
     }
     if (normalized.company) {
-      const rows = await conn.db.select().from(conn.schema.contacts)
-        .where(and(eq(conn.schema.contacts.fullName, normalized.fullName), eq(conn.schema.contacts.company, normalized.company)))
+      const rows = await conn.db
+        .select()
+        .from(c)
+        .where(
+          and(
+            eq(c.fullName, normalized.fullName),
+            eq(c.company, normalized.company),
+            workspacePredicate(scope, c.workspaceId),
+          ),
+        )
         .limit(1);
       if (rows[0]) return rows[0];
     }
     return null;
   }
 
+  const c = conn.schema.contacts;
   if (normalized.email) {
-    const rows = await conn.db.select().from(conn.schema.contacts).where(eq(conn.schema.contacts.email, normalized.email)).limit(1);
+    const rows = await conn.db
+      .select()
+      .from(c)
+      .where(
+        and(
+          eq(c.email, normalized.email),
+          workspacePredicate(scope, c.workspaceId),
+        ),
+      )
+      .limit(1);
     if (rows[0]) return rows[0];
   }
   if (normalized.company) {
-    const rows = await conn.db.select().from(conn.schema.contacts)
-      .where(and(eq(conn.schema.contacts.fullName, normalized.fullName), eq(conn.schema.contacts.company, normalized.company)))
+    const rows = await conn.db
+      .select()
+      .from(c)
+      .where(
+        and(
+          eq(c.fullName, normalized.fullName),
+          eq(c.company, normalized.company),
+          workspacePredicate(scope, c.workspaceId),
+        ),
+      )
       .limit(1);
     if (rows[0]) return rows[0];
   }
   return null;
 }
 
-async function insertContact(conn: SqliteConn | PgConn, normalized: NormalizedContact, linkedinUrl: string | undefined, connectionDate: string | undefined): Promise<string> {
+async function insertContact(
+  conn: SqliteConn | PgConn,
+  normalized: NormalizedContact,
+  linkedinUrl: string | undefined,
+  connectionDate: string | undefined,
+  scope: WorkspaceScope,
+): Promise<string> {
   const now = new Date().toISOString();
   const values = {
     id: randomUUID(),
-    workspaceId: 'default',
+    workspaceId: scope.workspaceId,
     fullName: normalized.fullName,
     firstName: normalized.firstName,
     lastName: normalized.lastName,
@@ -155,7 +258,7 @@ async function insertContact(conn: SqliteConn | PgConn, normalized: NormalizedCo
     seniority: normalized.seniority,
     location: normalized.location,
     linkedinUrl,
-    source: 'linkedin_csv',
+    source: "linkedin_csv",
     // When the CSV carries "Connected On", the relationship entered your
     // network that day — createdAt reflects acquisition, lastInteraction
     // starts at the connection itself (an accepted invite is an interaction).
@@ -164,7 +267,7 @@ async function insertContact(conn: SqliteConn | PgConn, normalized: NormalizedCo
     updatedAt: now,
   };
 
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     await conn.db.insert(conn.schema.contacts).values(values);
     return values.id;
   }
@@ -173,7 +276,14 @@ async function insertContact(conn: SqliteConn | PgConn, normalized: NormalizedCo
   return values.id;
 }
 
-async function updateContact(conn: SqliteConn | PgConn, id: string, merged: NormalizedContact, linkedinUrl: string | undefined, backfillInteractionDate?: string): Promise<void> {
+async function updateContact(
+  conn: SqliteConn | PgConn,
+  id: string,
+  merged: NormalizedContact,
+  linkedinUrl: string | undefined,
+  backfillInteractionDate?: string,
+  scope?: WorkspaceScope,
+): Promise<void> {
   const set = {
     fullName: merged.fullName,
     email: merged.email,
@@ -185,13 +295,31 @@ async function updateContact(conn: SqliteConn | PgConn, id: string, merged: Norm
     updatedAt: new Date().toISOString(),
     // Backfill only when the caller asks — the pipeline passes a date solely
     // for existing rows that have no interaction recorded yet.
-    ...(backfillInteractionDate ? { lastInteraction: backfillInteractionDate } : {}),
+    ...(backfillInteractionDate
+      ? { lastInteraction: backfillInteractionDate }
+      : {}),
   };
 
-  if (conn.dialect === 'sqlite') {
-    await conn.db.update(conn.schema.contacts).set(set).where(eq(conn.schema.contacts.id, id));
+  if (conn.dialect === "sqlite") {
+    await conn.db
+      .update(conn.schema.contacts)
+      .set(set)
+      .where(
+        and(
+          eq(conn.schema.contacts.id, id),
+          workspacePredicate(scope, conn.schema.contacts.workspaceId),
+        ),
+      );
     return;
   }
 
-  await conn.db.update(conn.schema.contacts).set(set).where(eq(conn.schema.contacts.id, id));
+  await conn.db
+    .update(conn.schema.contacts)
+    .set(set)
+    .where(
+      and(
+        eq(conn.schema.contacts.id, id),
+        workspacePredicate(scope, conn.schema.contacts.workspaceId),
+      ),
+    );
 }

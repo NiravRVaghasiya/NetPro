@@ -14,7 +14,10 @@ import {
   topValues,
 } from "./metrics";
 import { getNetworkGraph, type NetworkGraph } from "../graph/network";
-import { getContentOverview, type ContentOverview } from "../content/repository";
+import {
+  getContentOverview,
+  type ContentOverview,
+} from "../content/repository";
 import { getViewsOverview, type ViewsOverview } from "../views/analytics";
 import {
   resolveAnalyticsOptions,
@@ -46,6 +49,7 @@ export async function getNetworkOverview(
           ...options.graph,
           limit: options.graph?.limit ?? Math.min(options.limit ?? 10, 50),
           now,
+          scope: options.scope,
         });
 
   // The dashboard strip wants a compact payload: 5 breakdown rows, 5 recent
@@ -54,13 +58,17 @@ export async function getNetworkOverview(
   const viewsPromise: Promise<ViewsOverview | undefined> =
     options.includeViews === false
       ? Promise.resolve(undefined)
-      : getViewsOverview(conn, {
-          days: options.views?.days ?? 30,
-          limit: options.views?.limit ?? 5,
-          includeBots: options.views?.includeBots,
-          includeOwnerViews: options.views?.includeOwnerViews,
-          now,
-        });
+      : getViewsOverview(
+          conn,
+          {
+            days: options.views?.days ?? 30,
+            limit: options.views?.limit ?? 5,
+            includeBots: options.views?.includeBots,
+            includeOwnerViews: options.views?.includeOwnerViews,
+            now,
+          },
+          options.scope,
+        );
 
   // v2.5 Phase 6 — the content strip reads the same all-time overview the
   // `/content` page and dashboard shared before; all-time (no window) so the
@@ -68,7 +76,7 @@ export async function getNetworkOverview(
   const contentPromise: Promise<ContentOverview | undefined> =
     options.includeContent === false
       ? Promise.resolve(undefined)
-      : getContentOverview(conn, { now });
+      : getContentOverview(conn, { now, scope: options.scope });
 
   const [metrics, growth, clusters, dormant, rows, graph, views, content] =
     await Promise.all([
@@ -76,7 +84,7 @@ export async function getNetworkOverview(
       getGrowthSummary(conn, options),
       detectClusters(conn, options),
       getDormantContacts(conn, options),
-      projectContacts(conn),
+      projectContacts(conn, options.scope),
       graphPromise,
       viewsPromise,
       contentPromise,
@@ -93,8 +101,18 @@ export async function getNetworkOverview(
     metrics,
     score,
     growth,
-    topCompanies: topValues(rows, "company", metrics.totalContacts, TOP_VALUES_LIMIT),
-    topIndustries: topValues(rows, "industry", metrics.totalContacts, TOP_VALUES_LIMIT),
+    topCompanies: topValues(
+      rows,
+      "company",
+      metrics.totalContacts,
+      TOP_VALUES_LIMIT,
+    ),
+    topIndustries: topValues(
+      rows,
+      "industry",
+      metrics.totalContacts,
+      TOP_VALUES_LIMIT,
+    ),
     clusters,
     dormant,
     ...(graph ? { graph } : {}),

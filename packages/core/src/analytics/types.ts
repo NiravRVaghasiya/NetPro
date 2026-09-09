@@ -10,6 +10,7 @@ import type { GraphAnalysisOptions } from "../graph/analysis";
 import type { NetworkGraph } from "../graph/network";
 import type { ContentOverview } from "../content/repository";
 import type { ViewsOverview, ViewsOverviewOptions } from "../views/analytics";
+import type { WorkspaceScope } from "../workspaces/scope";
 
 /** Options accepted by every analytics function. All fields optional. */
 export interface AnalyticsOptions {
@@ -46,6 +47,11 @@ export interface AnalyticsOptions {
    * All window math uses UTC.
    */
   now?: Date;
+  /**
+   * v3.0 Phase 2 — workspace scope for every query this module runs.
+   * Absent = bootstrap workspace (single-owner compatibility guarantee).
+   */
+  scope?: WorkspaceScope;
 }
 
 export interface ResolvedAnalyticsOptions {
@@ -61,10 +67,7 @@ export function resolveAnalyticsOptions(
 ): ResolvedAnalyticsOptions {
   const dormantDays = bound(opts.dormantDays ?? 90, 1);
   const activeDays = bound(opts.activeDays ?? 30, 1);
-  const growthMonths = Math.min(
-    Math.max(opts.growthMonths ?? 12, 1),
-    60,
-  );
+  const growthMonths = Math.min(Math.max(opts.growthMonths ?? 12, 1), 60);
   const limit = Math.min(Math.max(opts.limit ?? 10, 1), 100);
   const now = opts.now ?? new Date();
   return { dormantDays, activeDays, growthMonths, limit, now };

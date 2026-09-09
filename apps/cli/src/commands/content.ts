@@ -20,6 +20,7 @@
 import { readFileSync } from "node:fs";
 import type { Command } from "commander";
 import type { SqliteConn, PgConn } from "@netpro/db";
+import type { WorkspaceScope } from "@netpro/core/src/workspaces/scope";
 import {
   CONTENT_PROVIDERS,
   ContentError,
@@ -279,6 +280,7 @@ export async function executeContentList(
   opts: ContentListOptions,
   conn: SqliteConn | PgConn,
   now: Date = new Date(),
+  scope?: WorkspaceScope,
 ): Promise<string> {
   const { items, total, limit } = await listContentSummaries(conn, {
     platform: opts.platform?.trim() || undefined,
@@ -287,6 +289,7 @@ export async function executeContentList(
     query: opts.query?.trim() || undefined,
     limit: parseLimit(opts.limit, 50, 200),
     now,
+    scope,
   });
   if (opts.json) return JSON.stringify({ items, total, limit }, null, 2);
   if (items.length === 0) {
@@ -300,7 +303,7 @@ export async function executeContentList(
     `Content (${items.length} of ${total}):`,
     ...items.map((i) => renderItemLine(i, now)),
   ];
-  const status = await contentStatus(conn);
+  const status = await contentStatus(conn, scope);
   lines.push(
     `  ${status.items} tracked · ${status.withMetrics} with metrics · ${status.snapshots} snapshot(s) · ${status.mentions} mention(s).`,
   );
@@ -320,6 +323,7 @@ export async function executeContentAdd(
   },
   conn: SqliteConn | PgConn,
   now: Date = new Date(),
+  scope?: WorkspaceScope,
 ): Promise<string> {
   if (!opts.title?.trim()) {
     throw new Error(
@@ -338,7 +342,7 @@ export async function executeContentAdd(
       publishedAt: opts.publishedAt?.trim() || undefined,
       source: "manual",
     },
-    { now },
+    { now, scope },
   );
   if (opts.json) return JSON.stringify({ item, created }, null, 2);
   return created
@@ -357,9 +361,10 @@ export async function executeContentShow(
   opts: ContentShowOptions,
   conn: SqliteConn | PgConn,
   now: Date = new Date(),
+  scope?: WorkspaceScope,
 ): Promise<string> {
-  const item = await resolveContentRef(conn, selector);
-  const detail = await getContentItem(conn, item.id);
+  const item = await resolveContentRef(conn, selector, scope);
+  const detail = await getContentItem(conn, item.id, scope);
   if (!detail)
     throw new ContentError("not_found", `No content with id "${item.id}".`);
   let series: Awaited<ReturnType<typeof getContentMetricsSeries>> | null = null;
@@ -367,6 +372,7 @@ export async function executeContentShow(
     series = await getContentMetricsSeries(conn, item.id, {
       days: parseDays(opts.days),
       now,
+      scope,
     });
   }
   if (opts.json) {
@@ -393,6 +399,7 @@ export async function executeContentImport(
   opts: ContentImportOptions,
   conn: SqliteConn | PgConn,
   now: Date = new Date(),
+  scope?: WorkspaceScope,
 ): Promise<string> {
   const path = (positional ?? opts.file)?.trim();
   if (!path) {
@@ -409,6 +416,7 @@ export async function executeContentImport(
     platform: opts.platform?.trim() || undefined,
     dryRun: opts.dryRun === true,
     now,
+    scope,
   });
   if (opts.json) return JSON.stringify(summary, null, 2);
   return renderImportSummary(summary);
@@ -438,8 +446,9 @@ export async function executeContentFetch(
   opts: ContentFetchOptions,
   conn: SqliteConn | PgConn,
   now: Date = new Date(),
+  scope?: WorkspaceScope,
 ): Promise<string> {
-  const item = await resolveContentRef(conn, selector);
+  const item = await resolveContentRef(conn, selector, scope);
   const manualNumbers: Array<[string, number]> = [];
   const counts: Array<[string, string | undefined]> = [
     ["views", opts.views],
@@ -490,7 +499,7 @@ export async function executeContentFetch(
         bookmarks: manualNumbers.find(([n]) => n === "bookmarks")?.[1],
         source: "manual",
       },
-      { now },
+      { now, scope },
     );
     if (opts.json) return JSON.stringify({ item, metric }, null, 2);
     return renderFetchResult(metric, item);
@@ -523,7 +532,7 @@ export async function executeContentFetch(
         source: metricSourceFor(provider.id),
         rawPayload: sample.rawPayload ?? null,
       },
-      { now },
+      { now, scope },
     );
     if (opts.json)
       return JSON.stringify({ item, metric, provider: provider.id }, null, 2);
@@ -543,12 +552,13 @@ export async function executeContentRm(
   selector: string,
   opts: { json?: boolean },
   conn: SqliteConn | PgConn,
+  scope?: WorkspaceScope,
 ): Promise<string> {
-  const item = await resolveContentRef(conn, selector);
-  const removed = await deleteContentItem(conn, item.id);
+  const item = await resolveContentRef(conn, selector, scope);
+  const removed = await deleteContentItem(conn, item.id, scope);
   if (opts.json) {
     return JSON.stringify(
-      { removed, remaining: (await contentStatus(conn)).items },
+      { removed, remaining: (await contentStatus(conn, scope)).items },
       null,
       2,
     );
@@ -565,9 +575,11 @@ export async function executeContentAnalyze(
   opts: ContentAnalyzeOptions,
   conn: SqliteConn | PgConn,
   now: Date = new Date(),
+  scope?: WorkspaceScope,
 ): Promise<string> {
   const overview = await getContentOverview(conn, {
     days: parseDays(opts.days),
+    scope,
     now,
   });
   if (opts.json) return JSON.stringify(overview, null, 2);
@@ -575,11 +587,14 @@ export async function executeContentAnalyze(
 }
 
 async function run(
-  fn: (conn: SqliteConn | PgConn) => Promise<string>,
+  cmd: Command,
+  fn: (conn: SqliteConn | PgConn, scope?: WorkspaceScope) => Promise<string>,
 ): Promise<void> {
-  const { openDb } = await import("../db");
+  const { openDb, resolveCliScope } = await import("../db");
   try {
-    console.log(await fn(await openDb()));
+    const conn = await openDb();
+    const scope = await resolveCliScope(cmd, conn);
+    console.log(await fn(conn, scope));
   } catch (e) {
     console.error(`netpro content: ${(e as Error).message}`);
     process.exitCode = 1;
@@ -606,7 +621,9 @@ export function registerContentCommand(program: Command): void {
     .option("--limit <n>", "Max rows (default 50)", "50")
     .option("--json", "Print the result as JSON")
     .action((opts: ContentListOptions) =>
-      run((conn) => executeContentList(opts, conn)),
+      run(content, (conn, scope) =>
+        executeContentList(opts, conn, new Date(), scope),
+      ),
     );
 
   content
@@ -636,7 +653,10 @@ export function registerContentCommand(program: Command): void {
           publishedAt?: string;
           json?: boolean;
         },
-      ) => run((conn) => executeContentAdd(url, opts, conn)),
+      ) =>
+        run(content, (conn, scope) =>
+          executeContentAdd(url, opts, conn, new Date(), scope),
+        ),
     );
 
   content
@@ -648,7 +668,9 @@ export function registerContentCommand(program: Command): void {
     .option("--days <n>", "Window for --metrics (default: all kept snapshots)")
     .option("--json", "Print the result as JSON")
     .action((selector: string, opts: ContentShowOptions) =>
-      run((conn) => executeContentShow(selector, opts, conn)),
+      run(content, (conn, scope) =>
+        executeContentShow(selector, opts, conn, new Date(), scope),
+      ),
     );
 
   content
@@ -664,7 +686,9 @@ export function registerContentCommand(program: Command): void {
     )
     .option("--json", "Print the summary as JSON")
     .action((file: string | undefined, opts: ContentImportOptions) =>
-      run((conn) => executeContentImport(file, opts, conn)),
+      run(content, (conn, scope) =>
+        executeContentImport(file, opts, conn, new Date(), scope),
+      ),
     );
 
   content
@@ -685,7 +709,9 @@ export function registerContentCommand(program: Command): void {
     .option("--bookmarks <n>", "Bookmarks, for --manual snapshots")
     .option("--json", "Print the result as JSON")
     .action((selector: string, opts: ContentFetchOptions) =>
-      run((conn) => executeContentFetch(selector, opts, conn)),
+      run(content, (conn, scope) =>
+        executeContentFetch(selector, opts, conn, new Date(), scope),
+      ),
     );
 
   content
@@ -693,7 +719,9 @@ export function registerContentCommand(program: Command): void {
     .description("Remove a piece of content, its snapshots and its mentions")
     .option("--json", "Print the result as JSON")
     .action((selector: string, opts: { json?: boolean }) =>
-      run((conn) => executeContentRm(selector, opts, conn)),
+      run(content, (conn, scope) =>
+        executeContentRm(selector, opts, conn, scope),
+      ),
     );
 
   content
@@ -704,6 +732,8 @@ export function registerContentCommand(program: Command): void {
     .option("--days <n>", "Window the analysis (default: the whole library)")
     .option("--json", "Print the result as JSON")
     .action((opts: ContentAnalyzeOptions) =>
-      run((conn) => executeContentAnalyze(opts, conn)),
+      run(content, (conn, scope) =>
+        executeContentAnalyze(opts, conn, new Date(), scope),
+      ),
     );
 }

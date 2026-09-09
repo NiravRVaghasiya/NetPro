@@ -1,4 +1,15 @@
-vi.mock('@/lib/authz', () => ({ requireMembership: async () => ({ workspaceId: 'default', userId: 'test-user', role: 'member' }) }));
+vi.mock("@/lib/authz", () => ({
+  requireMembership: async () => ({
+    workspaceId: "default",
+    userId: "test-user",
+    role: "member",
+  }),
+  requireScope: async () => ({
+    workspaceId: "default",
+    userId: "test-user",
+    role: "member",
+  }),
+}));
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -177,10 +188,16 @@ describe("POST /api/outreach", () => {
     expect(body.code).toBe("ai_upstream_error");
   });
   it("does not relay credentials echoed in an upstream error", async () => {
-    vi.mocked(fetch).mockImplementationOnce(async () => ({ ok: false, status: 401, json: async () => ({ error: { message: 'Rejected key sk-test' } }) }) as Response);
-    const res = await post({ contactId: 'c1' });
+    vi.mocked(fetch).mockImplementationOnce(
+      async () =>
+        ({
+          ok: false,
+          status: 401,
+          json: async () => ({ error: { message: "Rejected key sk-test" } }),
+        }) as Response,
+    );
+    const res = await post({ contactId: "c1" });
     expect(res.status).toBe(502);
-    expect(await res.text()).not.toContain('sk-test');
+    expect(await res.text()).not.toContain("sk-test");
   });
-
 });

@@ -7,10 +7,10 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
 
 ## [Unreleased] — v3.0 platform work
 
-### Added — Phase 2 (part): workspace-scoped CRM engine
+### Added — Phase 2 (complete): workspace-scoped engine & surfaces
 
 - Scope helpers in `@netpro/core/workspaces` (`bootstrapScope`, `resolveScope`,
-  `workspacePredicate`) — every CRM query now carries an explicit
+  `workspacePredicate`) — every core query now carries an explicit
   `workspace_id` predicate, resolved to the bootstrap workspace when no scope is
   supplied (single-owner installs behave exactly as before).
 - The shared CRM (contacts/interactions/follow-ups/timeline/activity/contact
@@ -26,9 +26,20 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
   every data table. Phase 1's `0008` left the column nullable with no default,
   so Postgres inserts that omitted `workspace_id` produced NULL, which the
   scoped queries then hid; this keeps single-owner installs v2.5-compatible.
-- Web: `requireScope()` in `apps/web/lib/authz.ts`; the CRM API routes
-  (`/api/interactions`, `/api/follow-ups`, `/api/contacts`, `/api/contacts/[id]`)
-  now derive the scope from the session and pass it into core.
+- Web: `requireScope()` in `apps/web/lib/authz.ts`; **every** API route and
+  every `(app)` page now derives the scope from the session and passes it into
+  core — CRM, analytics, search, views/card, content, graph edges, events,
+  campaigns, outreach, skills, enrichment, import/export included.
+- Every remaining core module is now scope-aware: analytics overview &
+  retention-sensitive views, hybrid search arms (FTS + semantic), views/beacon
+  ingestion and purge, content repository (items/metrics/mentions), graph
+  edges & provenance, events + attendee matching, campaigns (drafts,
+  recipients, merge rendering), skills profiles, and the GDPR retention purge.
+- CLI: all commands thread the caller's workspace through `resolveCliScope()`
+  (`--workspace <id>` on any command, defaulting to the bootstrap workspace) —
+  `track`, `outreach`, `path`, `analyze`, `card --views`, `edge`, `events`,
+  `skills`, `campaign`, and `content` are scopes-compliant; single-owner use
+  is byte-identical to v2.5.
 - Cross-tenant scope-guard suite (`workspaces/scope-guard.test.ts`) asserting no
   workspace can read another's CRM rows, on the hermetic SQLite fixture.
 
@@ -47,7 +58,7 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
 
 ## [2.5.0] - 2026-09-09 — v2.5 (The Observer)
 
-NetPro can now *observe*: who looked at your card, and how your cross-posted
+NetPro can now _observe_: who looked at your card, and how your cross-posted
 content performs — without becoming a tracker itself. Everything below was
 built to a privacy budget the code enforces, not a policy page: the raw IP
 never reaches the database, the logs, or a backup; viewer hashes rotate daily
@@ -137,7 +148,7 @@ purge themselves on a documented schedule.
 
 - **Core `@netpro/core/views` analytics** (`views/analytics.ts`): the query
   side of `profile_views`, one composition (`getViewsOverview` → `{ stats,
-  recent, matches }`) that every surface shares so the CLI, the API, and the
+recent, matches }`) that every surface shares so the CLI, the API, and the
   dashboard can never disagree.
   - `getViewStats` — windowed totals (views, unique viewers, resolved
     contacts, avg read duration), a zero-filled daily series, and
@@ -166,7 +177,7 @@ purge themselves on a documented schedule.
     stats payload at 10k views on SQLite**, against the plan's 100 ms
     budget.
 - **CLI:** `netpro card --views [--days 30] [--limit 10] [--include-bots]
-  [--include-owner-views] [--json]` (summary + per-day bars + referrers +
+[--include-owner-views] [--json]` (summary + per-day bars + referrers +
   recent + known visitors; generation flags are refused in this mode, and
   generation stays offline — `--input` is now validated in code instead of
   by Commander so the two modes can have different requirements) and
@@ -322,18 +333,18 @@ purge themselves on a documented schedule.
   Operator knobs: `NETPRO_DISABLE_RETENTION`, `NETPRO_VIEW_RETENTION_DAYS`,
   `NETPRO_CONTENT_METRIC_RETENTION_DAYS` (garbage/zero/negative values fall
   back to the defaults — a typo must not widen the window). The Settings →
-  Card tracking panel now documents the *effective* windows (and the
+  Card tracking panel now documents the _effective_ windows (and the
   content-snapshot horizon) from that same config, so UI and job agree.
   `GET /api/card/pixel.gif` keeps its guarantees under test: no `Set-Cookie`,
   no raw IP in any stored column — and now a regression test that the raw IP
   never reaches the server logs either.
 - **Performance budget (recorded on SQLite at 10k views + 1k content items
-  + 5k metrics, 500 contacts / 100 edges):** `GET /api/analytics`
-  (full dashboard payload, graph included) **~53 ms** (budget 500 ms),
-  `GET /api/card/views` **~10 ms** (budget 100 ms), `GET /api/content`
-  **~1–2 ms** (budget 100 ms). No new indexes were needed. The budget
-  ships as a hermetic test (`perf.budget.test.ts`) with 10× smoke-alarm
-  assertions, so a 10× regression fails the build and 15% jitter does not.
+  - 5k metrics, 500 contacts / 100 edges):** `GET /api/analytics`
+    (full dashboard payload, graph included) **~53 ms** (budget 500 ms),
+    `GET /api/card/views` **~10 ms** (budget 100 ms), `GET /api/content`
+    **~1–2 ms** (budget 100 ms). No new indexes were needed. The budget
+    ships as a hermetic test (`perf.budget.test.ts`) with 10× smoke-alarm
+    assertions, so a 10× regression fails the build and 15% jitter does not.
 - **Docs:** `docs/getting-started.md` gains the content cookbook (add /
   CSV + feed import / manual snapshots / analyze) and the profile-views
   guide (embed snippet, signed `?v=` links, DNT behaviour, operator
@@ -359,7 +370,7 @@ purge themselves on a documented schedule.
   resolved contacts, zero-filled 30-day series, and `withMetrics` on the
   content overview — because the views module had no dedicated
   live-Postgres suite at Phase 6's end. Phase 7 then added one for the
-  *ingest* side too, after the Docker smoke caught the bug described under
+  _ingest_ side too, after the Docker smoke caught the bug described under
   **Fixed**. Measured on PostgreSQL 18.4, medians of 3 runs;
   recorded in the
   [Phase 7 progress doc](docs/superpowers/plans/2026-09-09-v2.5-phase7-release-progress.md)
@@ -419,7 +430,7 @@ purge themselves on a documented schedule.
 - **Contact resolution from IP, email, or user agent.** The only path from a
   view to a known contact is the owner's own signed `?v=` link (HMAC,
   30-day cap, contact must still exist). "Who viewed your profile" shows you
-  who you *sent the link to* — it never deanonymizes strangers.
+  who you _sent the link to_ — it never deanonymizes strangers.
 - **Platform metric integrations.** `devto` / `twitter` / `github` content
   providers ship as disabled, self-explaining stubs that name the env key
   which would enable them (`DEVTO_API_KEY`, `TWITTER_BEARER_TOKEN`,
@@ -443,7 +454,7 @@ purge themselves on a documented schedule.
   producer. New `@netpro/core/events` module — CSV import, attendee matching,
   overlap, and recommendations.
 - Import: alias-tolerant headers (`Event Name`, `starts_at`, `Attendee
-  Emails`, `names`…), attendees split on `, ; |` and newline, and dates
+Emails`, `names`…), attendees split on `, ; |` and newline, and dates
   normalized to UTC ISO. Unparseable or ambiguous dates (`14/03/2026`,
   `2026-02-31`) are **rejected per row** rather than guessed. Imports are
   idempotent — events dedupe on normalized name, attendance on
@@ -469,7 +480,7 @@ purge themselves on a documented schedule.
   component, and drops empty past events. Timing is UTC-day granular so a
   page cannot print "in 7d" and "starts in 6 days" for one event.
 - CLI (17th command): `netpro events list|show|add|import|match|link|unlink|
-  recommend|rm`, each with `--json`; event selectors take an id or an exact
+recommend|rm`, each with `--json`; event selectors take an id or an exact
   name and refuse to guess between same-named events.
 - Web: `/events` (list, filters, **Where to go next** recommendations with
   reasons, add form, CSV import panel that previews first and names ambiguous
@@ -481,7 +492,7 @@ purge themselves on a documented schedule.
   `POST /api/events/[id]/match` and `POST/DELETE /api/events/[id]/attendees`.
   `EventError` now maps to HTTP the way `CrmError` and `GraphError` do
   (400 / 404 / 409; ambiguity is 400 everywhere).
-- Live event *discovery* (Luma/Eventbrite) is **not** shipped: it lands as a
+- Live event _discovery_ (Luma/Eventbrite) is **not** shipped: it lands as a
   `EventDiscoveryProvider` interface with a disabled default, so a provider
   can be added later without touching the core, the CLI or the web.
 
@@ -514,8 +525,8 @@ purge themselves on a documented schedule.
   rather than silently widening the result.
 - CLI (16th command): `netpro skills <contact>` (stored + current skills with
   evidence), `netpro skills gap --role --description --skills [--contact]
-  [--limit] [--json]`, `netpro skills extract [--mode heuristic|ai] [--contact]
-  [--limit] [--dry-run] [--provider]`, `netpro skills status`. `--mode ai`
+[--limit] [--json]`, `netpro skills extract [--mode heuristic|ai] [--contact]
+[--limit] [--dry-run] [--provider]`, `netpro skills status`. `--mode ai`
   reuses the outreach credentials (keychain / env) and fails before touching
   the database when no key is configured.
 - Web: `/skills` (target form, coverage table with contact + warm-intro links,
@@ -543,7 +554,7 @@ purge themselves on a documented schedule.
   arm. Results are merged with **reciprocal rank fusion** (`k=60`, weights
   keyword 1 / semantic 0.9 / portable 0.5) and deduped per contact. Every
   response carries an `engine` report naming which arms ran, how many hits
-  each returned, and *why* one was skipped.
+  each returned, and _why_ one was skipped.
 - The keyword arm indexes the full contact document — name, email, headline,
   company, role, seniority, department, industry, location, country, tags and
   **notes** — so it finds people the six-column substring search cannot.
@@ -580,7 +591,7 @@ purge themselves on a documented schedule.
 - `IntroPathNode` now carries `lastInteraction`, so every hop shows your
   relationship score **and** recency on both surfaces.
 - CLI: `netpro path <target> [--from] [--max-depth n] [--relation r]
-  [--status s] [--alt n] [--draft] [--json]` — ranked k-shortest chains, the
+[--status s] [--alt n] [--draft] [--json]` — ranked k-shortest chains, the
   first ask to make, and an optional AI-drafted ask email. A failed `--draft`
   prints the plan and exits non-zero so scripts can tell.
 - Web: `/graph` — server-rendered target picker (contact datalist + free

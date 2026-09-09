@@ -18,21 +18,20 @@ const UA =
 const SALT = "unit-test-view-salt";
 const SECRET = "unit-test-nextauth-secret";
 
-function request(
-  params = "",
-  headers: Record<string, string> = {},
-): Request {
+function request(params = "", headers: Record<string, string> = {}): Request {
   return new Request(`${origin}/api/card/pixel.gif${params}`, {
     headers: { "user-agent": UA, "x-forwarded-for": IP, ...headers },
   });
 }
 
 const storedRows = () =>
-  fixture.sqlite
-    .prepare("SELECT * FROM profile_views")
-    .all() as Array<Record<string, unknown>>;
+  fixture.sqlite.prepare("SELECT * FROM profile_views").all() as Array<
+    Record<string, unknown>
+  >;
 
-function expectRow(rows: Array<Record<string, unknown>>): Record<string, unknown> {
+function expectRow(
+  rows: Array<Record<string, unknown>>,
+): Record<string, unknown> {
   expect(rows).toHaveLength(1);
   const [row] = rows;
   if (row === undefined) throw new Error("expected exactly one row");
@@ -46,9 +45,16 @@ beforeEach(() => {
   fixture.sqlite.prepare("DELETE FROM contacts").run();
   fixture.sqlite
     .prepare(
-      "INSERT INTO contacts (id, full_name, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO contacts (id, workspace_id, full_name, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
     )
-    .run("contact-1", "Ada Lovelace", "csv", "2026-09-01T00:00:00.000Z", "2026-09-01T00:00:00.000Z");
+    .run(
+      "contact-1",
+      "default",
+      "Ada Lovelace",
+      "csv",
+      "2026-09-01T00:00:00.000Z",
+      "2026-09-01T00:00:00.000Z",
+    );
   beaconRateLimiter.reset();
   process.env.NETPRO_VIEW_SALT = SALT;
   process.env.NEXTAUTH_SECRET = SECRET;
@@ -90,12 +96,16 @@ describe("GET /api/card/pixel.gif (v2.5 phase 2)", () => {
 
   it("never logs the raw IP, even in server logs (v2.5 phase 6)", async () => {
     const lines: string[] = [];
-    const logSpy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
-      lines.push(args.join(" "));
-    });
-    const infoSpy = vi.spyOn(console, "info").mockImplementation((...args: unknown[]) => {
-      lines.push(args.join(" "));
-    });
+    const logSpy = vi
+      .spyOn(console, "log")
+      .mockImplementation((...args: unknown[]) => {
+        lines.push(args.join(" "));
+      });
+    const infoSpy = vi
+      .spyOn(console, "info")
+      .mockImplementation((...args: unknown[]) => {
+        lines.push(args.join(" "));
+      });
     try {
       await GET(request());
       for (const line of lines) expect(line).not.toContain(IP);
@@ -109,7 +119,8 @@ describe("GET /api/card/pixel.gif (v2.5 phase 2)", () => {
     vi.mocked(auth).mockResolvedValue({ user: { id: "owner" } } as never);
     const response = await GET(
       request("", {
-        "user-agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+        "user-agent":
+          "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
       }),
     );
     expect(response.status).toBe(200);

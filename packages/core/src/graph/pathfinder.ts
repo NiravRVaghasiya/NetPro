@@ -32,19 +32,20 @@
 //   - avgHopStrength = mean over hops of (min strength x min confidence).
 // Determinism: equal scores order by the lexicographically smallest id
 // chain, so reruns are byte-identical.
-import { and, isNull, sql } from 'drizzle-orm';
-import type { SqliteConn, PgConn } from '@netpro/db';
+import { and, isNull, sql } from "drizzle-orm";
+import type { SqliteConn, PgConn } from "@netpro/db";
 import {
   contactToRecipientInput,
   getContactById,
   resolveContactRef,
   type ContactRef,
-} from '../ai/resolve-contact';
-import type { ComposeOutreachInput, OutreachTone } from '../ai/prompt';
-import { LIMITS as COMPOSE_LIMITS } from '../ai/compose';
-import type { GraphAnalysisOptions } from './analysis';
-import { findIntroPaths, type IntroPath, type IntroPathNode } from './paths';
-import { GraphError } from './types';
+} from "../ai/resolve-contact";
+import type { ComposeOutreachInput, OutreachTone } from "../ai/prompt";
+import { LIMITS as COMPOSE_LIMITS } from "../ai/compose";
+import type { GraphAnalysisOptions } from "./analysis";
+import { findIntroPaths, type IntroPath, type IntroPathNode } from "./paths";
+import { GraphError } from "./types";
+import { workspacePredicate, type WorkspaceScope } from "../workspaces/scope";
 
 /** Budgets and knobs specific to the Phase 3 surface (not the engine). */
 export const PATHFINDER_LIMITS = {
@@ -115,11 +116,17 @@ export function scoreIntroPath(path: IntroPath): IntroPathScore {
     .slice(1)
     .map((n) => (n.via ? n.via.minStrength * n.via.minConfidence : 0));
   const avgHopStrength =
-    hopStrengths.length > 0 ? hopStrengths.reduce((a, b) => a + b, 0) / hopStrengths.length : 0;
+    hopStrengths.length > 0
+      ? hopStrengths.reduce((a, b) => a + b, 0) / hopStrengths.length
+      : 0;
   const score =
     PATH_SCORE_WEIGHTS.weakestTie * (weakestTie ?? 1) +
     PATH_SCORE_WEIGHTS.hopStrength * avgHopStrength;
-  return { weakestTie, avgHopStrength: round3(avgHopStrength), score: round3(score) };
+  return {
+    weakestTie,
+    avgHopStrength: round3(avgHopStrength),
+    score: round3(score),
+  };
 }
 
 /**
@@ -128,7 +135,10 @@ export function scoreIntroPath(path: IntroPath): IntroPathScore {
  * remaining chain), matching the rule Phase 2 uses for its `viaId`, so the
  * dashboard and the pathfinder never disagree.
  */
-function pickAsk(path: IntroPath): { node: IntroPathNode; next: IntroPathNode } {
+function pickAsk(path: IntroPath): {
+  node: IntroPathNode;
+  next: IntroPathNode;
+} {
   const candidates = askableNodes(path);
   let bestIndex = 0;
   candidates.forEach((n, i) => {
@@ -148,17 +158,21 @@ function buildAsk(path: IntroPath): IntroPathAsk {
   // When the ask person is adjacent to the target, the line cites the edge
   // that connects THEM to the target (the target's inbound hop) — not the
   // edge that connects the ask person to this chain.
-  const relations = adjacent ? (target.via?.relations.join(', ') ?? '') : '';
+  const relations = adjacent ? (target.via?.relations.join(", ") ?? "") : "";
   const meta = [
-    node.relationshipScore !== null ? `score ${node.relationshipScore.toFixed(2)}` : 'no score yet',
-    node.lastInteraction ? `last touch ${node.lastInteraction.slice(0, 10)}` : 'no recorded touch',
-  ].join(' · ');
+    node.relationshipScore !== null
+      ? `score ${node.relationshipScore.toFixed(2)}`
+      : "no score yet",
+    node.lastInteraction
+      ? `last touch ${node.lastInteraction.slice(0, 10)}`
+      : "no recorded touch",
+  ].join(" · ");
   const remaining = path.hops - (path.path.indexOf(node) + 1);
   const suggestion = adjacent
     ? `Ask ${node.fullName} (${meta}) for an introduction to ${target.fullName}` +
-      `${relations ? ` — the ${relations} link goes straight to them` : ''}.`
+      `${relations ? ` — the ${relations} link goes straight to them` : ""}.`
     : `Ask ${node.fullName} (${meta}) to connect you with ${next.fullName}; ` +
-      `from there ${remaining} more hop${remaining === 1 ? '' : 's'} to ${target.fullName}.`;
+      `from there ${remaining} more hop${remaining === 1 ? "" : "s"} to ${target.fullName}.`;
   return {
     contactId: node.contactId,
     fullName: node.fullName,
@@ -177,14 +191,22 @@ function buildAsk(path: IntroPath): IntroPathAsk {
  * Exported pure so tests hand-check the ordering.
  */
 export function rankIntroPaths(paths: IntroPath[]): RankedIntroPath[] {
-  const decorated = paths.map((path) => ({ path, score: scoreIntroPath(path) }));
+  const decorated = paths.map((path) => ({
+    path,
+    score: scoreIntroPath(path),
+  }));
   decorated.sort((a, b) => {
     if (b.score.score !== a.score.score) return b.score.score - a.score.score;
-    const ka = a.path.path.map((n) => n.contactId).join('>');
-    const kb = b.path.path.map((n) => n.contactId).join('>');
+    const ka = a.path.path.map((n) => n.contactId).join(">");
+    const kb = b.path.path.map((n) => n.contactId).join(">");
     return ka < kb ? -1 : ka > kb ? 1 : 0;
   });
-  return decorated.map((entry, i) => ({ ...entry.path, rank: i + 1, score: entry.score, ask: buildAsk(entry.path) }));
+  return decorated.map((entry, i) => ({
+    ...entry.path,
+    rank: i + 1,
+    score: entry.score,
+    ask: buildAsk(entry.path),
+  }));
 }
 
 /** One live contact projected for path display. */
@@ -199,7 +221,7 @@ export interface PathPlanOrigin extends PathPlanContact {
   relationshipScore: number | null;
   lastInteraction: string | null;
   /** How the origin was picked — surfaces disclose this so the default is never silent. */
-  selectedBy: 'explicit' | 'strongest-tie';
+  selectedBy: "explicit" | "strongest-tie";
 }
 
 export interface PlanIntroPathsInput {
@@ -225,8 +247,18 @@ function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
-function planContact(ref: { id: string; fullName: string; company: string | null; role: string | null }): PathPlanContact {
-  return { contactId: ref.id, fullName: ref.fullName, company: ref.company, role: ref.role };
+function planContact(ref: {
+  id: string;
+  fullName: string;
+  company: string | null;
+  role: string | null;
+}): PathPlanContact {
+  return {
+    contactId: ref.id,
+    fullName: ref.fullName,
+    company: ref.company,
+    role: ref.role,
+  };
 }
 
 /**
@@ -234,13 +266,19 @@ function planContact(ref: { id: string; fullName: string; company: string | null
  * errors onto GraphError codes so every surface answers the same way:
  * unknown → not_found (404), ambiguous → invalid_input (400).
  */
-async function resolveSelector(conn: SqliteConn | PgConn, selector: string, field: string): Promise<ContactRef> {
+async function resolveSelector(
+  conn: SqliteConn | PgConn,
+  selector: string,
+  field: string,
+  scope?: WorkspaceScope,
+): Promise<ContactRef> {
   try {
-    return await resolveContactRef(conn, selector);
+    return await resolveContactRef(conn, selector, scope);
   } catch (e) {
     const msg = (e as Error).message;
-    if (msg.startsWith('Ambiguous')) throw new GraphError('invalid_input', `${field}: ${msg}`);
-    throw new GraphError('not_found', `${field}: ${msg}`);
+    if (msg.startsWith("Ambiguous"))
+      throw new GraphError("invalid_input", `${field}: ${msg}`);
+    throw new GraphError("not_found", `${field}: ${msg}`);
   }
 }
 
@@ -251,32 +289,47 @@ async function resolveSelector(conn: SqliteConn | PgConn, selector: string, fiel
  */
 export async function defaultPathOrigin(
   conn: SqliteConn | PgConn,
-  opts: { exceptContactId?: string } = {}
+  opts: { exceptContactId?: string; scope?: WorkspaceScope } = {},
 ): Promise<ContactRef | null> {
   // Drizzle's typed builders need dialect-narrowed tables (same pattern as
   // analysis.ts); the queries themselves are plain ANSI SQL. The exclusion
   // keeps the default origin from being the target itself (a fresh network
   // with uniform scores would otherwise hit that on the first query).
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     const t = conn.schema.contacts;
     const rows = await conn.db
       .select({
-        id: t.id, fullName: t.fullName, email: t.email, company: t.company, role: t.role,
-        headline: t.headline, location: t.location, industry: t.industry,
-        linkedinUrl: t.linkedinUrl, githubUrl: t.githubUrl, notes: t.notes,
+        id: t.id,
+        fullName: t.fullName,
+        email: t.email,
+        company: t.company,
+        role: t.role,
+        headline: t.headline,
+        location: t.location,
+        industry: t.industry,
+        linkedinUrl: t.linkedinUrl,
+        githubUrl: t.githubUrl,
+        notes: t.notes,
       })
       .from(t)
       .where(
         opts.exceptContactId
-          ? and(isNull(t.deletedAt), sql`${t.id} <> ${opts.exceptContactId}`)
-          : isNull(t.deletedAt)
+          ? and(
+              isNull(t.deletedAt),
+              workspacePredicate(opts.scope, t.workspaceId),
+              sql`${t.id} <> ${opts.exceptContactId}`,
+            )
+          : and(
+              isNull(t.deletedAt),
+              workspacePredicate(opts.scope, t.workspaceId),
+            ),
       )
       .orderBy(
         sql`CASE WHEN ${t.relationshipScore} IS NULL THEN 1 ELSE 0 END`,
         sql`COALESCE(${t.relationshipScore}, -1) DESC`,
         sql`CASE WHEN ${t.lastInteraction} IS NULL THEN 1 ELSE 0 END`,
         sql`${t.lastInteraction} DESC`,
-        sql`${t.id} ASC`
+        sql`${t.id} ASC`,
       )
       .limit(1);
     return (rows[0] ?? null) as ContactRef | null;
@@ -284,22 +337,37 @@ export async function defaultPathOrigin(
   const t = conn.schema.contacts;
   const rows = await conn.db
     .select({
-      id: t.id, fullName: t.fullName, email: t.email, company: t.company, role: t.role,
-      headline: t.headline, location: t.location, industry: t.industry,
-      linkedinUrl: t.linkedinUrl, githubUrl: t.githubUrl, notes: t.notes,
+      id: t.id,
+      fullName: t.fullName,
+      email: t.email,
+      company: t.company,
+      role: t.role,
+      headline: t.headline,
+      location: t.location,
+      industry: t.industry,
+      linkedinUrl: t.linkedinUrl,
+      githubUrl: t.githubUrl,
+      notes: t.notes,
     })
     .from(t)
     .where(
       opts.exceptContactId
-        ? and(isNull(t.deletedAt), sql`${t.id} <> ${opts.exceptContactId}`)
-        : isNull(t.deletedAt)
+        ? and(
+            isNull(t.deletedAt),
+            workspacePredicate(opts.scope, t.workspaceId),
+            sql`${t.id} <> ${opts.exceptContactId}`,
+          )
+        : and(
+            isNull(t.deletedAt),
+            workspacePredicate(opts.scope, t.workspaceId),
+          ),
     )
     .orderBy(
       sql`CASE WHEN ${t.relationshipScore} IS NULL THEN 1 ELSE 0 END`,
       sql`COALESCE(${t.relationshipScore}, -1) DESC`,
       sql`CASE WHEN ${t.lastInteraction} IS NULL THEN 1 ELSE 0 END`,
       sql`${t.lastInteraction} DESC`,
-      sql`${t.id} ASC`
+      sql`${t.id} ASC`,
     )
     .limit(1);
   return (rows[0] ?? null) as ContactRef | null;
@@ -313,35 +381,51 @@ export async function defaultPathOrigin(
 export async function planIntroPaths(
   conn: SqliteConn | PgConn,
   input: PlanIntroPathsInput,
-  opts: GraphAnalysisOptions = {}
+  opts: GraphAnalysisOptions = {},
 ): Promise<IntroPathPlan> {
-  const targetSel = (input.target ?? '').trim();
-  if (!targetSel) throw new GraphError('invalid_input', 'A target contact is required (name, email, or id).');
-  const target = await resolveSelector(conn, targetSel, 'Target');
+  const targetSel = (input.target ?? "").trim();
+  if (!targetSel)
+    throw new GraphError(
+      "invalid_input",
+      "A target contact is required (name, email, or id).",
+    );
+  const target = await resolveSelector(conn, targetSel, "Target", opts.scope);
 
   let originRef: ContactRef;
-  let selectedBy: PathPlanOrigin['selectedBy'];
-  const fromSel = (input.from ?? '').trim();
+  let selectedBy: PathPlanOrigin["selectedBy"];
+  const fromSel = (input.from ?? "").trim();
   if (fromSel) {
-    originRef = await resolveSelector(conn, fromSel, 'Origin');
-    selectedBy = 'explicit';
+    originRef = await resolveSelector(conn, fromSel, "Origin", opts.scope);
+    selectedBy = "explicit";
   } else {
-    const fallback = await defaultPathOrigin(conn, { exceptContactId: target.id });
+    const fallback = await defaultPathOrigin(conn, {
+      exceptContactId: target.id,
+      scope: opts.scope,
+    });
     if (!fallback) {
       throw new GraphError(
-        'not_found',
-        'No other live contact to start a chain from — the pathfinder needs at least one contact besides the target.'
+        "not_found",
+        "No other live contact to start a chain from — the pathfinder needs at least one contact besides the target.",
       );
     }
     originRef = fallback;
-    selectedBy = 'strongest-tie';
+    selectedBy = "strongest-tie";
   }
   if (originRef.id === target.id) {
-    throw new GraphError('invalid_input', 'Target and origin are the same contact — pick a different --from.');
+    throw new GraphError(
+      "invalid_input",
+      "Target and origin are the same contact — pick a different --from.",
+    );
   }
 
-  const k = Math.min(Math.max(Math.trunc(input.k ?? 1), 1), PATHFINDER_LIMITS.maxAlternatives);
-  const result = await findIntroPaths(conn, originRef.id, target.id, { ...opts, k });
+  const k = Math.min(
+    Math.max(Math.trunc(input.k ?? 1), 1),
+    PATHFINDER_LIMITS.maxAlternatives,
+  );
+  const result = await findIntroPaths(conn, originRef.id, target.id, {
+    ...opts,
+    k,
+  });
 
   let originScore: number | null = null;
   let originTouch: string | null = null;
@@ -353,7 +437,12 @@ export async function planIntroPaths(
 
   return {
     target: planContact(target),
-    origin: { ...planContact(originRef), relationshipScore: originScore, lastInteraction: originTouch, selectedBy },
+    origin: {
+      ...planContact(originRef),
+      relationshipScore: originScore,
+      lastInteraction: originTouch,
+      selectedBy,
+    },
     maxDepth: result.maxDepth,
     found: result.found,
     unreachable: result.unreachable,
@@ -371,36 +460,39 @@ export interface IntroAskText {
  * CLI hint and the web composer prefill, so both surfaces describe the
  * path identically. Pure; bounded to the compose context cap.
  */
-export function introAskText(plan: IntroPathPlan, path: RankedIntroPath): IntroAskText {
-  const chain = path.path.map((n) => n.fullName).join(' → ');
+export function introAskText(
+  plan: IntroPathPlan,
+  path: RankedIntroPath,
+): IntroAskText {
+  const chain = path.path.map((n) => n.fullName).join(" → ");
   const originLine =
-    plan.origin.selectedBy === 'strongest-tie'
-      ? `(your strongest tie${plan.origin.relationshipScore !== null ? `, score ${plan.origin.relationshipScore.toFixed(2)}` : ''})`
-      : '';
+    plan.origin.selectedBy === "strongest-tie"
+      ? `(your strongest tie${plan.origin.relationshipScore !== null ? `, score ${plan.origin.relationshipScore.toFixed(2)}` : ""})`
+      : "";
   const context = clip(
     [
-      `Warm-intro chain in NetPro: ${chain} (${path.hops} hop${path.hops === 1 ? '' : 's'}, within depth ${plan.maxDepth}).`,
-      originLine ? `Starting from ${plan.origin.fullName} ${originLine}.` : '',
+      `Warm-intro chain in NetPro: ${chain} (${path.hops} hop${path.hops === 1 ? "" : "s"}, within depth ${plan.maxDepth}).`,
+      originLine ? `Starting from ${plan.origin.fullName} ${originLine}.` : "",
       `Your relationship with ${path.ask.fullName}: ` +
-        `${path.ask.relationshipScore !== null ? `score ${path.ask.relationshipScore.toFixed(2)}` : 'no score recorded'}` +
-        `${path.ask.lastInteraction ? `, last touch ${path.ask.lastInteraction.slice(0, 10)}` : ', no recorded touch'}.`,
+        `${path.ask.relationshipScore !== null ? `score ${path.ask.relationshipScore.toFixed(2)}` : "no score recorded"}` +
+        `${path.ask.lastInteraction ? `, last touch ${path.ask.lastInteraction.slice(0, 10)}` : ", no recorded touch"}.`,
       path.ask.adjacentToTarget
         ? `${path.ask.fullName} is directly connected to ${plan.target.fullName}.`
         : `The chain continues through ${path.ask.askForName} before reaching ${plan.target.fullName}.`,
     ]
       .filter(Boolean)
-      .join(' '),
-    COMPOSE_LIMITS.context
+      .join(" "),
+    COMPOSE_LIMITS.context,
   );
   const targetLine = [
     `an introduction to ${plan.target.fullName}`,
     [plan.target.role, plan.target.company].filter(Boolean).length
-      ? `(${[plan.target.role, plan.target.company].filter(Boolean).join(' at ')})`
-      : '',
-    '— happy to send a short blurb you can forward.',
+      ? `(${[plan.target.role, plan.target.company].filter(Boolean).join(" at ")})`
+      : "",
+    "— happy to send a short blurb you can forward.",
   ]
     .filter(Boolean)
-    .join(' ');
+    .join(" ");
   return { context, purpose: clip(targetLine, COMPOSE_LIMITS.purpose) };
 }
 
@@ -415,17 +507,24 @@ export async function buildIntroAskInput(
   conn: SqliteConn | PgConn,
   plan: IntroPathPlan,
   path: RankedIntroPath,
-  opts: { senderName?: string; tone?: OutreachTone } = {}
+  opts: {
+    senderName?: string;
+    tone?: OutreachTone;
+    scope?: WorkspaceScope;
+  } = {},
 ): Promise<ComposeOutreachInput> {
-  const askRef = await getContactById(conn, path.ask.contactId);
+  const askRef = await getContactById(conn, path.ask.contactId, opts.scope);
   if (!askRef) {
-    throw new GraphError('not_found', `Contact "${path.ask.fullName}" is no longer available to draft to.`);
+    throw new GraphError(
+      "not_found",
+      `Contact "${path.ask.fullName}" is no longer available to draft to.`,
+    );
   }
   const text = introAskText(plan, path);
   return {
     recipient: contactToRecipientInput(askRef),
     senderName: opts.senderName,
-    tone: opts.tone ?? 'warm',
+    tone: opts.tone ?? "warm",
     context: text.context,
     purpose: text.purpose,
   };

@@ -13,16 +13,22 @@
 //   * betweenness is `null` + reason when the node budget skips it;
 //   * above the 50k-edge cap the analysis sections are `degraded` and only
 //     the adjacency list is returned (cheap indexed read — always works).
-import { eq } from 'drizzle-orm';
-import type { SqliteConn, PgConn } from '@netpro/db';
-import { getContactById } from '../ai/resolve-contact';
-import { GRAPH_ANALYSIS_LIMITS, loadGraph, resolveGraphAnalysisOptions, type GraphAnalysisOptions } from './analysis';
-import { brandesBetweenness, degreeCentrality } from './centrality';
-import { communityLabel } from './communities';
-import { listEdges } from './edges';
-import { louvain } from './louvain';
-import { warmIntrosOf, type WarmIntroCandidate } from './network';
-import { GraphError } from './types';
+import { and, eq } from "drizzle-orm";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import { getContactById } from "../ai/resolve-contact";
+import {
+  GRAPH_ANALYSIS_LIMITS,
+  loadGraph,
+  resolveGraphAnalysisOptions,
+  type GraphAnalysisOptions,
+} from "./analysis";
+import { brandesBetweenness, degreeCentrality } from "./centrality";
+import { communityLabel } from "./communities";
+import { listEdges } from "./edges";
+import { louvain } from "./louvain";
+import { warmIntrosOf, type WarmIntroCandidate } from "./network";
+import { GraphError } from "./types";
+import { workspacePredicate } from "../workspaces/scope";
 
 export interface GraphNeighborRow {
   edgeId: string;
@@ -33,7 +39,7 @@ export interface GraphNeighborRow {
   confidence: number;
   strength: number;
   /** From THIS contact's perspective: 'both' for bidirectional rows. */
-  direction: 'both' | 'out' | 'in';
+  direction: "both" | "out" | "in";
   context: string | null;
   updatedAt: string;
 }
@@ -69,7 +75,11 @@ export interface ContactGraphPosition {
 }
 
 /** Undirected BFS over `neighbors` from one node, bounded by maxDepth. */
-function reachableWithin(graphNeighbors: Map<string, string[]>, start: string, maxDepth: number): number {
+function reachableWithin(
+  graphNeighbors: Map<string, string[]>,
+  start: string,
+  maxDepth: number,
+): number {
   const dist = new Map<string, number>([[start, 0]]);
   const queue = [start];
   for (let head = 0; head < queue.length; head++) {
@@ -93,14 +103,19 @@ function reachableWithin(graphNeighbors: Map<string, string[]>, start: string, m
 export async function getContactGraphPosition(
   conn: SqliteConn | PgConn,
   contactId: string,
-  opts: GraphAnalysisOptions = {}
+  opts: GraphAnalysisOptions = {},
 ): Promise<ContactGraphPosition> {
-  const ref = await getContactById(conn, contactId);
-  if (!ref) throw new GraphError('not_found', `No contact with id "${contactId}".`);
+  const ref = await getContactById(conn, contactId, opts.scope);
+  if (!ref)
+    throw new GraphError("not_found", `No contact with id "${contactId}".`);
 
   const resolved = resolveGraphAnalysisOptions(opts);
   const graph = await loadGraph(conn, opts);
-  const neighborRows = await listEdges(conn, { contactId: ref.id, limit: 50 });
+  const neighborRows = await listEdges(
+    conn,
+    { contactId: ref.id, limit: 50 },
+    opts.scope,
+  );
   const neighbors: GraphNeighborRow[] = neighborRows.map((e) => ({
     edgeId: e.id,
     contactId: e.sourceId === ref.id ? e.targetId : e.sourceId,
@@ -109,7 +124,7 @@ export async function getContactGraphPosition(
     status: e.status,
     confidence: e.confidence,
     strength: e.strength,
-    direction: e.bidirectional ? 'both' : e.sourceId === ref.id ? 'out' : 'in',
+    direction: e.bidirectional ? "both" : e.sourceId === ref.id ? "out" : "in",
     context: e.context,
     updatedAt: e.updatedAt,
   }));
@@ -117,20 +132,32 @@ export async function getContactGraphPosition(
   // Relationship facts straight off the live contact row — independent of
   // whether the contact participates in the analyzed graph. (Dialect-
   // narrowed tables, same house pattern as analysis.ts.)
-  let row: { relationshipScore: number | null; lastInteraction: string | null } | undefined;
-  if (conn.dialect === 'sqlite') {
+  let row:
+    | { relationshipScore: number | null; lastInteraction: string | null }
+    | undefined;
+  if (conn.dialect === "sqlite") {
     const t = conn.schema.contacts;
     [row] = await conn.db
-      .select({ relationshipScore: t.relationshipScore, lastInteraction: t.lastInteraction })
+      .select({
+        relationshipScore: t.relationshipScore,
+        lastInteraction: t.lastInteraction,
+      })
       .from(t)
-      .where(eq(t.id, ref.id))
+      .where(
+        and(eq(t.id, ref.id), workspacePredicate(opts.scope, t.workspaceId)),
+      )
       .limit(1);
   } else {
     const t = conn.schema.contacts;
     [row] = await conn.db
-      .select({ relationshipScore: t.relationshipScore, lastInteraction: t.lastInteraction })
+      .select({
+        relationshipScore: t.relationshipScore,
+        lastInteraction: t.lastInteraction,
+      })
       .from(t)
-      .where(eq(t.id, ref.id))
+      .where(
+        and(eq(t.id, ref.id), workspacePredicate(opts.scope, t.workspaceId)),
+      )
       .limit(1);
   }
 
@@ -146,7 +173,12 @@ export async function getContactGraphPosition(
     analyzed: { nodes: graph.stats.nodes, edges: graph.stats.edges },
     degraded: null,
     inGraph: false,
-    centrality: { degree: null, degreeRank: null, betweenness: null, betweennessNote: null },
+    centrality: {
+      degree: null,
+      degreeRank: null,
+      betweenness: null,
+      betweennessNote: null,
+    },
     community: null,
     reachableWithinDepth: 0,
     neighbors,
@@ -154,7 +186,10 @@ export async function getContactGraphPosition(
   };
 
   if (graph.stats.edges > resolved.limits.maxEdges) {
-    return { ...base, degraded: `graph has ${graph.stats.edges} edges — centrality and community sections are capped at ${resolved.limits.maxEdges}; adjacency is always available` };
+    return {
+      ...base,
+      degraded: `graph has ${graph.stats.edges} edges — centrality and community sections are capped at ${resolved.limits.maxEdges}; adjacency is always available`,
+    };
   }
 
   const inGraph = graph.nodes.has(ref.id);
@@ -166,7 +201,7 @@ export async function getContactGraphPosition(
         degree: 0,
         degreeRank: null,
         betweenness: 0,
-        betweennessNote: 'no confirmed edges include this contact',
+        betweennessNote: "no confirmed edges include this contact",
       },
     };
   }
@@ -177,7 +212,9 @@ export async function getContactGraphPosition(
   const bEntry = entries?.find((b) => b.contactId === ref.id);
 
   const communities = louvain(graph).communities;
-  const memberIndex = communities.findIndex((members) => members.includes(ref.id));
+  const memberIndex = communities.findIndex((members) =>
+    members.includes(ref.id),
+  );
   const community =
     memberIndex === -1
       ? null
@@ -187,9 +224,16 @@ export async function getContactGraphPosition(
           size: communities[memberIndex]!.length,
         };
 
-  const allIntros = warmIntrosOf(graph, resolved.maxDepth, GRAPH_ANALYSIS_LIMITS.listLimitCap);
+  const allIntros = warmIntrosOf(
+    graph,
+    resolved.maxDepth,
+    GRAPH_ANALYSIS_LIMITS.listLimitCap,
+  );
   const warmIntros = allIntros
-    .filter((w) => w.contactId === ref.id || w.targetId === ref.id || w.viaId === ref.id)
+    .filter(
+      (w) =>
+        w.contactId === ref.id || w.targetId === ref.id || w.viaId === ref.id,
+    )
     .slice(0, resolved.limit);
 
   return {
@@ -199,10 +243,15 @@ export async function getContactGraphPosition(
       degree: rank === -1 ? 0 : degree[rank]!.degree,
       degreeRank: rank === -1 ? null : rank + 1,
       betweenness: bEntry ? Math.round(bEntry.normalized * 1000) / 1000 : null,
-      betweennessNote: skippedReason ?? (bEntry ? null : 'not computed for this contact'),
+      betweennessNote:
+        skippedReason ?? (bEntry ? null : "not computed for this contact"),
     },
     community,
-    reachableWithinDepth: reachableWithin(graph.neighbors, ref.id, resolved.maxDepth),
+    reachableWithinDepth: reachableWithin(
+      graph.neighbors,
+      ref.id,
+      resolved.maxDepth,
+    ),
     warmIntros,
   };
 }

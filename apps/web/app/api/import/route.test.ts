@@ -1,10 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import * as schema from '@netpro/db/src/schema.sqlite';
+import { describe, it, expect, vi } from "vitest";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import * as schema from "@netpro/db/src/schema.sqlite";
 
-vi.mock('@/lib/db', () => {
-  const sqlite = new Database(':memory:');
+vi.mock("@/lib/authz", () => ({
+  requireScope: async () => ({
+    workspaceId: "default",
+    role: "owner",
+    userId: "system",
+  }),
+}));
+vi.mock("@/lib/db", () => {
+  const sqlite = new Database(":memory:");
   const db = drizzle(sqlite, { schema });
   sqlite.exec(`
     CREATE TABLE contacts (
@@ -18,30 +25,43 @@ vi.mock('@/lib/db', () => {
       workspace_id TEXT DEFAULT 'default', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
     );
   `);
-  return { conn: { dialect: 'sqlite', db, schema } };
+  return { conn: { dialect: "sqlite", db, schema } };
 });
 
-const { POST } = await import('./route');
+const { POST } = await import("./route");
 
-describe('POST /api/import', () => {
-  it('imports an uploaded CSV and returns a summary', async () => {
+describe("POST /api/import", () => {
+  it("imports an uploaded CSV and returns a summary", async () => {
     const csv = [
-      'First Name,Last Name,Email Address,Company,Position,Connected On,URL',
-      'Jane,Doe,jane@example.com,Stripe,Senior Engineer,01 Jan 2024,',
-    ].join('\n');
+      "First Name,Last Name,Email Address,Company,Position,Connected On,URL",
+      "Jane,Doe,jane@example.com,Stripe,Senior Engineer,01 Jan 2024,",
+    ].join("\n");
     const formData = new FormData();
-    formData.append('file', new File([csv], 'connections.csv', { type: 'text/csv' }));
+    formData.append(
+      "file",
+      new File([csv], "connections.csv", { type: "text/csv" }),
+    );
 
-    const response = await POST(new Request('http://localhost/api/import', { method: 'POST', body: formData }));
+    const response = await POST(
+      new Request("http://localhost/api/import", {
+        method: "POST",
+        body: formData,
+      }),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toMatchObject({ imported: 1, merged: 0, errors: [] });
   });
 
-  it('returns 400 when no file is provided', async () => {
+  it("returns 400 when no file is provided", async () => {
     const formData = new FormData();
-    const response = await POST(new Request('http://localhost/api/import', { method: 'POST', body: formData }));
+    const response = await POST(
+      new Request("http://localhost/api/import", {
+        method: "POST",
+        body: formData,
+      }),
+    );
 
     expect(response.status).toBe(400);
   });

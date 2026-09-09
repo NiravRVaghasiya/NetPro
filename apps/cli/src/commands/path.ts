@@ -12,6 +12,7 @@
 //                         only — NetPro never sends anything)
 //   --json                machine-readable plan payload
 import type { Command } from "commander";
+import type { WorkspaceScope } from "@netpro/core/src/workspaces/scope";
 import type { SqliteConn, PgConn } from "@netpro/db";
 import {
   planIntroPaths,
@@ -48,7 +49,10 @@ export interface PathCommandOptions {
 export function toPlanInput(
   opts: PathCommandOptions,
   target: string,
-): { input: { target: string; from?: string; k?: number }; graphOpts: GraphAnalysisOptions } {
+): {
+  input: { target: string; from?: string; k?: number };
+  graphOpts: GraphAnalysisOptions;
+} {
   const trim = (v: string | undefined): string | undefined => {
     const s = v?.trim();
     return s ? s : undefined;
@@ -58,7 +62,9 @@ export function toPlanInput(
   if (opts.maxDepth !== undefined) {
     maxDepth = Number(opts.maxDepth);
     if (!Number.isFinite(maxDepth) || maxDepth < 1) {
-      throw new Error(`--max-depth must be a positive number, got "${opts.maxDepth}"`);
+      throw new Error(
+        `--max-depth must be a positive number, got "${opts.maxDepth}"`,
+      );
     }
   }
 
@@ -72,7 +78,9 @@ export function toPlanInput(
 
   const relation: string | undefined = trim(opts.relation);
   if (relation && !(EDGE_RELATIONS as readonly string[]).includes(relation)) {
-    throw new Error(`Unknown --relation "${relation}". Expected one of: ${EDGE_RELATIONS.join(", ")}.`);
+    throw new Error(
+      `Unknown --relation "${relation}". Expected one of: ${EDGE_RELATIONS.join(", ")}.`,
+    );
   }
 
   let status: GraphAnalysisOptions["status"];
@@ -82,7 +90,9 @@ export function toPlanInput(
   } else if (statusRaw === "all" || statusRaw === "pending") {
     status = statusRaw;
   } else {
-    throw new Error(`Unknown --status "${statusRaw}". Expected confirmed, all, or pending.`);
+    throw new Error(
+      `Unknown --status "${statusRaw}". Expected confirmed, all, or pending.`,
+    );
   }
 
   return {
@@ -97,7 +107,8 @@ function hopLabel(p: RankedIntroPath): string {
 
 function nodeMeta(n: RankedIntroPath["path"][number]): string {
   const bits: string[] = [];
-  if (n.relationshipScore !== null) bits.push(`score ${n.relationshipScore.toFixed(2)}`);
+  if (n.relationshipScore !== null)
+    bits.push(`score ${n.relationshipScore.toFixed(2)}`);
   if (n.lastInteraction) bits.push(`last ${n.lastInteraction.slice(0, 10)}`);
   if (n.via?.oneWay) bits.push("one-way");
   return bits.length ? ` (${bits.join(" · ")})` : "";
@@ -109,23 +120,27 @@ export function renderPathPlan(plan: IntroPathPlan): string[] {
     plan.origin.selectedBy === "strongest-tie"
       ? `${plan.origin.fullName} (your strongest tie)`
       : plan.origin.fullName;
-  const header = `Warm-intro to ${plan.target.fullName} from ${originTag} — max ${plan.maxDepth} hop${plan.maxDepth === 1 ? '' : 's'}`;
+  const header = `Warm-intro to ${plan.target.fullName} from ${originTag} — max ${plan.maxDepth} hop${plan.maxDepth === 1 ? "" : "s"}`;
   if (!plan.found) {
     return [
       header,
-      `  No path within ${plan.maxDepth} hop${plan.maxDepth === 1 ? '' : 's'} over the analyzed edges — link people with ` +
+      `  No path within ${plan.maxDepth} hop${plan.maxDepth === 1 ? "" : "s"} over the analyzed edges — link people with ` +
         "'netpro edge add' or widen the search (--max-depth, --status all).",
     ];
   }
   const lines = [header];
   for (const p of plan.paths) {
     const chain = p.path.map((n) => `${n.fullName}${nodeMeta(n)}`).join(" → ");
-    lines.push(`  #${p.rank} (${hopLabel(p)}) · score ${p.score.score.toFixed(2)}`);
+    lines.push(
+      `  #${p.rank} (${hopLabel(p)}) · score ${p.score.score.toFixed(2)}`,
+    );
     lines.push(`    ${chain}`);
     lines.push(`    → ${p.ask.suggestion}`);
   }
   if (plan.origin.selectedBy === "strongest-tie") {
-    lines.push("  (origin defaults to your strongest tie — pass --from to override)");
+    lines.push(
+      "  (origin defaults to your strongest tie — pass --from to override)",
+    );
   }
   return lines;
 }
@@ -143,7 +158,12 @@ export interface PathResult {
   draftError?: string;
 }
 
-async function composeDraftFor(plan: IntroPathPlan, conn: SqliteConn | PgConn, opts: PathCommandOptions) {
+async function composeDraftFor(
+  plan: IntroPathPlan,
+  conn: SqliteConn | PgConn,
+  opts: PathCommandOptions,
+  scope?: WorkspaceScope,
+) {
   const top = plan.paths[0]!;
   const senderKeychain = await Keychain.get("user.name");
   const { credentials } = await readCredentials(opts.provider);
@@ -151,18 +171,22 @@ async function composeDraftFor(plan: IntroPathPlan, conn: SqliteConn | PgConn, o
   const input = await buildIntroAskInput(conn, plan, top, {
     senderName: opts.sender?.trim() || senderKeychain?.trim() || undefined,
     tone: (opts.tone as OutreachTone) ?? "warm",
+    scope,
   });
-  const draft = await composeOutreachMessage(validateComposeInput(input), { provider });
+  const draft = await composeOutreachMessage(validateComposeInput(input), {
+    provider,
+  });
   return draft;
 }
 
 export async function executePathDetailed(
   opts: PathCommandOptions,
   target: string,
-  conn: SqliteConn | PgConn
+  conn: SqliteConn | PgConn,
+  scope?: WorkspaceScope,
 ): Promise<PathResult> {
   const { input, graphOpts } = toPlanInput(opts, target);
-  const plan = await planIntroPaths(conn, input, graphOpts);
+  const plan = await planIntroPaths(conn, input, { ...graphOpts, scope });
 
   let draft: PathJsonPayload["draft"];
   let draftError: string | undefined;
@@ -171,7 +195,7 @@ export async function executePathDetailed(
       draftError = "nothing to draft — no path was found.";
     } else {
       try {
-        draft = await composeDraftFor(plan, conn, opts);
+        draft = await composeDraftFor(plan, conn, opts, scope);
       } catch (e) {
         // The plan itself is still useful; surface the AI failure honestly.
         draftError = (e as Error).message;
@@ -179,7 +203,11 @@ export async function executePathDetailed(
     }
   }
 
-  const payload: PathJsonPayload = { plan, ...(draft ? { draft } : {}), ...(draftError ? { draftError } : {}) };
+  const payload: PathJsonPayload = {
+    plan,
+    ...(draft ? { draft } : {}),
+    ...(draftError ? { draftError } : {}),
+  };
 
   const lines = renderPathPlan(plan);
   if (draft) {
@@ -191,7 +219,10 @@ export async function executePathDetailed(
       draft.body,
     );
   } else if (!draftError && plan.found) {
-    lines.push("", "Tip: --draft composes the ask email (BYO key); the composer prefill text is in the plan JSON.");
+    lines.push(
+      "",
+      "Tip: --draft composes the ask email (BYO key); the composer prefill text is in the plan JSON.",
+    );
   }
   return {
     output: lines.join("\n"),
@@ -204,7 +235,7 @@ export async function executePathDetailed(
 export async function executePath(
   opts: PathCommandOptions,
   target: string,
-  conn: SqliteConn | PgConn
+  conn: SqliteConn | PgConn,
 ): Promise<string> {
   const result = await executePathDetailed(opts, target, conn);
   return opts.json ? result.json : result.output;
@@ -213,26 +244,39 @@ export async function executePath(
 export function registerPathCommand(program: Command): void {
   program
     .command("path <target>")
-    .description("Find a warm-intro chain to a contact and the first ask to make (v2.0)")
+    .description(
+      "Find a warm-intro chain to a contact and the first ask to make (v2.0)",
+    )
     .option("--from <selector>", "start contact (default: your strongest tie)")
     .option("--max-depth <n>", "hop budget, 1–8 (default 4)", "4")
-    .option("--relation <rel>", `only walk this relation: ${EDGE_RELATIONS.join(" | ")}`)
+    .option(
+      "--relation <rel>",
+      `only walk this relation: ${EDGE_RELATIONS.join(" | ")}`,
+    )
     .option("--status <s>", "confirmed | all | pending (default confirmed)")
     .option("--alt <n>", "ranked alternatives to show (1–5, default 1)")
     .option("--draft", "also compose the ask email (AI, draft-only — you send)")
-    .option("--tone <tone>", `draft tone for --draft: ${TONE_VALUES.join(" | ")}`, "warm")
+    .option(
+      "--tone <tone>",
+      `draft tone for --draft: ${TONE_VALUES.join(" | ")}`,
+      "warm",
+    )
     .option("--sender <name>", "your name for the draft sign-off")
     .option("--provider <provider>", "openai | anthropic override for --draft")
     .option("--json", "print the full plan (and draft, if any) as JSON")
-    .action(async (target: string, opts: PathCommandOptions) => {
-      const { openDb } = await import("../db");
+    .action(async (target: string, opts: PathCommandOptions, cmd: Command) => {
+      const { openDb, resolveCliScope } = await import("../db");
       try {
-        const result = await executePathDetailed(opts, target, await openDb());
+        const conn = await openDb();
+        const scope = await resolveCliScope(cmd, conn);
+        const result = await executePathDetailed(opts, target, conn, scope);
         console.log(opts.json ? result.json : result.output);
         if (result.draftError) {
           // An explicitly requested draft that failed must not look like a
           // full success to scripts — non-zero exit; the plan already printed.
-          console.error(`netpro path: draft step failed — ${result.draftError}`);
+          console.error(
+            `netpro path: draft step failed — ${result.draftError}`,
+          );
           process.exitCode = 1;
         }
       } catch (e) {

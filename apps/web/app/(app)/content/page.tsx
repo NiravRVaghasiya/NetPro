@@ -9,6 +9,7 @@
 //     breakdown (the same `getContentOverview` the dashboard strip reads);
 //   * the panels — add one link, or import a CSV/feed preview-then-write.
 import Link from "next/link";
+import { requireScope } from "@/lib/authz";
 import { conn } from "@/lib/db";
 import {
   CONTENT_PLATFORMS,
@@ -78,11 +79,12 @@ export default async function ContentPage({
   if (query) sp.set("query", query);
 
   const now = new Date();
-  const listOptions = { platform, tag, days, query, limit: 100 };
+  const scope = await requireScope();
+  const listOptions = { platform, tag, days, query, limit: 100, scope };
   const [list, overview, status] = await Promise.all([
     listContentSummaries(conn, listOptions),
-    getContentOverview(conn, { days, now }),
-    contentStatus(conn),
+    getContentOverview(conn, { days, now, scope }),
+    contentStatus(conn, scope),
   ]);
 
   const windowLabel = days ? ` (last ${days} days)` : "";

@@ -82,6 +82,13 @@ const fixture = await vi.hoisted(async () => {
   ]);
   return f;
 });
+vi.mock("@/lib/authz", () => ({
+  requireScope: async () => ({
+    workspaceId: "default",
+    role: "owner",
+    userId: "system",
+  }),
+}));
 vi.mock("@/lib/db", () => ({ conn: fixture.conn }));
 
 import { GET } from "./route";
@@ -144,7 +151,11 @@ describe("GET /api/analytics", () => {
     const res = await get("/api/analytics");
     const body = (await res.json()) as {
       views?: {
-        stats: { window: { days: number }; totals: { views: number }; series: unknown[] };
+        stats: {
+          window: { days: number };
+          totals: { views: number };
+          series: unknown[];
+        };
         recent: { limit: number };
       };
     };
@@ -163,7 +174,11 @@ describe("GET /api/analytics", () => {
     const { upsertContentItem } = await import("@netpro/core/src/content");
     await upsertContentItem(
       fixture.conn,
-      { url: "https://example.dev/blog/api", title: "API post", platform: "blog" },
+      {
+        url: "https://example.dev/blog/api",
+        title: "API post",
+        platform: "blog",
+      },
       { now: new Date("2026-09-06T12:00:00.000Z") },
     );
     try {
@@ -176,14 +191,16 @@ describe("GET /api/analytics", () => {
       expect(body.views).toBeDefined(); // other sections untouched
 
       const slim = await get("/api/analytics?content=0");
-      const slimBody = (await slim.json()) as { content?: unknown; views: unknown };
+      const slimBody = (await slim.json()) as {
+        content?: unknown;
+        views: unknown;
+      };
       expect(slimBody.content).toBeUndefined();
       expect(slimBody.views).toBeDefined();
     } finally {
-      fixture.sqlite
-        .exec(
-          "DELETE FROM content_mentions; DELETE FROM content_metrics; DELETE FROM content_items;",
-        );
+      fixture.sqlite.exec(
+        "DELETE FROM content_mentions; DELETE FROM content_metrics; DELETE FROM content_items;",
+      );
     }
   });
 

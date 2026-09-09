@@ -33,12 +33,13 @@ function insertContact(
 ): void {
   sqlite
     .prepare(
-      `INSERT INTO contacts (id, full_name, email, headline, company, role, seniority,
+      `INSERT INTO contacts (id, workspace_id, full_name, email, headline, company, role, seniority,
          industry, location, notes, tags, source, created_at, updated_at, deleted_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
     .run(
       id,
+      "default",
       fields.fullName ?? `Contact ${id}`,
       fields.email ?? null,
       fields.headline ?? null,
@@ -57,7 +58,9 @@ function insertContact(
 }
 
 /** Deterministic offline embedder: one dimension per keyword, no network. */
-function fakeEmbedder(model = "fake-model"): EmbeddingProvider & { calls: string[][] } {
+function fakeEmbedder(
+  model = "fake-model",
+): EmbeddingProvider & { calls: string[][] } {
   const vocabulary = ["payments", "design", "berlin", "growth"];
   const calls: string[][] = [];
   return {
@@ -152,9 +155,18 @@ describe("reindexSearchIndex", () => {
     insertContact("c2", { fullName: "John Smith", company: "Vercel" });
 
     const summary = await reindexSearchIndex(conn);
-    expect(summary).toMatchObject({ scanned: 2, indexed: 2, skipped: 0, embedded: 0 });
+    expect(summary).toMatchObject({
+      scanned: 2,
+      indexed: 2,
+      skipped: 0,
+      embedded: 0,
+    });
 
-    const rows = sqlite.prepare("SELECT contact_id, search_text, content_hash FROM search_index ORDER BY contact_id").all();
+    const rows = sqlite
+      .prepare(
+        "SELECT contact_id, search_text, content_hash FROM search_index ORDER BY contact_id",
+      )
+      .all();
     expect(rows).toHaveLength(2);
     const fts = sqlite
       .prepare("SELECT contact_id FROM contacts_fts WHERE contacts_fts MATCH ?")
@@ -172,15 +184,25 @@ describe("reindexSearchIndex", () => {
   it("re-writes a row whose content changed and keeps FTS in step", async () => {
     insertContact("c1", { fullName: "Jane Doe", company: "Stripe" });
     await reindexSearchIndex(conn);
-    sqlite.prepare("UPDATE contacts SET company = 'Vercel' WHERE id = 'c1'").run();
+    sqlite
+      .prepare("UPDATE contacts SET company = 'Vercel' WHERE id = 'c1'")
+      .run();
 
     const summary = await reindexSearchIndex(conn);
     expect(summary).toMatchObject({ indexed: 1, skipped: 0 });
     expect(
-      sqlite.prepare("SELECT contact_id FROM contacts_fts WHERE contacts_fts MATCH ?").all("stripe"),
+      sqlite
+        .prepare(
+          "SELECT contact_id FROM contacts_fts WHERE contacts_fts MATCH ?",
+        )
+        .all("stripe"),
     ).toEqual([]);
     expect(
-      sqlite.prepare("SELECT contact_id FROM contacts_fts WHERE contacts_fts MATCH ?").all("vercel"),
+      sqlite
+        .prepare(
+          "SELECT contact_id FROM contacts_fts WHERE contacts_fts MATCH ?",
+        )
+        .all("vercel"),
     ).toEqual([{ contact_id: "c1" }]);
   });
 
@@ -196,13 +218,21 @@ describe("reindexSearchIndex", () => {
   it("prunes a soft-deleted contact out of the index and out of FTS", async () => {
     insertContact("c1", { fullName: "Jane Doe", company: "Stripe" });
     await reindexSearchIndex(conn);
-    sqlite.prepare("UPDATE contacts SET deleted_at = '2026-02-01' WHERE id = 'c1'").run();
+    sqlite
+      .prepare("UPDATE contacts SET deleted_at = '2026-02-01' WHERE id = 'c1'")
+      .run();
 
     const summary = await reindexSearchIndex(conn);
     expect(summary).toMatchObject({ scanned: 0, pruned: 1 });
-    expect(sqlite.prepare("SELECT count(*) AS n FROM search_index").get()).toEqual({ n: 0 });
     expect(
-      sqlite.prepare("SELECT contact_id FROM contacts_fts WHERE contacts_fts MATCH ?").all("stripe"),
+      sqlite.prepare("SELECT count(*) AS n FROM search_index").get(),
+    ).toEqual({ n: 0 });
+    expect(
+      sqlite
+        .prepare(
+          "SELECT contact_id FROM contacts_fts WHERE contacts_fts MATCH ?",
+        )
+        .all("stripe"),
     ).toEqual([]);
   });
 
@@ -210,12 +240,16 @@ describe("reindexSearchIndex", () => {
     insertContact("c1", { fullName: "Jane Doe" });
     insertContact("c2", { fullName: "John Smith" });
     await reindexSearchIndex(conn);
-    sqlite.prepare("UPDATE contacts SET deleted_at = '2026-02-01' WHERE id = 'c2'").run();
+    sqlite
+      .prepare("UPDATE contacts SET deleted_at = '2026-02-01' WHERE id = 'c2'")
+      .run();
 
     const summary = await reindexSearchIndex(conn, { contactIds: ["c1"] });
     expect(summary).toMatchObject({ scanned: 1, pruned: 0 });
     // c2 is soft-deleted but out of scope, so its row survives this run.
-    expect(sqlite.prepare("SELECT count(*) AS n FROM search_index").get()).toEqual({ n: 2 });
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM search_index").get(),
+    ).toEqual({ n: 2 });
   });
 
   it("no-ops on an empty contactIds list rather than reindexing everything", async () => {
@@ -224,14 +258,18 @@ describe("reindexSearchIndex", () => {
       scanned: 0,
       indexed: 0,
     });
-    expect(sqlite.prepare("SELECT count(*) AS n FROM search_index").get()).toEqual({ n: 0 });
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM search_index").get(),
+    ).toEqual({ n: 0 });
   });
 
   it("honours the limit cap", async () => {
     insertContact("c1");
     insertContact("c2");
     insertContact("c3");
-    expect(await reindexSearchIndex(conn, { limit: 2 })).toMatchObject({ scanned: 2 });
+    expect(await reindexSearchIndex(conn, { limit: 2 })).toMatchObject({
+      scanned: 2,
+    });
   });
 });
 
@@ -241,10 +279,16 @@ describe("reindexSearchIndex — embeddings", () => {
     const embedder = fakeEmbedder();
 
     const summary = await reindexSearchIndex(conn, { embedder });
-    expect(summary).toMatchObject({ indexed: 1, embedded: 1, embeddingError: null });
+    expect(summary).toMatchObject({
+      indexed: 1,
+      embedded: 1,
+      embeddingError: null,
+    });
 
     const row = sqlite
-      .prepare("SELECT embedding, embedding_model, embedding_dim, embedding_updated_at FROM search_index")
+      .prepare(
+        "SELECT embedding, embedding_model, embedding_dim, embedding_updated_at FROM search_index",
+      )
       .get() as Record<string, unknown>;
     expect(row.embedding).toBe(encodeEmbedding([1, 0, 0, 0]));
     expect(row.embedding_model).toBe("fake-model");
@@ -267,21 +311,31 @@ describe("reindexSearchIndex — embeddings", () => {
     insertContact("c1", { fullName: "Jane", headline: "payments" });
     await reindexSearchIndex(conn, { embedder: fakeEmbedder("model-a") });
 
-    const summary = await reindexSearchIndex(conn, { embedder: fakeEmbedder("model-b") });
+    const summary = await reindexSearchIndex(conn, {
+      embedder: fakeEmbedder("model-b"),
+    });
     expect(summary).toMatchObject({ indexed: 1, embedded: 1 });
     expect(
-      (sqlite.prepare("SELECT embedding_model AS m FROM search_index").get() as { m: string }).m,
+      (
+        sqlite
+          .prepare("SELECT embedding_model AS m FROM search_index")
+          .get() as { m: string }
+      ).m,
     ).toBe("model-b");
   });
 
   it("a keyword-only rerun preserves an existing vector", async () => {
     insertContact("c1", { fullName: "Jane", headline: "payments" });
     await reindexSearchIndex(conn, { embedder: fakeEmbedder() });
-    sqlite.prepare("UPDATE contacts SET company = 'Stripe' WHERE id = 'c1'").run();
+    sqlite
+      .prepare("UPDATE contacts SET company = 'Stripe' WHERE id = 'c1'")
+      .run();
 
     await reindexSearchIndex(conn); // no embedder
     const row = sqlite
-      .prepare("SELECT embedding, embedding_model, search_text FROM search_index")
+      .prepare(
+        "SELECT embedding, embedding_model, search_text FROM search_index",
+      )
       .get() as Record<string, string>;
     expect(row.embedding).toBe(encodeEmbedding([1, 0, 0, 0]));
     expect(row.embedding_model).toBe("fake-model");
@@ -289,7 +343,8 @@ describe("reindexSearchIndex — embeddings", () => {
   });
 
   it("batches large runs", async () => {
-    for (let i = 0; i < 70; i++) insertContact(`c${String(i).padStart(3, "0")}`);
+    for (let i = 0; i < 70; i++)
+      insertContact(`c${String(i).padStart(3, "0")}`);
     const embedder = fakeEmbedder();
     const summary = await reindexSearchIndex(conn, { embedder });
     expect(summary.embedded).toBe(70);
@@ -312,7 +367,11 @@ describe("reindexSearchIndex — embeddings", () => {
     expect(summary.embeddingError).toMatch(/upstream 503/);
     // The point of the degradation: full-text search still works.
     expect(
-      sqlite.prepare("SELECT contact_id FROM contacts_fts WHERE contacts_fts MATCH ?").all("stripe"),
+      sqlite
+        .prepare(
+          "SELECT contact_id FROM contacts_fts WHERE contacts_fts MATCH ?",
+        )
+        .all("stripe"),
     ).toEqual([{ contact_id: "c1" }]);
   });
 });

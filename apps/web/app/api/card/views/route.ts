@@ -10,17 +10,19 @@
 // session; only the two beacon paths under /api/card are public). Params are
 // lenient — garbage falls back, out-of-range clamps — and the effective
 // window is echoed in `stats.window`.
-import { conn } from '@/lib/db';
-import { getViewsOverview } from '@netpro/core/src/views';
-import { crmErrorResponse, crmJson } from '@/lib/crm-request';
-import { viewsListParams } from '@/lib/views-request';
+import { conn } from "@/lib/db";
+import { getViewsOverview } from "@netpro/core/src/views";
+import { crmErrorResponse, crmJson } from "@/lib/crm-request";
+import { viewsListParams } from "@/lib/views-request";
+import { requireScope } from "@/lib/authz";
 
-export const runtime = 'nodejs';
+export const runtime = "nodejs";
 
 export async function GET(request: Request): Promise<Response> {
   const sp = new URL(request.url).searchParams;
   try {
-    const overview = await getViewsOverview(conn, viewsListParams(sp));
+    const scope = await requireScope();
+    const overview = await getViewsOverview(conn, viewsListParams(sp), scope);
     return crmJson(overview);
   } catch (error) {
     return crmErrorResponse(error);

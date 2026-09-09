@@ -14,6 +14,7 @@ import {
   type RecipientInput,
 } from "@netpro/core/src/ai";
 import { Keychain } from "../config/keychain";
+import type { WorkspaceScope } from "@netpro/core/src/workspaces/scope";
 
 export interface OutreachCommandOptions {
   // Recipient from the database:
@@ -143,12 +144,13 @@ export async function readCredentials(providerFlag?: string) {
 export async function executeOutreach(
   opts: OutreachCommandOptions,
   conn: SqliteConn | PgConn,
+  scope?: WorkspaceScope,
 ): Promise<string> {
   const input = toOutreachInput(opts);
 
   let recipient: RecipientInput;
   if (input.selector) {
-    const ref = await resolveContactRef(conn, input.selector);
+    const ref = await resolveContactRef(conn, input.selector, scope);
     recipient = contactToRecipientInput(ref);
   } else {
     recipient = input.adHoc!;
@@ -207,10 +209,12 @@ export function registerOutreachCommand(program: Command): void {
     )
     .option("--model <model-id>", "override the provider default model")
     .option("--json", "emit the draft as JSON")
-    .action(async (options: OutreachCommandOptions) => {
-      const { openDb } = await import("../db");
+    .action(async (options: OutreachCommandOptions, cmd: Command) => {
+      const { openDb, resolveCliScope } = await import("../db");
       try {
-        const output = await executeOutreach(options, await openDb());
+        const conn = await openDb();
+        const scope = await resolveCliScope(cmd, conn);
+        const output = await executeOutreach(options, conn, scope);
         console.log(output);
       } catch (e) {
         console.error(`netpro outreach: ${(e as Error).message}`);

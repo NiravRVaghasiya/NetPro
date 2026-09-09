@@ -28,7 +28,11 @@ import {
   type SearchEngineReport,
   type SearchMode,
 } from "./types";
-import { buildSearchConditions, buildOrderBy, type PreparedTermFilters } from "./conditions";
+import {
+  buildSearchConditions,
+  buildOrderBy,
+  type PreparedTermFilters,
+} from "./conditions";
 import {
   EMPTY_FACETS,
   contactColumns,
@@ -42,6 +46,7 @@ import {
 import { keywordArm, semanticArm } from "./arms";
 import { reciprocalRankFusion, type RankedList } from "./rrf";
 import type { EmbeddingProvider } from "./embeddings";
+import type { WorkspaceScope } from "../workspaces/scope";
 
 export interface HybridSearchDeps {
   /**
@@ -72,13 +77,18 @@ interface NormalizedOptions {
  * coincidental substring hit inside a notes blob cannot outrank a real
  * full-text match, while still guaranteeing the result appears at all.
  */
-export const ARM_WEIGHTS = { keyword: 1, semantic: 0.9, portable: 0.5 } as const;
+export const ARM_WEIGHTS = {
+  keyword: 1,
+  semantic: 0.9,
+  portable: 0.5,
+} as const;
 
 export async function searchContactsFused(
   conn: Conn,
   options: SearchContactsOptions,
   norm: NormalizedOptions,
   deps: HybridSearchDeps = {},
+  scope?: WorkspaceScope,
 ): Promise<SearchContactsResponse> {
   const cols = contactColumns(conn);
 
@@ -88,7 +98,7 @@ export async function searchContactsFused(
     cutoff: norm.cutoff,
     fullQuery: null,
   };
-  const filters = buildSearchConditions(cols, options, noTerms);
+  const filters = buildSearchConditions(cols, options, noTerms, scope);
   const query = norm.terms.join(" ");
 
   // Portable arm: the v1 engine's own ordering, ids only.
@@ -97,7 +107,12 @@ export async function searchContactsFused(
     cutoff: norm.cutoff,
     fullQuery: query.toLowerCase(),
   };
-  const portableWhere = buildSearchConditions(cols, options, portableTerms);
+  const portableWhere = buildSearchConditions(
+    cols,
+    options,
+    portableTerms,
+    scope,
+  );
   const portableRows = await runRows(
     conn,
     portableWhere,
@@ -110,7 +125,12 @@ export async function searchContactsFused(
     report: { used: true, hits: portableRows.length },
   };
 
-  const keyword = await keywordArm(conn, norm.terms, filters, HYBRID_POOL_LIMIT);
+  const keyword = await keywordArm(
+    conn,
+    norm.terms,
+    filters,
+    HYBRID_POOL_LIMIT,
+  );
   const semantic =
     norm.mode === "hybrid"
       ? await semanticArm(
@@ -121,12 +141,15 @@ export async function searchContactsFused(
           HYBRID_POOL_LIMIT,
           deps.signal,
         )
-      : { ids: [], report: { used: false, hits: 0, reason: "not_requested" as const } };
+      : {
+          ids: [],
+          report: { used: false, hits: 0, reason: "not_requested" as const },
+        };
 
   // An empty index is a distinct, actionable state ("run netpro reindex") —
   // report it rather than the generic zero-hits.
   if (keyword.report.used && keyword.report.hits === 0) {
-    const indexed = await countIndexRows(conn);
+    const indexed = await countIndexRows(conn, scope);
     if (indexed === 0) {
       keyword.report = { used: false, hits: 0, reason: "index_empty" };
     }
@@ -134,12 +157,24 @@ export async function searchContactsFused(
 
   const lists: RankedList[] = [];
   if (keyword.report.used && keyword.ids.length > 0) {
-    lists.push({ arm: "keyword", ids: keyword.ids, weight: ARM_WEIGHTS.keyword });
+    lists.push({
+      arm: "keyword",
+      ids: keyword.ids,
+      weight: ARM_WEIGHTS.keyword,
+    });
   }
   if (semantic.report.used && semantic.ids.length > 0) {
-    lists.push({ arm: "semantic", ids: semantic.ids, weight: ARM_WEIGHTS.semantic });
+    lists.push({
+      arm: "semantic",
+      ids: semantic.ids,
+      weight: ARM_WEIGHTS.semantic,
+    });
   }
-  lists.push({ arm: "portable", ids: portable.ids, weight: ARM_WEIGHTS.portable });
+  lists.push({
+    arm: "portable",
+    ids: portable.ids,
+    weight: ARM_WEIGHTS.portable,
+  });
 
   const fused = reciprocalRankFusion(lists);
   const fusedIds = fused.map((f) => f.id).slice(0, HYBRID_POOL_LIMIT);
@@ -155,7 +190,11 @@ export async function searchContactsFused(
   const engine: SearchEngineReport = {
     mode: servedMode,
     requested: norm.mode,
-    arms: { portable: portable.report, keyword: keyword.report, semantic: semantic.report },
+    arms: {
+      portable: portable.report,
+      keyword: keyword.report,
+      semantic: semantic.report,
+    },
     truncated:
       fused.length >= HYBRID_POOL_LIMIT ||
       portable.ids.length >= HYBRID_POOL_LIMIT ||
@@ -188,7 +227,13 @@ export async function searchContactsFused(
       const pageWhere: SQL = filters
         ? sql`${filters} AND ${idInList(cols, conn, pageIds)}`
         : idInList(cols, conn, pageIds);
-      const unordered = await runRows(conn, pageWhere, [sql`${cols.fullName} ASC`], pageIds.length, 0);
+      const unordered = await runRows(
+        conn,
+        pageWhere,
+        [sql`${cols.fullName} ASC`],
+        pageIds.length,
+        0,
+      );
       const byId = new Map(unordered.map((r) => [r.id, r]));
       rows = pageIds
         .map((id) => byId.get(id))
@@ -216,12 +261,16 @@ export async function searchContactsFused(
   };
 }
 
-async function countIndexRows(conn: Conn): Promise<number> {
+async function countIndexRows(
+  conn: Conn,
+  scope?: WorkspaceScope,
+): Promise<number> {
   try {
     const { rawAll } = await import("./indexer");
+    const { workspaceSql } = await import("../workspaces/scope");
     const rows = await rawAll<{ n: number }>(
       conn,
-      sql`SELECT count(*) AS n FROM search_index`,
+      sql`SELECT count(*) AS n FROM search_index WHERE ${workspaceSql(scope, "search_index.workspace_id")}`,
     );
     return Number(rows[0]?.n ?? 0);
   } catch {

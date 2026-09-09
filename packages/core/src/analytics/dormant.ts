@@ -20,6 +20,7 @@ import {
   type AnalyticsOptions,
   type DormantContact,
 } from "./types";
+import { workspacePredicate } from "../workspaces/scope";
 
 /** Map a DB row to the DormantContact shape (dialect-agnostic). */
 function toDormant(
@@ -73,7 +74,7 @@ export async function getDormantContacts(
       })
       .from(c)
       .where(
-        sql`${c.deletedAt} IS NULL AND coalesce(${c.lastInteraction}, ${c.createdAt}) < ${cutoff}`,
+        sql`${c.deletedAt} IS NULL AND ${workspacePredicate(options.scope, c.workspaceId)} AND coalesce(${c.lastInteraction}, ${c.createdAt}) < ${cutoff}`,
       )
       .orderBy(
         sql`coalesce(${c.lastInteraction}, ${c.createdAt}) asc, ${c.relationshipScore} desc`,
@@ -96,7 +97,7 @@ export async function getDormantContacts(
     })
     .from(c)
     .where(
-      sql`${c.deletedAt} IS NULL AND coalesce(${c.lastInteraction}, ${c.createdAt}) < ${cutoff}`,
+      sql`${c.deletedAt} IS NULL AND ${workspacePredicate(options.scope, c.workspaceId)} AND coalesce(${c.lastInteraction}, ${c.createdAt}) < ${cutoff}`,
     )
     .orderBy(
       sql`coalesce(${c.lastInteraction}, ${c.createdAt}) asc, ${c.relationshipScore} desc`,

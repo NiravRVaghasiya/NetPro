@@ -81,14 +81,15 @@ const SEED: Seed[] = [
 
 function seed(rows: Seed[] = SEED): void {
   const stmt = sqlite.prepare(
-    `INSERT INTO contacts (id, full_name, email, company, role, seniority, industry,
+    `INSERT INTO contacts (id, workspace_id, full_name, email, company, role, seniority, industry,
        location, headline, notes, relationship_score, last_interaction,
        source, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
   );
   for (const r of rows) {
     stmt.run(
       r.id,
+      "default",
       r.fullName,
       r.email ?? null,
       r.company ?? null,
@@ -131,7 +132,8 @@ function topicEmbedder(model = "fake-model"): EmbeddingProvider {
         const vector = [0, 0, 0];
         for (const word of text.toLowerCase().split(/[^a-z]+/)) {
           const hit = lexicon[word];
-          if (hit) for (let i = 0; i < TOPICS.length; i++) vector[i]! += hit[i]!;
+          if (hit)
+            for (let i = 0; i < TOPICS.length; i++) vector[i]! += hit[i]!;
         }
         return vector;
       });
@@ -189,7 +191,10 @@ describe("searchContacts — portable stays the default", () => {
 
   it("degrades a keyword request with no free text to portable", async () => {
     seed();
-    const res = await searchContacts(conn, { mode: "hybrid", company: "vercel" });
+    const res = await searchContacts(conn, {
+      mode: "hybrid",
+      company: "vercel",
+    });
     expect(res.engine.mode).toBe("portable");
     expect(res.engine.requested).toBe("hybrid");
     expect(res.engine.arms.keyword.reason).toBe("not_requested");
@@ -206,7 +211,10 @@ describe("searchContacts — keyword mode", () => {
   });
 
   it("fuses the FTS arm with the portable arm", async () => {
-    const res = await searchContacts(conn, { query: "payments", mode: "keyword" });
+    const res = await searchContacts(conn, {
+      query: "payments",
+      mode: "keyword",
+    });
     expect(res.engine.mode).toBe("keyword");
     expect(res.engine.arms.keyword.used).toBe(true);
     expect(res.engine.arms.portable.used).toBe(true);
@@ -228,7 +236,10 @@ describe("searchContacts — keyword mode", () => {
     const portable = await searchContacts(conn, { query: "introduced" });
     expect(portable.contacts).toHaveLength(0);
 
-    const keyword = await searchContacts(conn, { query: "introduced", mode: "keyword" });
+    const keyword = await searchContacts(conn, {
+      query: "introduced",
+      mode: "keyword",
+    });
     expect(keyword.contacts.map((c) => c.id)).toEqual(["c4"]);
     expect(keyword.engine.arms.keyword.hits).toBe(1);
     expect(keyword.engine.arms.portable.hits).toBe(0);
@@ -238,7 +249,10 @@ describe("searchContacts — keyword mode", () => {
     // "erce" matches "Vercel" as a substring but not as a token prefix, so
     // only the portable arm can find it. Hybrid must still return it.
     const portable = await searchContacts(conn, { query: "erce" });
-    const keyword = await searchContacts(conn, { query: "erce", mode: "keyword" });
+    const keyword = await searchContacts(conn, {
+      query: "erce",
+      mode: "keyword",
+    });
     expect(portable.contacts.map((c) => c.id).sort()).toEqual(["c2", "c3"]);
     expect(keyword.contacts.map((c) => c.id).sort()).toEqual(["c2", "c3"]);
     expect(keyword.engine.arms.keyword.hits).toBe(0);
@@ -263,7 +277,11 @@ describe("searchContacts — keyword mode", () => {
       { seniority: "senior" },
     ] as const) {
       const portable = await searchContacts(conn, { query: "e", ...filters });
-      const hybrid = await searchContacts(conn, { query: "e", mode: "keyword", ...filters });
+      const hybrid = await searchContacts(conn, {
+        query: "e",
+        mode: "keyword",
+        ...filters,
+      });
       expect(new Set(hybrid.contacts.map((c) => c.id))).toEqual(
         new Set(portable.contacts.map((c) => c.id)),
       );
@@ -271,21 +289,41 @@ describe("searchContacts — keyword mode", () => {
   });
 
   it("never returns a soft-deleted contact", async () => {
-    sqlite.prepare("UPDATE contacts SET deleted_at = '2026-02-01' WHERE id = 'c1'").run();
+    sqlite
+      .prepare("UPDATE contacts SET deleted_at = '2026-02-01' WHERE id = 'c1'")
+      .run();
     // The index row is stale on purpose: the filter must exclude her anyway.
-    const res = await searchContacts(conn, { query: "payments", mode: "keyword" });
+    const res = await searchContacts(conn, {
+      query: "payments",
+      mode: "keyword",
+    });
     expect(res.contacts.map((c) => c.id)).toEqual(["c4"]);
   });
 
   it("paginates the fused order coherently", async () => {
-    const all = await searchContacts(conn, { query: "e", mode: "keyword", limit: 100 });
-    const page1 = await searchContacts(conn, { query: "e", mode: "keyword", limit: 2 });
-    const page2 = await searchContacts(conn, { query: "e", mode: "keyword", limit: 2, offset: 2 });
+    const all = await searchContacts(conn, {
+      query: "e",
+      mode: "keyword",
+      limit: 100,
+    });
+    const page1 = await searchContacts(conn, {
+      query: "e",
+      mode: "keyword",
+      limit: 2,
+    });
+    const page2 = await searchContacts(conn, {
+      query: "e",
+      mode: "keyword",
+      limit: 2,
+      offset: 2,
+    });
 
     expect(page1.total).toBe(all.total);
     expect(page1.contacts).toHaveLength(2);
     expect([...page1.contacts, ...page2.contacts].map((c) => c.id)).toEqual(
-      all.contacts.slice(0, page1.contacts.length + page2.contacts.length).map((c) => c.id),
+      all.contacts
+        .slice(0, page1.contacts.length + page2.contacts.length)
+        .map((c) => c.id),
     );
     // No overlap between pages.
     expect(
@@ -294,29 +332,53 @@ describe("searchContacts — keyword mode", () => {
   });
 
   it("is deterministic across repeated identical queries", async () => {
-    const a = await searchContacts(conn, { query: "e", mode: "keyword", limit: 100 });
-    const b = await searchContacts(conn, { query: "e", mode: "keyword", limit: 100 });
+    const a = await searchContacts(conn, {
+      query: "e",
+      mode: "keyword",
+      limit: 100,
+    });
+    const b = await searchContacts(conn, {
+      query: "e",
+      mode: "keyword",
+      limit: 100,
+    });
     expect(a.contacts.map((c) => c.id)).toEqual(b.contacts.map((c) => c.id));
   });
 
   it("honours a non-relevance sort over the fused candidate set", async () => {
-    const res = await searchContacts(conn, { query: "e", mode: "keyword", sort: "name", limit: 100 });
+    const res = await searchContacts(conn, {
+      query: "e",
+      mode: "keyword",
+      sort: "name",
+      limit: 100,
+    });
     const names = res.contacts.map((c) => c.fullName);
     expect(names).toEqual([...names].sort());
 
-    const byScore = await searchContacts(conn, { query: "e", mode: "keyword", sort: "score", limit: 100 });
+    const byScore = await searchContacts(conn, {
+      query: "e",
+      mode: "keyword",
+      sort: "score",
+      limit: 100,
+    });
     const scores = byScore.contacts.map((c) => c.relationshipScore ?? 0);
     expect(scores).toEqual([...scores].sort((a, b) => b - a));
   });
 
   it("computes facets over the fused set, not the whole table", async () => {
-    const res = await searchContacts(conn, { query: "payments", mode: "keyword" });
+    const res = await searchContacts(conn, {
+      query: "payments",
+      mode: "keyword",
+    });
     const companies = res.facets.company.map((f) => f.value).sort();
     expect(companies).toEqual(["monzo", "stripe"]);
   });
 
   it("returns an empty, honest response when nothing matches", async () => {
-    const res = await searchContacts(conn, { query: "zzzznomatch", mode: "keyword" });
+    const res = await searchContacts(conn, {
+      query: "zzzznomatch",
+      mode: "keyword",
+    });
     expect(res.contacts).toEqual([]);
     expect(res.total).toBe(0);
     expect(res.facets.company).toEqual([]);
@@ -325,8 +387,14 @@ describe("searchContacts — keyword mode", () => {
 
   it("reports index_empty when nothing has been indexed yet", async () => {
     sqlite.prepare("DELETE FROM search_index").run();
-    const res = await searchContacts(conn, { query: "payments", mode: "keyword" });
-    expect(res.engine.arms.keyword).toMatchObject({ used: false, reason: "index_empty" });
+    const res = await searchContacts(conn, {
+      query: "payments",
+      mode: "keyword",
+    });
+    expect(res.engine.arms.keyword).toMatchObject({
+      used: false,
+      reason: "index_empty",
+    });
     expect(res.engine.mode).toBe("portable");
     // Degrades to exactly what portable would have returned.
     expect(res.contacts.map((c) => c.id).sort()).toEqual(["c1", "c4"]);
@@ -334,8 +402,14 @@ describe("searchContacts — keyword mode", () => {
 
   it("reports index_missing on an unmigrated database instead of throwing", async () => {
     conn.db.run(sql`DROP TABLE contacts_fts`);
-    const res = await searchContacts(conn, { query: "payments", mode: "keyword" });
-    expect(res.engine.arms.keyword).toMatchObject({ used: false, reason: "index_missing" });
+    const res = await searchContacts(conn, {
+      query: "payments",
+      mode: "keyword",
+    });
+    expect(res.engine.arms.keyword).toMatchObject({
+      used: false,
+      reason: "index_missing",
+    });
     expect(res.contacts.map((c) => c.id).sort()).toEqual(["c1", "c4"]);
   });
 });
@@ -347,8 +421,14 @@ describe("searchContacts — hybrid mode", () => {
 
   it("skips the semantic arm when embeddings are not configured", async () => {
     await reindexSearchIndex(conn);
-    const res = await searchContacts(conn, { query: "payments", mode: "hybrid" });
-    expect(res.engine.arms.semantic).toMatchObject({ used: false, reason: "not_configured" });
+    const res = await searchContacts(conn, {
+      query: "payments",
+      mode: "hybrid",
+    });
+    expect(res.engine.arms.semantic).toMatchObject({
+      used: false,
+      reason: "not_configured",
+    });
     expect(res.engine.mode).toBe("keyword");
   });
 
@@ -359,7 +439,10 @@ describe("searchContacts — hybrid mode", () => {
       { query: "payments", mode: "hybrid" },
       { embedder: topicEmbedder() },
     );
-    expect(res.engine.arms.semantic).toMatchObject({ used: false, reason: "no_embeddings" });
+    expect(res.engine.arms.semantic).toMatchObject({
+      used: false,
+      reason: "no_embeddings",
+    });
   });
 
   it("surfaces a conceptual match the lexical arms cannot find", async () => {
@@ -376,7 +459,10 @@ describe("searchContacts — hybrid mode", () => {
     expect(res.engine.arms.semantic.used).toBe(true);
     // c2 is the Product Manager — nothing lexical matches "roadmap".
     expect(res.contacts.map((c) => c.id)).toEqual(["c2"]);
-    const lexical = await searchContacts(conn, { query: "roadmap", mode: "keyword" });
+    const lexical = await searchContacts(conn, {
+      query: "roadmap",
+      mode: "keyword",
+    });
     expect(lexical.contacts).toEqual([]);
   });
 
@@ -389,7 +475,12 @@ describe("searchContacts — hybrid mode", () => {
     );
     // c1 and c4 are found by both the lexical and the semantic arms; c2/c3 at
     // most by one, so they cannot outrank them.
-    expect(res.contacts.slice(0, 2).map((c) => c.id).sort()).toEqual(["c1", "c4"]);
+    expect(
+      res.contacts
+        .slice(0, 2)
+        .map((c) => c.id)
+        .sort(),
+    ).toEqual(["c1", "c4"]);
   });
 
   it("falls back to the lexical arms when the provider is down", async () => {
@@ -406,7 +497,10 @@ describe("searchContacts — hybrid mode", () => {
       { query: "payments", mode: "hybrid" },
       { embedder: broken },
     );
-    expect(res.engine.arms.semantic).toMatchObject({ used: false, reason: "provider_error" });
+    expect(res.engine.arms.semantic).toMatchObject({
+      used: false,
+      reason: "provider_error",
+    });
     expect(res.engine.arms.semantic.detail).toMatch(/ECONNREFUSED/);
     expect(res.engine.mode).toBe("keyword");
     expect(res.contacts.map((c) => c.id).sort()).toEqual(["c1", "c4"]);
@@ -419,12 +513,19 @@ describe("searchContacts — hybrid mode", () => {
       { query: "payments", mode: "hybrid" },
       { embedder: topicEmbedder("model-b") },
     );
-    expect(res.engine.arms.semantic).toMatchObject({ used: false, reason: "no_embeddings" });
+    expect(res.engine.arms.semantic).toMatchObject({
+      used: false,
+      reason: "no_embeddings",
+    });
   });
 
   it("skips a stored vector whose dimensions no longer match", async () => {
     await reindexSearchIndex(conn, { embedder: topicEmbedder() });
-    sqlite.prepare("UPDATE search_index SET embedding = '[1,2]' WHERE contact_id = 'c1'").run();
+    sqlite
+      .prepare(
+        "UPDATE search_index SET embedding = '[1,2]' WHERE contact_id = 'c1'",
+      )
+      .run();
     const res = await searchContacts(
       conn,
       { query: "payments", mode: "hybrid", limit: 100 },
@@ -453,12 +554,20 @@ describe("searchContacts — fusion bounds", () => {
   it("caps the candidate pool and flags the response as truncated", async () => {
     const many: Seed[] = [];
     for (let i = 0; i < HYBRID_POOL_LIMIT + 25; i++) {
-      many.push({ id: `x${String(i).padStart(4, "0")}`, fullName: `Pat Example ${i}`, company: "Acme" });
+      many.push({
+        id: `x${String(i).padStart(4, "0")}`,
+        fullName: `Pat Example ${i}`,
+        company: "Acme",
+      });
     }
     seed(many);
     await reindexSearchIndex(conn);
 
-    const res = await searchContacts(conn, { query: "acme", mode: "keyword", limit: 10 });
+    const res = await searchContacts(conn, {
+      query: "acme",
+      mode: "keyword",
+      limit: 10,
+    });
     expect(res.total).toBe(HYBRID_POOL_LIMIT);
     expect(res.engine.truncated).toBe(true);
     expect(res.contacts).toHaveLength(10);

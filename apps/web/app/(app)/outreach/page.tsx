@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireScope } from "@/lib/authz";
 import { conn } from "@/lib/db";
 import { getContactById } from "@netpro/core/src/ai";
 import OutreachComposer from "./composer";
@@ -27,7 +28,10 @@ export default async function OutreachPage({
 }) {
   const q = await searchParams;
   const contactId = one(q.contactId);
-  const contact = contactId ? await getContactById(conn, contactId) : null;
+  const scope = await requireScope();
+  const contact = contactId
+    ? await getContactById(conn, contactId, scope)
+    : null;
   return (
     <div>
       <h1>AI Outreach</h1>

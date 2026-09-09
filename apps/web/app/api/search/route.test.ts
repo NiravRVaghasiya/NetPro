@@ -1,4 +1,15 @@
-vi.mock('@/lib/authz', () => ({ requireMembership: async () => ({ workspaceId: 'default', userId: 'test-user', role: 'member' }) }));
+vi.mock("@/lib/authz", () => ({
+  requireMembership: async () => ({
+    workspaceId: "default",
+    userId: "test-user",
+    role: "member",
+  }),
+  requireScope: async () => ({
+    workspaceId: "default",
+    userId: "test-user",
+    role: "member",
+  }),
+}));
 import { describe, it, expect, vi } from "vitest";
 
 // v2.0 Phase 4 moved this onto the migrated fixture: the keyword arm needs the
@@ -101,11 +112,17 @@ describe("GET /api/search", () => {
   });
 
   it("filters by derived skills (v2.0 Phase 5) — aliases canonicalised, unknown names match nothing", async () => {
-    const hit = await (await GET(new Request("http://localhost/api/search?skills=k8s,Python"))).json();
+    const hit = await (
+      await GET(new Request("http://localhost/api/search?skills=k8s,Python"))
+    ).json();
     expect(hit.contacts.map((c: { id: string }) => c.id)).toEqual(["c1"]);
-    const none = await (await GET(new Request("http://localhost/api/search?skills=python,nope"))).json();
+    const none = await (
+      await GET(new Request("http://localhost/api/search?skills=python,nope"))
+    ).json();
     expect(none.total).toBe(0);
-    const blank = await (await GET(new Request("http://localhost/api/search?skills=%20"))).json();
+    const blank = await (
+      await GET(new Request("http://localhost/api/search?skills=%20"))
+    ).json();
     expect(blank.total).toBe(3);
   });
 
@@ -128,7 +145,10 @@ describe("GET /api/search — engine modes", () => {
 
   it("reports the portable engine by default and runs no arms", async () => {
     const body = await (await call("?q=vercel")).json();
-    expect(body.engine).toMatchObject({ mode: "portable", requested: "portable" });
+    expect(body.engine).toMatchObject({
+      mode: "portable",
+      requested: "portable",
+    });
     expect(body.engine.arms.keyword.used).toBe(false);
     expect(body.total).toBe(2);
   });
@@ -139,9 +159,12 @@ describe("GET /api/search — engine modes", () => {
     expect((await res.json()).error).toMatch(/portable, keyword, hybrid/);
   });
 
-  it.each(["portable", "keyword", "hybrid"])("accepts mode=%s", async (mode) => {
-    expect((await call(`?q=vercel&mode=${mode}`)).status).toBe(200);
-  });
+  it.each(["portable", "keyword", "hybrid"])(
+    "accepts mode=%s",
+    async (mode) => {
+      expect((await call(`?q=vercel&mode=${mode}`)).status).toBe(200);
+    },
+  );
 
   it("degrades to portable — with a reason — before the index is built", async () => {
     const body = await (await call("?q=vercel&mode=keyword")).json();
@@ -149,7 +172,10 @@ describe("GET /api/search — engine modes", () => {
       used: false,
       reason: "index_empty",
     });
-    expect(body.contacts.map((c: { id: string }) => c.id).sort()).toEqual(["c2", "c3"]);
+    expect(body.contacts.map((c: { id: string }) => c.id).sort()).toEqual([
+      "c2",
+      "c3",
+    ]);
   });
 
   it("serves the keyword engine once the index exists", async () => {
@@ -157,7 +183,10 @@ describe("GET /api/search — engine modes", () => {
     const body = await (await call("?q=vercel&mode=keyword")).json();
     expect(body.engine.mode).toBe("keyword");
     expect(body.engine.arms.keyword.used).toBe(true);
-    expect(body.contacts.map((c: { id: string }) => c.id).sort()).toEqual(["c2", "c3"]);
+    expect(body.contacts.map((c: { id: string }) => c.id).sort()).toEqual([
+      "c2",
+      "c3",
+    ]);
   });
 
   it("finds indexed notes that the portable engine never reads", async () => {
@@ -180,7 +209,9 @@ describe("GET /api/search — engine modes", () => {
 
   it("keeps filters and pagination working in keyword mode", async () => {
     await reindexSearchIndex(fixture.conn);
-    const filtered = await (await call("?q=vercel&mode=keyword&seniority=junior")).json();
+    const filtered = await (
+      await call("?q=vercel&mode=keyword&seniority=junior")
+    ).json();
     expect(filtered.contacts.map((c: { id: string }) => c.id)).toEqual(["c3"]);
 
     const paged = await (await call("?q=vercel&mode=keyword&limit=1")).json();

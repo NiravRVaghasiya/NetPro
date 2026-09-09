@@ -12,6 +12,7 @@
 // profile-view purge from `../views/retention.ts`.
 import { sql } from "drizzle-orm";
 import type { SqliteConn, PgConn } from "@netpro/db";
+import { workspaceSql, type WorkspaceScope } from "../workspaces/scope";
 
 type Conn = SqliteConn | PgConn;
 
@@ -23,6 +24,11 @@ export interface PurgeContentMetricsOptions {
   olderThanDays?: number;
   /** Clock override for tests. Defaults to now. */
   now?: Date;
+  /**
+   * v3.0 Phase 2 — when present, purge only this workspace (system sweeps
+   * call once per workspace). Absent = across all workspaces.
+   */
+  scope?: WorkspaceScope;
 }
 
 /**
@@ -51,6 +57,7 @@ export async function purgeExpiredContentMetrics(
   // only rows past the cutoff.
   const statement = sql`DELETE FROM content_metrics
       WHERE fetched_at < ${cutoff}
+        AND ${workspaceSql(options.scope, "content_metrics.workspace_id")}
         AND fetched_at < (
           SELECT MAX(m2.fetched_at) FROM content_metrics m2
           WHERE m2.content_id = content_metrics.content_id

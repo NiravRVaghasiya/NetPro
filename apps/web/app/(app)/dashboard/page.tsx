@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireScope } from "@/lib/authz";
 import { conn } from "@/lib/db";
 import {
   getNetworkOverview,
@@ -39,7 +40,13 @@ function MetricCard({
   );
 }
 
-function ValueBars({ values, total }: { values: NetworkOverview["topCompanies"]; total: number }) {
+function ValueBars({
+  values,
+  total,
+}: {
+  values: NetworkOverview["topCompanies"];
+  total: number;
+}) {
   if (values.length === 0) {
     return <p style={{ color: "#9ca3af" }}>No data yet.</p>;
   }
@@ -48,7 +55,13 @@ function ValueBars({ values, total }: { values: NetworkOverview["topCompanies"];
     <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
       {values.map((v) => (
         <li key={v.value} style={{ marginBottom: 6 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.875rem" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: "0.875rem",
+            }}
+          >
             <span>{v.value}</span>
             <span style={{ color: "#6b7280" }}>
               {v.count} ({Math.round((total > 0 ? v.count / total : 0) * 100)}%)
@@ -86,13 +99,14 @@ function NetworkGraphSection({ graph }: { graph: NetworkGraph | undefined }) {
       <section style={{ marginTop: "1.5rem" }}>
         <h2>Network graph</h2>
         <p style={{ color: "#9ca3af" }}>
-          No confirmed edges yet. Import a LinkedIn CSV (mutuals arrive as candidates) or{" "}
-          <Link href="/edges">add links yourself</Link>
+          No confirmed edges yet. Import a LinkedIn CSV (mutuals arrive as
+          candidates) or <Link href="/edges">add links yourself</Link>
           {graph.pendingCandidates > 0 ? (
             <>
               {" · "}
               <Link href="/edges?status=pending">
-                {graph.pendingCandidates} pending candidate{graph.pendingCandidates === 1 ? "" : "s"} to review
+                {graph.pendingCandidates} pending candidate
+                {graph.pendingCandidates === 1 ? "" : "s"} to review
               </Link>
             </>
           ) : null}
@@ -106,21 +120,28 @@ function NetworkGraphSection({ graph }: { graph: NetworkGraph | undefined }) {
     <section style={{ marginTop: "1.5rem" }}>
       <h2>Network graph</h2>
       <p style={{ color: "#6b7280", margin: "0.25rem 0" }}>
-        {graph.nodes} of {graph.totalContacts} contacts linked by {graph.edges} confirmed edge
+        {graph.nodes} of {graph.totalContacts} contacts linked by {graph.edges}{" "}
+        confirmed edge
         {graph.edges === 1 ? "" : "s"} · {graph.components.count} component
-        {graph.components.count === 1 ? "" : "s"} (largest {graph.components.largestSize})
-        {graph.avgPathLength.value !== null ? ` · avg path length ${graph.avgPathLength.value}` : ""}
+        {graph.components.count === 1 ? "" : "s"} (largest{" "}
+        {graph.components.largestSize})
+        {graph.avgPathLength.value !== null
+          ? ` · avg path length ${graph.avgPathLength.value}`
+          : ""}
         {" · "}
         <Link href="/edges">manage edges</Link>
       </p>
       <div style={{ display: "flex", gap: "2rem", flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 260px" }}>
-          <h3>Communities ({graph.communities.count}, modularity {graph.communities.modularity})</h3>
+          <h3>
+            Communities ({graph.communities.count}, modularity{" "}
+            {graph.communities.modularity})
+          </h3>
           <ul>
             {graph.communities.top.map((c) => (
               <li key={c.communityId}>
-                <strong>{c.label}</strong> — {c.size} member{c.size === 1 ? "" : "s"} (
-                {Math.round(c.share * 100)}%){" "}
+                <strong>{c.label}</strong> — {c.size} member
+                {c.size === 1 ? "" : "s"} ({Math.round(c.share * 100)}%){" "}
                 <span style={{ color: "#6b7280" }}>
                   {c.members.map((m) => m.fullName).join(", ")}
                   {c.truncated ? "…" : ""}
@@ -134,16 +155,23 @@ function NetworkGraphSection({ graph }: { graph: NetworkGraph | undefined }) {
           <ul>
             {graph.centrality.top.map((t) => (
               <li key={t.contactId}>
-                <Link href={`/contacts/${t.contactId}`}>{t.fullName}</Link> — {t.degree} edge
+                <Link href={`/contacts/${t.contactId}`}>{t.fullName}</Link> —{" "}
+                {t.degree} edge
                 {t.degree === 1 ? "" : "s"}
                 {t.betweenness !== null ? (
-                  <span style={{ color: "#6b7280" }}> · betweenness {t.betweenness}</span>
+                  <span style={{ color: "#6b7280" }}>
+                    {" "}
+                    · betweenness {t.betweenness}
+                  </span>
                 ) : null}
               </li>
             ))}
           </ul>
-          {!graph.centrality.betweennessComputed && graph.centrality.skippedReason ? (
-            <p style={{ color: "#9ca3af", fontSize: "0.75rem" }}>{graph.centrality.skippedReason}</p>
+          {!graph.centrality.betweennessComputed &&
+          graph.centrality.skippedReason ? (
+            <p style={{ color: "#9ca3af", fontSize: "0.75rem" }}>
+              {graph.centrality.skippedReason}
+            </p>
           ) : null}
         </div>
       </div>
@@ -156,8 +184,8 @@ function NetworkGraphSection({ graph }: { graph: NetworkGraph | undefined }) {
                 <Link href={`/contacts/${w.contactId}`}>{w.contactName}</Link> →{" "}
                 <Link href={`/contacts/${w.targetId}`}>{w.targetName}</Link>{" "}
                 <span style={{ color: "#6b7280" }}>
-                  via{" "}
-                  <Link href={`/contacts/${w.viaId}`}>{w.viaName}</Link> ({w.hops} hops)
+                  via <Link href={`/contacts/${w.viaId}`}>{w.viaName}</Link> (
+                  {w.hops} hops)
                 </span>
               </li>
             ))}
@@ -310,7 +338,8 @@ function ProfileViewsSection({ views }: { views: ViewsOverview | undefined }) {
         {stats.totals.views} view{stats.totals.views === 1 ? "" : "s"} ·{" "}
         {stats.totals.uniqueViewers} unique viewer
         {stats.totals.uniqueViewers === 1 ? "" : "s"} · {known} (last{" "}
-        {stats.window.days} days) · <Link href="/settings/card">all analytics</Link>
+        {stats.window.days} days) ·{" "}
+        <Link href="/settings/card">all analytics</Link>
       </p>
       <div style={{ display: "flex", gap: "2rem", flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 260px" }}>
@@ -367,8 +396,9 @@ function ContentSection({ content }: { content: ContentOverview | undefined }) {
       <section style={{ marginTop: "1.5rem" }}>
         <h2>Content</h2>
         <p style={{ color: "#9ca3af" }}>
-          No content tracked yet. <Link href="/content">Add your first content</Link> — a
-          blog post, article or video — and record its numbers to see engagement here.
+          No content tracked yet.{" "}
+          <Link href="/content">Add your first content</Link> — a blog post,
+          article or video — and record its numbers to see engagement here.
         </p>
       </section>
     );
@@ -377,8 +407,9 @@ function ContentSection({ content }: { content: ContentOverview | undefined }) {
     <section style={{ marginTop: "1.5rem" }}>
       <h2>Content</h2>
       <p style={{ color: "#6b7280", margin: "0.25rem 0" }}>
-        {content.items} item{content.items === 1 ? "" : "s"} · {content.withMetrics} measured ·{" "}
-        {formatCount(content.totalViews)} latest-known views
+        {content.items} item{content.items === 1 ? "" : "s"} ·{" "}
+        {content.withMetrics} measured · {formatCount(content.totalViews)}{" "}
+        latest-known views
         {content.byPlatform.length > 0
           ? ` · ${content.byPlatform
               .map((p) => `${p.items} on ${platformLabel(p.platform)}`)
@@ -390,7 +421,9 @@ function ContentSection({ content }: { content: ContentOverview | undefined }) {
         <ol style={{ paddingLeft: "1.25rem", margin: "0.25rem 0" }}>
           {content.top.slice(0, 3).map((t) => (
             <li key={t.id} style={{ marginBottom: "0.25rem" }}>
-              <Link href={`/content/${encodeURIComponent(t.id)}`}>{t.title}</Link>{" "}
+              <Link href={`/content/${encodeURIComponent(t.id)}`}>
+                {t.title}
+              </Link>{" "}
               <span style={{ color: "#6b7280" }}>
                 · {formatCount(t.latestMetrics?.views ?? null)} views
               </span>
@@ -399,8 +432,8 @@ function ContentSection({ content }: { content: ContentOverview | undefined }) {
         </ol>
       ) : (
         <p style={{ color: "#9ca3af", margin: "0.25rem 0" }}>
-          No snapshots yet — <Link href="/content">track your first piece</Link> and record its
-          numbers.
+          No snapshots yet — <Link href="/content">track your first piece</Link>{" "}
+          and record its numbers.
         </p>
       )}
     </section>
@@ -414,9 +447,10 @@ export default async function DashboardPage() {
   // v2.5 Phase 6 — the "Content" strip reads `overview.content` (the
   // all-time overview folded into the shared payload) instead of a second
   // `getContentOverview` round-trip, so page and API can't disagree.
+  const scope = await requireScope();
   const [overview, followUps] = await Promise.all([
-    getNetworkOverview(conn),
-    listFollowUps(conn, { view: "pending", limit: 1 }),
+    getNetworkOverview(conn, { scope }),
+    listFollowUps(conn, { view: "pending", limit: 1 }, scope),
   ]);
   const m = overview.metrics;
   const g = overview.growth;
@@ -427,9 +461,8 @@ export default async function DashboardPage() {
       <div>
         <h1>Dashboard</h1>
         <p>
-          No contacts yet.{" "}
-          <Link href="/import">Import your connections</Link> to see network
-          analytics here.
+          No contacts yet. <Link href="/import">Import your connections</Link>{" "}
+          to see network analytics here.
         </p>
         <ContentSection content={overview.content} />
       </div>
@@ -446,7 +479,10 @@ export default async function DashboardPage() {
       <h1>Dashboard</h1>
 
       <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-        <MetricCard label="Network score" value={`${overview.score.score}/100`} />
+        <MetricCard
+          label="Network score"
+          value={`${overview.score.score}/100`}
+        />
         <MetricCard label="Contacts" value={String(m.totalContacts)} />
         <MetricCard
           label="Active (30d)"
@@ -464,7 +500,10 @@ export default async function DashboardPage() {
           value={String(m.diversityEffective)}
           hint={`effective ${m.diversityField}s`}
         />
-        <Link href="/contacts" style={{ textDecoration: "none", color: "inherit" }}>
+        <Link
+          href="/contacts"
+          style={{ textDecoration: "none", color: "inherit" }}
+        >
           <MetricCard
             label="Follow-ups due"
             value={String(due)}

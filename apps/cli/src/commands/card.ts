@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { SqliteConn, PgConn } from "@netpro/db";
+import type { WorkspaceScope } from "@netpro/core/src/workspaces/scope";
 import { MAX_PROFILE_BYTES } from "@netpro/core/src/card/types";
 import { parseProfileCardJson } from "@netpro/core/src/card/validation";
 import { renderProfileCardHtml } from "@netpro/core/src/card/html";
@@ -62,7 +63,10 @@ function executeCardGenerate(options: CardCommandOptions): {
   return { content, output: content };
 }
 
-function parsePositive(value: string | undefined, flag: string): number | undefined {
+function parsePositive(
+  value: string | undefined,
+  flag: string,
+): number | undefined {
   if (value === undefined) return undefined;
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1)
@@ -77,7 +81,9 @@ export function executeCard(options: CardCommandOptions): {
   // `--views` is the database mode and runs through `executeCardViews`;
   // reaching here with it (or any of its flags) is a caller bug.
   if (options.views) {
-    throw new Error("Use --views without generation flags; run `netpro card --views` on its own.");
+    throw new Error(
+      "Use --views without generation flags; run `netpro card --views` on its own.",
+    );
   }
   for (const [flag, set] of [
     ["--days", options.days !== undefined],
@@ -95,6 +101,7 @@ export function executeCard(options: CardCommandOptions): {
 export async function executeCardViews(
   options: CardCommandOptions,
   conn: SqliteConn | PgConn,
+  scope?: WorkspaceScope,
 ): Promise<string> {
   for (const [flag, set] of [
     ["--input", options.input !== undefined],
@@ -102,7 +109,8 @@ export async function executeCardViews(
     ["--format", options.format !== undefined],
     ["--pixel-url", options.pixelUrl !== undefined],
   ] as const) {
-    if (set) throw new Error(`${flag} applies to card generation, not to --views.`);
+    if (set)
+      throw new Error(`${flag} applies to card generation, not to --views.`);
   }
   // `--generate` is the default-action marker and a no-op elsewhere; in
   // views mode it is simply ignored rather than an error.
@@ -113,6 +121,7 @@ export async function executeCardViews(
     limit,
     includeBots: options.includeBots,
     includeOwnerViews: options.includeOwnerViews,
+    scope,
   });
   if (options.json) {
     return JSON.stringify(overview, null, 2);
@@ -140,17 +149,22 @@ export function registerCardCommand(program: Command): void {
       "Embed your NetPro view pixel (e.g. https://net.example/api/card/pixel.gif?p=blog) in the HTML card",
     )
     .option("--output <path>", "Write to a file instead of stdout")
-    .option("--views", "Show profile-view analytics instead of generating a card")
+    .option(
+      "--views",
+      "Show profile-view analytics instead of generating a card",
+    )
     .option("--days <n>", "Views window in days, 1–90 (default 30)")
     .option("--limit <n>", "Max rows per views list (default 10)")
     .option("--include-bots", "Count bot views too")
     .option("--include-owner-views", "Count your own views too")
     .option("--json", "Print the views overview as JSON (with --views)")
-    .action(async (options: CardCommandOptions) => {
+    .action(async (options: CardCommandOptions, cmd: Command) => {
       try {
         if (options.views) {
-          const { openDb } = await import("../db");
-          console.log(await executeCardViews(options, await openDb()));
+          const { openDb, resolveCliScope } = await import("../db");
+          const conn = await openDb();
+          const scope = await resolveCliScope(cmd, conn);
+          console.log(await executeCardViews(options, conn, scope));
         } else {
           console.log(executeCard(options).output);
         }

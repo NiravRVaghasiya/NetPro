@@ -1,8 +1,13 @@
-import { eq } from 'drizzle-orm';
-import type { SqliteConn, PgConn } from '@netpro/db';
-import type { EnrichableContact, EnrichmentProvider, EnrichmentResult } from './types';
-import { getCached, setCached } from './cache';
-import { LocalRateLimiter } from './rate-limiter';
+import { and, eq } from "drizzle-orm";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import type {
+  EnrichableContact,
+  EnrichmentProvider,
+  EnrichmentResult,
+} from "./types";
+import { getCached, setCached } from "./cache";
+import { LocalRateLimiter } from "./rate-limiter";
+import { workspacePredicate, type WorkspaceScope } from "../workspaces/scope";
 
 export interface EnrichSummary {
   enriched: number;
@@ -15,20 +20,25 @@ export class EnrichmentPipeline {
 
   constructor(
     private conn: SqliteConn | PgConn,
-    providers: EnrichmentProvider[]
+    providers: EnrichmentProvider[],
+    /** v3.0 Phase 2 — scope for the cache reads/writes and the contact update. */
+    private scope?: WorkspaceScope,
   ) {
     this.providers = [...providers].sort((a, b) => a.priority - b.priority);
     for (const provider of this.providers) {
       this.rateLimiters.set(
         provider.id,
-        new LocalRateLimiter({ defaultRate: provider.rateLimit.requests, windowMs: provider.rateLimit.windowMs })
+        new LocalRateLimiter({
+          defaultRate: provider.rateLimit.requests,
+          windowMs: provider.rateLimit.windowMs,
+        }),
       );
     }
   }
 
   async enrichContact(
     contact: EnrichableContact,
-    opts?: { force?: boolean }
+    opts?: { force?: boolean },
   ): Promise<{ results: EnrichmentResult[]; skipped: string[] }> {
     const results: EnrichmentResult[] = [];
     const skipped: string[] = [];
@@ -40,7 +50,12 @@ export class EnrichmentPipeline {
       }
 
       if (!opts?.force) {
-        const cached = await getCached(this.conn, contact.id, provider.id);
+        const cached = await getCached(
+          this.conn,
+          contact.id,
+          provider.id,
+          this.scope,
+        );
         if (cached && !cached.stale) {
           results.push(cached.result);
           continue;
@@ -55,7 +70,14 @@ export class EnrichmentPipeline {
 
       try {
         const result = await provider.enrich(contact);
-        await setCached(this.conn, contact.id, provider.id, result, provider.cacheTTL);
+        await setCached(
+          this.conn,
+          contact.id,
+          provider.id,
+          result,
+          provider.cacheTTL,
+          this.scope,
+        );
         results.push(result);
       } catch (e) {
         skipped.push(`${provider.id}: ${(e as Error).message}`);
@@ -65,16 +87,21 @@ export class EnrichmentPipeline {
     return { results, skipped };
   }
 
-  async enrichBatch(contacts: EnrichableContact[], opts?: { force?: boolean }): Promise<EnrichSummary> {
+  async enrichBatch(
+    contacts: EnrichableContact[],
+    opts?: { force?: boolean },
+  ): Promise<EnrichSummary> {
     const summary: EnrichSummary = { enriched: 0, skipped: [] };
 
     for (const contact of contacts) {
       const { results, skipped } = await this.enrichContact(contact, opts);
-      skipped.forEach((reason) => summary.skipped.push({ contactId: contact.id, reason }));
+      skipped.forEach((reason) =>
+        summary.skipped.push({ contactId: contact.id, reason }),
+      );
 
       if (results.length > 0) {
         const merged = mergeByConfidence(results);
-        await persistEnrichment(this.conn, contact.id, merged);
+        await persistEnrichment(this.conn, contact.id, merged, this.scope);
         summary.enriched++;
       }
     }
@@ -83,7 +110,9 @@ export class EnrichmentPipeline {
   }
 }
 
-function mergeByConfidence(results: EnrichmentResult[]): Partial<EnrichmentResult['data']> {
+function mergeByConfidence(
+  results: EnrichmentResult[],
+): Partial<EnrichmentResult["data"]> {
   const merged: Record<string, { value: unknown; confidence: number }> = {};
   for (const result of results) {
     for (const [key, value] of Object.entries(result.data)) {
@@ -94,7 +123,9 @@ function mergeByConfidence(results: EnrichmentResult[]): Partial<EnrichmentResul
       }
     }
   }
-  return Object.fromEntries(Object.entries(merged).map(([k, v]) => [k, v.value])) as Partial<EnrichmentResult['data']>;
+  return Object.fromEntries(
+    Object.entries(merged).map(([k, v]) => [k, v.value]),
+  ) as Partial<EnrichmentResult["data"]>;
 }
 
 // NOTE: `conn.db.select()`/`.insert()`/`.update()` don't typecheck against the raw
@@ -107,17 +138,43 @@ function mergeByConfidence(results: EnrichmentResult[]): Partial<EnrichmentResul
 async function persistEnrichment(
   conn: SqliteConn | PgConn,
   contactId: string,
-  data: Partial<EnrichmentResult['data']>
+  data: Partial<EnrichmentResult["data"]>,
+  scope?: WorkspaceScope,
 ): Promise<void> {
-  const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
-  for (const key of ['email', 'emailVerified', 'company', 'companyDomain', 'role', 'seniority', 'location', 'country', 'linkedinUrl', 'githubUrl', 'twitterUrl', 'industry'] as const) {
+  const updates: Record<string, unknown> = {
+    updatedAt: new Date().toISOString(),
+  };
+  for (const key of [
+    "email",
+    "emailVerified",
+    "company",
+    "companyDomain",
+    "role",
+    "seniority",
+    "location",
+    "country",
+    "linkedinUrl",
+    "githubUrl",
+    "twitterUrl",
+    "industry",
+  ] as const) {
     if (data[key] !== undefined) updates[key] = data[key];
   }
 
-  if (conn.dialect === 'sqlite') {
-    await conn.db.update(conn.schema.contacts).set(updates).where(eq(conn.schema.contacts.id, contactId));
+  if (conn.dialect === "sqlite") {
+    const c = conn.schema.contacts;
+    await conn.db
+      .update(c)
+      .set(updates)
+      .where(
+        and(eq(c.id, contactId), workspacePredicate(scope, c.workspaceId)),
+      );
     return;
   }
 
-  await conn.db.update(conn.schema.contacts).set(updates).where(eq(conn.schema.contacts.id, contactId));
+  const c = conn.schema.contacts;
+  await conn.db
+    .update(c)
+    .set(updates)
+    .where(and(eq(c.id, contactId), workspacePredicate(scope, c.workspaceId)));
 }

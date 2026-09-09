@@ -15,9 +15,10 @@
 // by design: because the salt rotates every UTC day, an owner hash recorded
 // yesterday can never match a visitor hash today, so the heuristic cannot
 // chase people across days even if a NAT IP is shared with a neighbour.
-import { sql } from 'drizzle-orm';
-import type { SqliteConn, PgConn } from '@netpro/db';
-import { rawAll } from '../search/indexer';
+import { sql } from "drizzle-orm";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import { rawAll } from "../search/indexer";
+import { BOOTSTRAP_WORKSPACE_ID } from "../workspaces/scope";
 
 type Conn = SqliteConn | PgConn;
 
@@ -31,10 +32,12 @@ export const OWNER_VIEW_LOOKBACK_HOURS = 24;
  */
 export async function recentOwnerViewIpHashes(
   conn: Conn,
-  options: { now?: Date } = {},
+  options: { now?: Date; workspaceId?: string } = {},
 ): Promise<string[]> {
+  const workspaceId = options.workspaceId ?? BOOTSTRAP_WORKSPACE_ID;
   const since = new Date(
-    (options.now ?? new Date()).getTime() - OWNER_VIEW_LOOKBACK_HOURS * 3_600_000,
+    (options.now ?? new Date()).getTime() -
+      OWNER_VIEW_LOOKBACK_HOURS * 3_600_000,
   ).toISOString();
   const rows = await rawAll<{ viewer_ip: string }>(
     conn,
@@ -42,6 +45,7 @@ export async function recentOwnerViewIpHashes(
         FROM profile_views
         WHERE is_owner_view = true
           AND viewed_at >= ${since}
+          AND workspace_id = ${workspaceId}
           AND viewer_ip IS NOT NULL`,
   );
   return rows.map((r) => r.viewer_ip);
@@ -65,6 +69,7 @@ export interface OwnerViewSignals {
 export function shouldMarkOwnerView(signals: OwnerViewSignals): boolean {
   if (signals.authenticatedOwnerSession) return true;
   return (
-    signals.ipHash !== null && signals.recentOwnerIpHashes.includes(signals.ipHash)
+    signals.ipHash !== null &&
+    signals.recentOwnerIpHashes.includes(signals.ipHash)
   );
 }

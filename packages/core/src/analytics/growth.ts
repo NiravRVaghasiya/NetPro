@@ -6,9 +6,7 @@
 // `date_trunc` are dialect-specific, while ISO-8601 UTC strings sort and
 // compare identically everywhere. The projection query stays portable.
 import type { SqliteConn, PgConn } from "@netpro/db";
-import {
-  projectContacts,
-} from "./metrics";
+import { projectContacts } from "./metrics";
 import {
   monthKey,
   resolveAnalyticsOptions,
@@ -28,12 +26,16 @@ export async function getGrowthSummary(
   options: AnalyticsOptions = {},
 ): Promise<GrowthSummary> {
   const { growthMonths, now } = resolveAnalyticsOptions(options);
-  const rows = await projectContacts(conn);
+  const rows = await projectContacts(conn, options.scope);
 
   // Month buckets oldest → newest, current partial month last.
   const buckets: string[] = [];
   for (let i = growthMonths - 1; i >= 0; i -= 1) {
-    buckets.push(monthKey(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))));
+    buckets.push(
+      monthKey(
+        new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)),
+      ),
+    );
   }
   const bucketIndex = new Map(buckets.map((m, i) => [m, i]));
 
@@ -42,8 +44,12 @@ export async function getGrowthSummary(
   let last30 = 0;
   let prior30 = 0;
 
-  const cutoff30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const cutoff60 = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString();
+  const cutoff30 = new Date(
+    now.getTime() - 30 * 24 * 60 * 60 * 1000,
+  ).toISOString();
+  const cutoff60 = new Date(
+    now.getTime() - 60 * 24 * 60 * 60 * 1000,
+  ).toISOString();
 
   // `buckets` is built by the loop above and is never empty (growthMonths >= 1).
   const oldestBucket = buckets[0]!;
@@ -82,6 +88,9 @@ export async function getGrowthSummary(
     series,
     last30,
     prior30,
-    ratePct: prior30 > 0 ? Math.round(((last30 - prior30) / prior30) * 1000) / 10 : null,
+    ratePct:
+      prior30 > 0
+        ? Math.round(((last30 - prior30) / prior30) * 1000) / 10
+        : null,
   };
 }

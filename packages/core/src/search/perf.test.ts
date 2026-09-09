@@ -38,9 +38,9 @@ function seedContacts(
 ): void {
   const rand = rng(7);
   const insert = sqlite.prepare(
-    `INSERT INTO contacts (id, full_name, email, company, role, location, headline,
+    `INSERT INTO contacts (id, workspace_id, full_name, email, company, role, location, headline,
        notes, relationship_score, source, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
   );
   const many = sqlite.transaction(() => {
     for (let i = 0; i < count; i++) {
@@ -49,6 +49,7 @@ function seedContacts(
       const city = CITIES[Math.floor(rand() * CITIES.length)]!;
       insert.run(
         `c${String(i).padStart(5, "0")}`,
+        "default",
         `Contact ${i} Example`,
         `contact${i}@example.com`,
         company,
@@ -157,7 +158,10 @@ describe("hybrid search performance budget", () => {
     // A 1536-dim vector serialises to ~13 KB; 5k of them is ~65 MB of JSON
     // text at the absolute worst case, and the rounding in encodeEmbedding is
     // what keeps that number from tripling.
-    const wide = Array.from({ length: 1536 }, (_, i) => Math.sin(i) * 0.123456789);
+    const wide = Array.from(
+      { length: 1536 },
+      (_, i) => Math.sin(i) * 0.123456789,
+    );
     expect(encodeEmbedding(wide).length).toBeLessThan(1536 * 12);
   });
 });

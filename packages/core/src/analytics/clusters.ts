@@ -29,7 +29,7 @@ export async function detectClusters(
   options: AnalyticsOptions = {},
 ): Promise<ClusterInfo[]> {
   const { limit } = resolveAnalyticsOptions(options);
-  const rows = await projectContacts(conn);
+  const rows = await projectContacts(conn, options.scope);
   const total = rows.length;
 
   interface Group {

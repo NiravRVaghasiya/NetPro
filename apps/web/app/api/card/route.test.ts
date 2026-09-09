@@ -7,12 +7,12 @@ const fixture = await vi.hoisted(async () => {
   return createTestSqliteConn();
 });
 vi.mock("@/lib/db", () => ({ conn: fixture.conn }));
-vi.mock("@/lib/auth", () => ({ auth: vi.fn() }));
+const mockRequireScope = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/authz", () => ({ requireScope: mockRequireScope }));
 import { conn } from "@/lib/db";
-import { auth } from "@/lib/auth";
 import { DELETE, GET, POST, PUT } from "./route";
 
-const mockAuth = vi.mocked(auth);
+const ownerScope = { workspaceId: "default", role: "owner", userId: "owner" };
 const profile = { fullName: "Public Ada", email: "public@example.com" };
 const origin = "https://netpro.example";
 function request(
@@ -29,10 +29,7 @@ function request(
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  mockAuth.mockResolvedValue({
-    user: { id: "owner" },
-    expires: "2099-01-01",
-  } as never);
+  mockRequireScope.mockResolvedValue(ownerScope);
   if (conn.dialect === "sqlite") await conn.db.delete(conn.schema.profileCards);
 });
 afterAll(() => fixture.sqlite.close());
@@ -41,7 +38,9 @@ describe("owner card API", () => {
   it.each([GET, PUT, POST, DELETE])(
     "checks auth in the handler, not just middleware",
     async (handler) => {
-      mockAuth.mockResolvedValue(null as never);
+      mockRequireScope.mockRejectedValue(
+        Object.assign(new Error("Unauthorized"), { status: 401 }),
+      );
       const response = await handler(request("POST", profile));
       expect(response.status).toBe(401);
       expect(response.headers.get("cache-control")).toContain("no-store");

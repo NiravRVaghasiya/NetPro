@@ -29,6 +29,11 @@ import {
   encodeEmbedding,
   type EmbeddingProvider,
 } from "./embeddings";
+import {
+  resolveScope,
+  workspaceSql,
+  type WorkspaceScope,
+} from "../workspaces/scope";
 
 /** Fields folded into the indexed document, in descending signal order. */
 export interface IndexableContact {
@@ -83,7 +88,9 @@ function tagWords(tags: unknown): string[] {
     }
   }
   if (Array.isArray(value)) {
-    return value.filter((v): v is string => typeof v === "string" && v.trim() !== "");
+    return value.filter(
+      (v): v is string => typeof v === "string" && v.trim() !== "",
+    );
   }
   return [];
 }
@@ -152,7 +159,10 @@ export function hashContent(text: string): string {
     h2 = (h2 + c) >>> 0;
     h2 = Math.imul(h2, 0x85ebca6b) >>> 0;
   }
-  return (h1 >>> 0).toString(16).padStart(8, "0") + (h2 >>> 0).toString(16).padStart(8, "0");
+  return (
+    (h1 >>> 0).toString(16).padStart(8, "0") +
+    (h2 >>> 0).toString(16).padStart(8, "0")
+  );
 }
 
 // ── Raw execution helpers (one place, both dialects) ─────────────────────
@@ -237,36 +247,57 @@ interface IndexRow extends Record<string, unknown> {
 export async function reindexSearchIndex(
   conn: Conn,
   options: ReindexOptions = {},
+  scope?: WorkspaceScope,
 ): Promise<ReindexSummary> {
-  const ids = options.contactIds?.filter((id) => typeof id === "string" && id !== "");
+  const resolved = resolveScope(scope);
+  const ids = options.contactIds?.filter(
+    (id) => typeof id === "string" && id !== "",
+  );
   if (options.contactIds && (!ids || ids.length === 0)) {
     return emptySummary();
   }
 
-  const scope = ids ? sql` AND id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})` : sql``;
-  const limitClause = options.limit ? sql` LIMIT ${Math.max(1, Math.floor(options.limit))}` : sql``;
+  const idScope = ids
+    ? sql` AND id IN (${sql.join(
+        ids.map((id) => sql`${id}`),
+        sql`, `,
+      )})`
+    : sql``;
+  const limitClause = options.limit
+    ? sql` LIMIT ${Math.max(1, Math.floor(options.limit))}`
+    : sql``;
 
+  // v3.0 Phase 2 — a reindex only ever scans one workspace's contacts, so
+  // its writes and prunes are per-workspace by construction.
   const contacts = await rawAll<ContactRow>(
     conn,
     sql`SELECT id, full_name, email, headline, company, role, seniority, department,
                industry, location, country, notes, tags, skills
         FROM contacts
-        WHERE deleted_at IS NULL${scope}
+        WHERE deleted_at IS NULL AND ${workspaceSql(scope, "contacts.workspace_id")}${idScope}
         ORDER BY id${limitClause}`,
   );
 
   // Prune index rows whose contact is gone or soft-deleted. Scoped the same
-  // way, so a targeted reindex cannot wipe unrelated rows.
+  // way, so a targeted reindex cannot wipe unrelated rows — and a scoped
+  // reindex can never prune another workspace's rows.
   const pruneScope = ids
-    ? sql` AND contact_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`
+    ? sql` AND contact_id IN (${sql.join(
+        ids.map((id) => sql`${id}`),
+        sql`, `,
+      )})`
     : sql``;
   const stale = await rawAll<{ contact_id: string }>(
     conn,
     sql`SELECT contact_id FROM search_index
-        WHERE contact_id NOT IN (SELECT id FROM contacts WHERE deleted_at IS NULL)${pruneScope}`,
+        WHERE ${workspaceSql(scope, "search_index.workspace_id")}
+          AND contact_id NOT IN (SELECT id FROM contacts WHERE deleted_at IS NULL)${pruneScope}`,
   );
   for (const row of stale) {
-    await rawRun(conn, sql`DELETE FROM search_index WHERE contact_id = ${row.contact_id}`);
+    await rawRun(
+      conn,
+      sql`DELETE FROM search_index WHERE contact_id = ${row.contact_id} AND ${workspaceSql(scope, "search_index.workspace_id")}`,
+    );
   }
 
   const summary: ReindexSummary = { ...emptySummary(), pruned: stale.length };
@@ -275,9 +306,15 @@ export async function reindexSearchIndex(
   const existing = new Map<string, IndexRow>();
   const existingRows = await rawAll<IndexRow>(
     conn,
-    sql`SELECT contact_id, content_hash, embedding_model, embedding FROM search_index${
-      ids ? sql` WHERE contact_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})` : sql``
-    }`,
+    sql`SELECT contact_id, content_hash, embedding_model, embedding FROM search_index
+        WHERE ${workspaceSql(scope, "search_index.workspace_id")}${
+          ids
+            ? sql` AND contact_id IN (${sql.join(
+                ids.map((id) => sql`${id}`),
+                sql`, `,
+              )})`
+            : sql``
+        }`,
   );
   for (const row of existingRows) existing.set(row.contact_id, row);
 
@@ -304,16 +341,17 @@ export async function reindexSearchIndex(
     });
 
     const prior = existing.get(row.id);
-    const textUnchanged = !options.force && prior?.content_hash === doc.contentHash;
+    const textUnchanged =
+      !options.force && prior?.content_hash === doc.contentHash;
     // A vector is stale when the text changed, the model changed, or there
     // simply isn't one yet. Model changes matter: vectors from two models are
     // not comparable and must never be ranked against each other.
     const needsEmbedding = Boolean(
       model &&
-        (options.force ||
-          !textUnchanged ||
-          !prior?.embedding ||
-          prior.embedding_model !== model),
+      (options.force ||
+        !textUnchanged ||
+        !prior?.embedding ||
+        prior.embedding_model !== model),
     );
 
     if (textUnchanged && !needsEmbedding) {
@@ -359,6 +397,7 @@ export async function reindexSearchIndex(
       embeddingModel: encoded ? model : null,
       embeddingDim: vector ? vector.length : null,
       keepExistingEmbedding: !encoded,
+      workspaceId: resolved.workspaceId,
     });
     summary.indexed += 1;
     if (encoded) summary.embedded += 1;
@@ -374,6 +413,8 @@ interface UpsertVectorFields {
   embeddingDim: number | null;
   /** Preserve any vector already stored (keyword-only runs must not erase it). */
   keepExistingEmbedding: boolean;
+  /** Tenancy stamp (v3.0 Phase 2). */
+  workspaceId: string;
 }
 
 async function upsertDocument(
@@ -396,16 +437,17 @@ async function upsertDocument(
   await rawRun(
     conn,
     sql`INSERT INTO search_index (
-          contact_id, search_text, company_norm, role_norm, location_norm,
+          contact_id, workspace_id, search_text, company_norm, role_norm, location_norm,
           seniority_norm, industry_norm, embedding, embedding_model,
           embedding_dim, embedding_updated_at, content_hash, updated_at
         ) VALUES (
-          ${doc.contactId}, ${doc.searchText}, ${doc.companyNorm}, ${doc.roleNorm},
+          ${doc.contactId}, ${v.workspaceId}, ${doc.searchText}, ${doc.companyNorm}, ${doc.roleNorm},
           ${doc.locationNorm}, ${doc.seniorityNorm}, ${doc.industryNorm},
           ${v.embedding}, ${v.embeddingModel}, ${v.embeddingDim},
           ${v.embedding ? v.now : null}, ${doc.contentHash}, ${v.now}
         )
         ON CONFLICT (contact_id) DO UPDATE SET
+          workspace_id = excluded.workspace_id,
           search_text = excluded.search_text,
           company_norm = excluded.company_norm,
           role_norm = excluded.role_norm,
@@ -444,18 +486,25 @@ export interface SearchIndexStatus {
   keywordIndexAvailable: boolean;
 }
 
-export async function searchIndexStatus(conn: Conn): Promise<SearchIndexStatus> {
-  const [counts] = await rawAll<{ contacts: number; indexed: number; embedded: number }>(
+export async function searchIndexStatus(
+  conn: Conn,
+  scope?: WorkspaceScope,
+): Promise<SearchIndexStatus> {
+  const [counts] = await rawAll<{
+    contacts: number;
+    indexed: number;
+    embedded: number;
+  }>(
     conn,
     sql`SELECT
-          (SELECT count(*) FROM contacts WHERE deleted_at IS NULL) AS contacts,
-          (SELECT count(*) FROM search_index) AS indexed,
-          (SELECT count(*) FROM search_index WHERE embedding IS NOT NULL) AS embedded`,
+          (SELECT count(*) FROM contacts WHERE deleted_at IS NULL AND ${workspaceSql(scope, "contacts.workspace_id")}) AS contacts,
+          (SELECT count(*) FROM search_index WHERE ${workspaceSql(scope, "search_index.workspace_id")}) AS indexed,
+          (SELECT count(*) FROM search_index WHERE embedding IS NOT NULL AND ${workspaceSql(scope, "search_index.workspace_id")}) AS embedded`,
   );
 
   const models = await rawAll<{ embedding_model: string | null }>(
     conn,
-    sql`SELECT DISTINCT embedding_model FROM search_index WHERE embedding_model IS NOT NULL`,
+    sql`SELECT DISTINCT embedding_model FROM search_index WHERE embedding_model IS NOT NULL AND ${workspaceSql(scope, "search_index.workspace_id")}`,
   );
 
   return {

@@ -14,16 +14,16 @@
 // Determinism: neighbors are explored in sorted order and equal-length
 // alternatives are enumerated stably, so repeated runs produce byte-identical
 // output for identical inputs.
-import type { SqliteConn, PgConn } from '@netpro/db';
-import { getContactById } from '../ai/resolve-contact';
+import type { SqliteConn, PgConn } from "@netpro/db";
+import { getContactById } from "../ai/resolve-contact";
 import {
   GRAPH_ANALYSIS_LIMITS,
   loadGraph,
   type GraphAnalysisOptions,
   type LoadedGraph,
   resolveGraphAnalysisOptions,
-} from './analysis';
-import { GraphError } from './types';
+} from "./analysis";
+import { GraphError } from "./types";
 
 export interface PathHopMeta {
   relations: string[];
@@ -74,7 +74,7 @@ export function shortestPaths(
   originId: string,
   targetId: string,
   maxDepth: number,
-  k = 1
+  k = 1,
 ): string[][] {
   if (originId === targetId) return [];
   if (!graph.nodes.has(originId) || !graph.nodes.has(targetId)) return [];
@@ -141,7 +141,10 @@ function hopMetaFor(graph: LoadedGraph, from: string, to: string): PathHopMeta {
     relations,
     minConfidence: Math.min(...all.map((e) => e.confidence)),
     minStrength: Math.min(...all.map((e) => e.strength)),
-    oneWay: forward.length > 0 && forward.every((e) => !e.bidirectional) && reverse.length === 0,
+    oneWay:
+      forward.length > 0 &&
+      forward.every((e) => !e.bidirectional) &&
+      reverse.length === 0,
   };
 }
 
@@ -163,7 +166,11 @@ function decorate(graph: LoadedGraph, chain: string[]): IntroPath {
   for (let i = 1; i < nodes.length; i++) {
     nodes[i]!.via = hopMetaFor(graph, chain[i - 1]!, chain[i]!);
   }
-  return { hops: chain.length - 1, path: nodes, intermediaries: nodes.slice(1, -1) };
+  return {
+    hops: chain.length - 1,
+    path: nodes,
+    intermediaries: nodes.slice(1, -1),
+  };
 }
 
 /**
@@ -175,16 +182,27 @@ export async function findIntroPaths(
   conn: SqliteConn | PgConn,
   originId: string,
   targetId: string,
-  opts: GraphAnalysisOptions & { k?: number } = {}
+  opts: GraphAnalysisOptions & { k?: number } = {},
 ): Promise<FindIntroPathsResult> {
   const from = originId.trim();
   const to = targetId.trim();
-  if (!from || !to) throw new GraphError('invalid_input', 'Both origin and target contact ids are required.');
-  if (from === to) throw new GraphError('invalid_input', 'Origin and target are the same contact.');
+  if (!from || !to)
+    throw new GraphError(
+      "invalid_input",
+      "Both origin and target contact ids are required.",
+    );
+  if (from === to)
+    throw new GraphError(
+      "invalid_input",
+      "Origin and target are the same contact.",
+    );
   for (const id of [from, to]) {
-    const contact = await getContactById(conn, id);
+    const contact = await getContactById(conn, id, opts.scope);
     if (!contact) {
-      throw new GraphError('not_found', `No contact with id "${id}". Soft-deleted contacts cannot be linked.`);
+      throw new GraphError(
+        "not_found",
+        `No contact with id "${id}". Soft-deleted contacts cannot be linked.`,
+      );
     }
   }
 

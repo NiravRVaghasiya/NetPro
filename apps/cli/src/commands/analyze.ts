@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import type { SqliteConn, PgConn } from "@netpro/db";
+import type { WorkspaceScope } from "@netpro/core/src/workspaces/scope";
 import {
   getNetworkOverview,
   type NetworkOverview,
@@ -39,9 +40,10 @@ function parseNumber(
 }
 
 /** Build the core analytics options from CLI flags, validating as we go. */
-export function toAnalyzeOptions(
-  opts: AnalyzeCommandOptions,
-): { dormantDays: number; limit: number } {
+export function toAnalyzeOptions(opts: AnalyzeCommandOptions): {
+  dormantDays: number;
+  limit: number;
+} {
   return {
     dormantDays: parseNumber(opts.days, "days") ?? 90,
     limit: parseNumber(opts.limit, "limit") ?? 10,
@@ -53,7 +55,13 @@ export function toAnalyzeOptions(
 export function selectedSection(
   opts: AnalyzeCommandOptions,
 ): "score" | "dormant" | "clusters" | "graph" | "views" | "full" {
-  const sections = [opts.networkScore, opts.dormant, opts.clusters, opts.graph, opts.views].filter(Boolean);
+  const sections = [
+    opts.networkScore,
+    opts.dormant,
+    opts.clusters,
+    opts.graph,
+    opts.views,
+  ].filter(Boolean);
   if (sections.length > 1) {
     throw new Error(
       "--network-score, --dormant, --clusters, --graph, and --views are mutually exclusive — pick one, or omit all for the full report",
@@ -93,7 +101,8 @@ function scoreLine(score: ScoreBreakdown): string[] {
   return [
     `Network score: ${score.score}/100`,
     ...score.factors.map(
-      (f) => `  ${f.key.padEnd(9)} ${String(f.value).padStart(5)}/100  (weight ${f.weight})`,
+      (f) =>
+        `  ${f.key.padEnd(9)} ${String(f.value).padStart(5)}/100  (weight ${f.weight})`,
     ),
   ];
 }
@@ -116,13 +125,18 @@ function growthLines(overview: NetworkOverview): string[] {
     "",
     "Growth (new connections per month):",
     ...series.map((p) => {
-      const bar = "█".repeat(Math.max(p.count > 0 ? 1 : 0, Math.round((p.count / max) * width)));
+      const bar = "█".repeat(
+        Math.max(p.count > 0 ? 1 : 0, Math.round((p.count / max) * width)),
+      );
       return `  ${p.month} │ ${bar.padEnd(width, p.count > 0 ? " " : "·")} ${p.count}  (total ${p.cumulative})`;
     }),
   ];
 }
 
-export function renderDormantSection(overview: NetworkOverview, dormantDays: number): string[] {
+export function renderDormantSection(
+  overview: NetworkOverview,
+  dormantDays: number,
+): string[] {
   const lines = [
     `Dormant ties (no known interaction in ${dormantDays}+ days — showing ${overview.dormant.length}):`,
   ];
@@ -132,8 +146,13 @@ export function renderDormantSection(overview: NetworkOverview, dormantDays: num
   }
   for (const d of overview.dormant) {
     const meta = [d.company, d.role].filter(Boolean).join(" · ");
-    const score = d.relationshipScore !== null ? ` [score ${d.relationshipScore.toFixed(2)}]` : "";
-    lines.push(`  ${d.fullName} — last touch ${d.daysSince}d ago${score}${meta ? `\n     ${meta}` : ""}`);
+    const score =
+      d.relationshipScore !== null
+        ? ` [score ${d.relationshipScore.toFixed(2)}]`
+        : "";
+    lines.push(
+      `  ${d.fullName} — last touch ${d.daysSince}d ago${score}${meta ? `\n     ${meta}` : ""}`,
+    );
   }
   return lines;
 }
@@ -190,18 +209,29 @@ export function renderGraphSection(graph: NetworkGraph | undefined): string[] {
       : graph.avgPathLength.note
         ? " · avg path length n/a (over the exact-BFS budget)"
         : "";
-  lines.push(`  Components: ${graph.components.count} (largest ${graph.components.largestSize})${apl}`);
+  lines.push(
+    `  Components: ${graph.components.count} (largest ${graph.components.largestSize})${apl}`,
+  );
 
   lines.push("  Most connected:");
   for (const t of graph.centrality.top.slice(0, 5)) {
-    const btw = t.betweenness !== null ? ` · betweenness ${t.betweenness.toFixed(2)}` : "";
-    lines.push(`    ${t.fullName} — ${t.degree} edge${t.degree === 1 ? "" : "s"}${btw}`);
+    const btw =
+      t.betweenness !== null
+        ? ` · betweenness ${t.betweenness.toFixed(2)}`
+        : "";
+    lines.push(
+      `    ${t.fullName} — ${t.degree} edge${t.degree === 1 ? "" : "s"}${btw}`,
+    );
   }
 
   if (graph.warmIntros.length > 0) {
-    lines.push("  Warm-intro candidates (contact → target, via the strongest intermediary):");
+    lines.push(
+      "  Warm-intro candidates (contact → target, via the strongest intermediary):",
+    );
     for (const w of graph.warmIntros.slice(0, 5)) {
-      lines.push(`    ${w.contactName} → ${w.targetName} via ${w.viaName} (${w.hops} hops)`);
+      lines.push(
+        `    ${w.contactName} → ${w.targetName} via ${w.viaName} (${w.hops} hops)`,
+      );
     }
   }
   if (graph.pendingCandidates > 0) {
@@ -224,14 +254,22 @@ function referrerHost(referrer: string | null): string {
 }
 
 /** v2.5 Phase 3 — the viewer-analytics strip in text form (shared with `netpro card --views`). */
-export function renderViewsSection(views: ViewsOverview | undefined, days: number): string[] {
+export function renderViewsSection(
+  views: ViewsOverview | undefined,
+  days: number,
+): string[] {
   if (!views) return [];
   const { stats, recent, matches } = views;
   const t = stats.totals;
   if (t.views === 0) {
-    const lines = [`Profile views (last ${days} days):`, "  No views yet — publish your card and share the link; views appear here."];
+    const lines = [
+      `Profile views (last ${days} days):`,
+      "  No views yet — publish your card and share the link; views appear here.",
+    ];
     if (stats.excluded.bots > 0 || stats.excluded.ownerViews > 0) {
-      lines.push(`  (${excludedNote(stats.excluded.bots, stats.excluded.ownerViews)} — nothing from real visitors.)`);
+      lines.push(
+        `  (${excludedNote(stats.excluded.bots, stats.excluded.ownerViews)} — nothing from real visitors.)`,
+      );
     }
     return lines;
   }
@@ -245,7 +283,9 @@ export function renderViewsSection(views: ViewsOverview | undefined, days: numbe
     `  ${t.views} view${t.views === 1 ? "" : "s"} · ${t.uniqueViewers} unique viewer${t.uniqueViewers === 1 ? "" : "s"} · ${visitors}`,
   ];
   if (stats.excluded.bots > 0 || stats.excluded.ownerViews > 0) {
-    lines.push(`  ${excludedNote(stats.excluded.bots, stats.excluded.ownerViews)} (use --include-bots / --include-owner-views to count them)`);
+    lines.push(
+      `  ${excludedNote(stats.excluded.bots, stats.excluded.ownerViews)} (use --include-bots / --include-owner-views to count them)`,
+    );
   }
   if (t.avgDurationMs !== null) {
     lines.push(`  Avg read duration: ${formatDuration(t.avgDurationMs)}`);
@@ -266,34 +306,50 @@ export function renderViewsSection(views: ViewsOverview | undefined, days: numbe
     lines.push(
       "",
       "Top referrers:",
-      ...stats.byReferrer.map((r) => `  ${r.value}  ${r.count} (${pct(r.share)})`),
+      ...stats.byReferrer.map(
+        (r) => `  ${r.value}  ${r.count} (${pct(r.share)})`,
+      ),
     );
   }
   if (stats.byCountry.length > 0) {
     lines.push(
       "",
       "Top countries:",
-      ...stats.byCountry.map((r) => `  ${r.value}  ${r.count} (${pct(r.share)})`),
+      ...stats.byCountry.map(
+        (r) => `  ${r.value}  ${r.count} (${pct(r.share)})`,
+      ),
     );
   }
 
-  lines.push("", `Recent views (showing ${recent.views.length} of ${recent.total}):`);
+  lines.push(
+    "",
+    `Recent views (showing ${recent.views.length} of ${recent.total}):`,
+  );
   for (const v of recent.views) {
     const who = v.resolvedContact ? v.resolvedContact.fullName : "anonymous";
-    const where = [v.country, referrerHost(v.referrer)].filter((s) => s && s !== "direct");
+    const where = [v.country, referrerHost(v.referrer)].filter(
+      (s) => s && s !== "direct",
+    );
     lines.push(
       `  ${v.viewedAt.slice(0, 16).replace("T", " ")}  ${v.viewedPage}  ${who}${where.length > 0 ? `  (${where.join(" · ")})` : ""}`,
     );
   }
 
   if (matches.matches.length > 0) {
-    lines.push("", `Known visitors (${matches.total} view${matches.total === 1 ? "" : "s"}):`);
+    lines.push(
+      "",
+      `Known visitors (${matches.total} view${matches.total === 1 ? "" : "s"}):`,
+    );
     for (const m of matches.matches) {
       const meta = m.contact.company ? ` (${m.contact.company})` : "";
-      lines.push(`  ${m.contact.fullName}${meta} — ${m.viewedAt.slice(0, 10)} via ${referrerHost(m.referrer)}`);
+      lines.push(
+        `  ${m.contact.fullName}${meta} — ${m.viewedAt.slice(0, 10)} via ${referrerHost(m.referrer)}`,
+      );
     }
     if (matches.total > matches.matches.length) {
-      lines.push(`  …and ${matches.total - matches.matches.length} more (raise --limit to see them)`);
+      lines.push(
+        `  …and ${matches.total - matches.matches.length} more (raise --limit to see them)`,
+      );
     }
   }
   return lines;
@@ -302,7 +358,10 @@ export function renderViewsSection(views: ViewsOverview | undefined, days: numbe
 function excludedNote(bots: number, ownerViews: number): string {
   const parts: string[] = [];
   if (bots > 0) parts.push(`${bots} bot view${bots === 1 ? "" : "s"} excluded`);
-  if (ownerViews > 0) parts.push(`${ownerViews} owner view${ownerViews === 1 ? "" : "s"} excluded`);
+  if (ownerViews > 0)
+    parts.push(
+      `${ownerViews} owner view${ownerViews === 1 ? "" : "s"} excluded`,
+    );
   return parts.join(" · ");
 }
 
@@ -316,8 +375,9 @@ function formatDuration(ms: number): string {
 export async function executeAnalyze(
   options: AnalyzeCommandOptions,
   conn: SqliteConn | PgConn,
+  scope?: WorkspaceScope,
 ): Promise<string> {
-  const analyticsOptions = toAnalyzeOptions(options);
+  const analyticsOptions = { ...toAnalyzeOptions(options), scope };
   const section = selectedSection(options);
 
   // Every section reads the same overview payload. `--views` applies the
@@ -331,7 +391,10 @@ export async function executeAnalyze(
       section === "views"
         ? toViewsOptions(options)
         : options.includeBots || options.includeOwnerViews
-          ? { includeBots: options.includeBots, includeOwnerViews: options.includeOwnerViews }
+          ? {
+              includeBots: options.includeBots,
+              includeOwnerViews: options.includeOwnerViews,
+            }
           : undefined,
   });
 
@@ -340,14 +403,19 @@ export async function executeAnalyze(
   }
 
   if (section === "views") {
-    return renderViewsSection(overview.views, toViewsOptions(options).days).join("\n");
+    return renderViewsSection(
+      overview.views,
+      toViewsOptions(options).days,
+    ).join("\n");
   }
 
   if (section === "score") {
     return scoreLine(overview.score).join("\n");
   }
   if (section === "dormant") {
-    return renderDormantSection(overview, analyticsOptions.dormantDays).join("\n");
+    return renderDormantSection(overview, analyticsOptions.dormantDays).join(
+      "\n",
+    );
   }
   if (section === "clusters") {
     return renderClustersSection(overview).join("\n");
@@ -358,7 +426,10 @@ export async function executeAnalyze(
 
   const m = overview.metrics;
   const g = overview.growth;
-  const rate = g.ratePct === null ? "n/a (empty prior window)" : `${g.ratePct > 0 ? "+" : ""}${g.ratePct}%`;
+  const rate =
+    g.ratePct === null
+      ? "n/a (empty prior window)"
+      : `${g.ratePct > 0 ? "+" : ""}${g.ratePct}%`;
   const lines = [
     ...scoreLine(overview.score),
     "",
@@ -379,14 +450,22 @@ export async function executeAnalyze(
     "",
     ...renderDormantSection(overview, analyticsOptions.dormantDays),
   ];
-  return lines.filter((l) => l !== "").join("\n").replace(/\n{3,}/g, "\n\n");
+  return lines
+    .filter((l) => l !== "")
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
 }
 
 export function registerAnalyzeCommand(program: Command): void {
   program
     .command("analyze")
-    .description("Analyze your network: score, growth, diversity, clusters, dormant ties, graph, views")
-    .option("--days <n>", "Dormancy window in days (default 90; the views window, default 30, with --views)")
+    .description(
+      "Analyze your network: score, growth, diversity, clusters, dormant ties, graph, views",
+    )
+    .option(
+      "--days <n>",
+      "Dormancy window in days (default 90; the views window, default 30, with --views)",
+    )
     .option("--dormant", "Show only the dormant-ties section")
     .option("--clusters", "Show only the clusters section")
     .option("--graph", "Show only the graph-analytics section (v2.0)")
@@ -396,10 +475,12 @@ export function registerAnalyzeCommand(program: Command): void {
     .option("--network-score", "Print just the network score and its factors")
     .option("--limit <n>", "Max rows per list (default 10)", "10")
     .option("--json", "Print the full overview as JSON")
-    .action(async (opts: AnalyzeCommandOptions) => {
-      const { openDb } = await import("../db");
+    .action(async (opts: AnalyzeCommandOptions, cmd: Command) => {
+      const { openDb, resolveCliScope } = await import("../db");
       try {
-        const output = await executeAnalyze(opts, await openDb());
+        const conn = await openDb();
+        const scope = await resolveCliScope(cmd, conn);
+        const output = await executeAnalyze(opts, conn, scope);
         console.log(output);
       } catch (e) {
         console.error(`netpro analyze: ${(e as Error).message}`);

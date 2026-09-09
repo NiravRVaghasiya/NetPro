@@ -10,7 +10,7 @@
 // thin executor. (The same pragmatism as Phase 2's facet queries; the
 // denormalized aggregates in the blueprint's Stage 5 belong to the phase that
 // introduces real data volume.)
-import { isNull } from "drizzle-orm";
+import { and, isNull } from "drizzle-orm";
 import type { SqliteConn, PgConn } from "@netpro/db";
 import {
   daysAgoIso,
@@ -21,6 +21,7 @@ import {
   type ScoreFactor,
   type TopValue,
 } from "./types";
+import { workspacePredicate, type WorkspaceScope } from "../workspaces/scope";
 
 /** The contacts columns analytics reads — the entire data footprint of this module. */
 export interface ProjectedContact {
@@ -41,6 +42,7 @@ export interface ProjectedContact {
  */
 export async function projectContacts(
   conn: SqliteConn | PgConn,
+  scope?: WorkspaceScope,
 ): Promise<ProjectedContact[]> {
   if (conn.dialect === "sqlite") {
     const c = conn.schema.contacts;
@@ -55,7 +57,9 @@ export async function projectContacts(
         createdAt: c.createdAt,
       })
       .from(c)
-      .where(isNull(c.deletedAt));
+      .where(
+        and(isNull(c.deletedAt), workspacePredicate(scope, c.workspaceId)),
+      );
   }
 
   const c = conn.schema.contacts;
@@ -70,7 +74,7 @@ export async function projectContacts(
       createdAt: c.createdAt,
     })
     .from(c)
-    .where(isNull(c.deletedAt));
+    .where(and(isNull(c.deletedAt), workspacePredicate(scope, c.workspaceId)));
 }
 
 /** A contact's last known touchpoint: its interaction date, else when the relationship was acquired. */
@@ -95,7 +99,9 @@ export function normalizedValues(
 }
 
 /** Count occurrences of each value, sorted by count desc then value asc. */
-export function countValues(values: string[]): Array<{ value: string; count: number }> {
+export function countValues(
+  values: string[],
+): Array<{ value: string; count: number }> {
   const counts = new Map<string, number>();
   for (const v of values) {
     counts.set(v, (counts.get(v) ?? 0) + 1);
@@ -135,7 +141,7 @@ export async function computeNetworkMetrics(
   options: AnalyticsOptions = {},
 ): Promise<NetworkMetrics> {
   const { dormantDays, activeDays, now } = resolveAnalyticsOptions(options);
-  const rows = await projectContacts(conn);
+  const rows = await projectContacts(conn, options.scope);
 
   const activeCutoff = daysAgoIso(now, activeDays);
   const dormantCutoff = daysAgoIso(now, dormantDays);
@@ -229,7 +235,9 @@ export interface NetworkScoreInputs {
  * Pure — the caller supplies the numbers so the score is trivially testable
  * and identical on every surface.
  */
-export function computeNetworkScore(inputs: NetworkScoreInputs): ScoreBreakdown {
+export function computeNetworkScore(
+  inputs: NetworkScoreInputs,
+): ScoreBreakdown {
   const sizeValue = Math.min(100, (inputs.totalContacts / SIZE_TARGET) * 100);
   const activityValue = Math.min(100, inputs.activeRate * 100);
   const diversityValue = Math.min(
@@ -242,8 +250,16 @@ export function computeNetworkScore(inputs: NetworkScoreInputs): ScoreBreakdown 
   );
 
   const factors: ScoreFactor[] = [
-    { key: "activity", value: round1(activityValue), weight: SCORE_WEIGHTS.activity },
-    { key: "diversity", value: round1(diversityValue), weight: SCORE_WEIGHTS.diversity },
+    {
+      key: "activity",
+      value: round1(activityValue),
+      weight: SCORE_WEIGHTS.activity,
+    },
+    {
+      key: "diversity",
+      value: round1(diversityValue),
+      weight: SCORE_WEIGHTS.diversity,
+    },
     { key: "size", value: round1(sizeValue), weight: SCORE_WEIGHTS.size },
     { key: "growth", value: round1(growthValue), weight: SCORE_WEIGHTS.growth },
   ];

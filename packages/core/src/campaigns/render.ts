@@ -7,19 +7,30 @@
 // interaction through the CRM module (so scoring, stats, and analytics stay
 // single-sourced), and schedules the next drip step as advice.
 
-import { and, eq, gte, isNotNull, lt, sql } from 'drizzle-orm';
-import type { SqliteConn, PgConn } from '@netpro/db';
-import { writeActivityLog } from '../crm/activity';
-import { logInteraction } from '../crm/interactions';
-import { CrmError, resolveNow, startOfUtcDay, DAY_MS, type CrmOptions } from '../crm/types';
-import { getCampaign, parseJsonColumn, refreshCampaignStats } from './repository';
-import { contactToTemplateVars, renderMessage } from './template';
+import { and, eq, gte, isNotNull, lt, sql } from "drizzle-orm";
+import type { SqliteConn, PgConn } from "@netpro/db";
+import { writeActivityLog } from "../crm/activity";
+import { logInteraction } from "../crm/interactions";
+import {
+  CrmError,
+  resolveNow,
+  startOfUtcDay,
+  DAY_MS,
+  type CrmOptions,
+} from "../crm/types";
+import { workspacePredicate, type WorkspaceScope } from "../workspaces/scope";
+import {
+  getCampaign,
+  parseJsonColumn,
+  refreshCampaignStats,
+} from "./repository";
+import { contactToTemplateVars, renderMessage } from "./template";
 import {
   campaignSequence,
   type Campaign,
   type MessageTemplate,
   type RecipientStatus,
-} from './types';
+} from "./types";
 
 export interface RenderedRecipient {
   id: string;
@@ -74,11 +85,12 @@ interface RecipientJoinRow {
 async function selectRecipientRows(
   conn: SqliteConn | PgConn,
   campaignId: string,
-  recipientId?: string
+  recipientId?: string,
+  scope?: WorkspaceScope,
 ): Promise<RecipientJoinRow[]> {
   // Drizzle's typed builders need dialect-narrowed tables; the query itself
   // is one portable join (recipient → contact).
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     const r = conn.schema.campaignRecipients;
     const c = conn.schema.contacts;
     const rows = await conn.db
@@ -104,7 +116,14 @@ async function selectRecipientRows(
       })
       .from(r)
       .innerJoin(c, eq(r.contactId, c.id))
-      .where(recipientId ? and(eq(r.campaignId, campaignId), eq(r.id, recipientId)) : eq(r.campaignId, campaignId))
+      .where(
+        and(
+          recipientId
+            ? and(eq(r.campaignId, campaignId), eq(r.id, recipientId))
+            : eq(r.campaignId, campaignId),
+          workspacePredicate(scope, r.workspaceId),
+        ),
+      )
       .orderBy(sql`${r.id} ASC`);
     return rows as RecipientJoinRow[];
   }
@@ -133,20 +152,27 @@ async function selectRecipientRows(
     })
     .from(r)
     .innerJoin(c, eq(r.contactId, c.id))
-    .where(recipientId ? and(eq(r.campaignId, campaignId), eq(r.id, recipientId)) : eq(r.campaignId, campaignId))
+    .where(
+      and(
+        recipientId
+          ? and(eq(r.campaignId, campaignId), eq(r.id, recipientId))
+          : eq(r.campaignId, campaignId),
+        workspacePredicate(scope, r.workspaceId),
+      ),
+    )
     .orderBy(sql`${r.id} ASC`);
   return rows as RecipientJoinRow[];
 }
 
 function toRenderedRecipient(
   row: RecipientJoinRow,
-  sequence: MessageTemplate[]
+  sequence: MessageTemplate[],
 ): RenderedRecipient {
   const status: RecipientStatus = (
-    ['pending', 'scheduled', 'sent', 'replied', 'skipped'] as RecipientStatus[]
+    ["pending", "scheduled", "sent", "replied", "skipped"] as RecipientStatus[]
   ).includes(row.status as RecipientStatus)
     ? (row.status as RecipientStatus)
-    : 'pending';
+    : "pending";
   const currentStep = Math.max(row.currentStep ?? 0, 0);
   const vars = contactToTemplateVars(
     {
@@ -160,12 +186,12 @@ function toRenderedRecipient(
       location: row.location,
       industry: row.industry,
     },
-    parseJsonColumn<Record<string, unknown> | null>(row.personalizedVars, null)
+    parseJsonColumn<Record<string, unknown> | null>(row.personalizedVars, null),
   );
 
   let draft: MessageTemplate | null = null;
   if (
-    (status === 'pending' || status === 'scheduled') &&
+    (status === "pending" || status === "scheduled") &&
     currentStep < sequence.length &&
     row.contactDeletedAt === null
   ) {
@@ -193,17 +219,24 @@ function toRenderedRecipient(
 export async function countSentToday(
   conn: SqliteConn | PgConn,
   campaignId: string,
-  now: Date
+  now: Date,
+  scope?: WorkspaceScope,
 ): Promise<number> {
   const fromIso = startOfUtcDay(now).toISOString();
   const toIso = new Date(startOfUtcDay(now).getTime() + DAY_MS).toISOString();
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     const r = conn.schema.campaignRecipients;
     const rows = await conn.db
       .select({ n: sql<number>`count(*)` })
       .from(r)
       .where(
-        and(eq(r.campaignId, campaignId), isNotNull(r.sentAt), gte(r.sentAt, fromIso), lt(r.sentAt, toIso))
+        and(
+          eq(r.campaignId, campaignId),
+          isNotNull(r.sentAt),
+          gte(r.sentAt, fromIso),
+          lt(r.sentAt, toIso),
+          workspacePredicate(scope, r.workspaceId),
+        ),
       );
     return Number(rows[0]?.n ?? 0);
   }
@@ -212,7 +245,13 @@ export async function countSentToday(
     .select({ n: sql<number>`count(*)` })
     .from(r)
     .where(
-      and(eq(r.campaignId, campaignId), isNotNull(r.sentAt), gte(r.sentAt, fromIso), lt(r.sentAt, toIso))
+      and(
+        eq(r.campaignId, campaignId),
+        isNotNull(r.sentAt),
+        gte(r.sentAt, fromIso),
+        lt(r.sentAt, toIso),
+        workspacePredicate(scope, r.workspaceId),
+      ),
     );
   return Number(rows[0]?.n ?? 0);
 }
@@ -228,19 +267,26 @@ export interface RenderCampaignOptions extends CrmOptions {
 export async function renderCampaign(
   conn: SqliteConn | PgConn,
   campaignId: string,
-  opts: RenderCampaignOptions = {}
+  opts: RenderCampaignOptions = {},
+  scope?: WorkspaceScope,
 ): Promise<CampaignRender | null> {
   const now = resolveNow(opts);
-  const campaign = await getCampaign(conn, campaignId);
+  const campaign = await getCampaign(conn, campaignId, scope);
   if (!campaign) return null;
 
   const sequence = campaignSequence(campaign);
-  const rows = await selectRecipientRows(conn, campaign.id);
+  const rows = await selectRecipientRows(conn, campaign.id, undefined, scope);
   const recipients = rows
     .map((row) => toRenderedRecipient(row, sequence))
-    .slice(0, Math.min(Math.max(opts.limit ?? Number.MAX_SAFE_INTEGER, 1), Number.MAX_SAFE_INTEGER));
+    .slice(
+      0,
+      Math.min(
+        Math.max(opts.limit ?? Number.MAX_SAFE_INTEGER, 1),
+        Number.MAX_SAFE_INTEGER,
+      ),
+    );
 
-  const sentToday = await countSentToday(conn, campaign.id, now);
+  const sentToday = await countSentToday(conn, campaign.id, now, scope);
   return {
     campaign,
     recipients,
@@ -253,9 +299,10 @@ export async function renderCampaign(
 async function selectRecipientRow(
   conn: SqliteConn | PgConn,
   campaignId: string,
-  recipientId: string
+  recipientId: string,
+  scope?: WorkspaceScope,
 ): Promise<RecipientJoinRow | null> {
-  const rows = await selectRecipientRows(conn, campaignId, recipientId);
+  const rows = await selectRecipientRows(conn, campaignId, recipientId, scope);
   return rows[0] ?? null;
 }
 
@@ -284,55 +331,63 @@ export async function markRecipientSent(
   conn: SqliteConn | PgConn,
   campaignId: string,
   recipientId: string,
-  opts: MarkSentOptions = {}
+  opts: MarkSentOptions = {},
+  scope?: WorkspaceScope,
 ): Promise<MarkSentResult> {
   const now = resolveNow(opts);
-  const campaign = await getCampaign(conn, campaignId);
-  if (!campaign) throw new CrmError('not_found', `No campaign with id "${campaignId}".`);
+  const campaign = await getCampaign(conn, campaignId, scope);
+  if (!campaign)
+    throw new CrmError("not_found", `No campaign with id "${campaignId}".`);
 
-  const row = await selectRecipientRow(conn, campaignId, recipientId);
+  const row = await selectRecipientRow(conn, campaignId, recipientId, scope);
   if (!row) {
     throw new CrmError(
-      'not_found',
-      `Recipient "${recipientId}" is not part of campaign "${campaign.name}".`
+      "not_found",
+      `Recipient "${recipientId}" is not part of campaign "${campaign.name}".`,
     );
   }
   if (row.contactDeletedAt !== null) {
     throw new CrmError(
-      'conflict',
-      `${row.fullName} was deleted — skip this recipient instead of sending.`
+      "conflict",
+      `${row.fullName} was deleted — skip this recipient instead of sending.`,
     );
   }
-  if (campaign.status !== 'active') {
+  if (campaign.status !== "active") {
     throw new CrmError(
-      'conflict',
-      `Campaign "${campaign.name}" is ${campaign.status} — activate it before recording sends.`
+      "conflict",
+      `Campaign "${campaign.name}" is ${campaign.status} — activate it before recording sends.`,
     );
   }
 
-  const status = (row.status ?? 'pending') as RecipientStatus;
-  if (status !== 'pending' && status !== 'scheduled') {
+  const status = (row.status ?? "pending") as RecipientStatus;
+  if (status !== "pending" && status !== "scheduled") {
     const hint =
-      status === 'replied'
-        ? 'They already replied — the sequence is over.'
-        : status === 'skipped'
-          ? 'This recipient was skipped.'
-          : 'The whole sequence was already sent.';
-    throw new CrmError('conflict', `Recipient "${row.fullName}" is ${status}. ${hint}`);
+      status === "replied"
+        ? "They already replied — the sequence is over."
+        : status === "skipped"
+          ? "This recipient was skipped."
+          : "The whole sequence was already sent.";
+    throw new CrmError(
+      "conflict",
+      `Recipient "${row.fullName}" is ${status}. ${hint}`,
+    );
   }
 
   const sequence = campaignSequence(campaign);
   const currentStep = Math.max(row.currentStep ?? 0, 0);
   if (currentStep >= sequence.length) {
-    throw new CrmError('conflict', `Recipient "${row.fullName}" has finished the sequence.`);
+    throw new CrmError(
+      "conflict",
+      `Recipient "${row.fullName}" has finished the sequence.`,
+    );
   }
 
-  const sentToday = await countSentToday(conn, campaignId, now);
+  const sentToday = await countSentToday(conn, campaignId, now, scope);
   if (!opts.force && sentToday >= campaign.dailyLimit) {
     throw new CrmError(
-      'conflict',
+      "conflict",
       `Daily limit reached for "${campaign.name}" (${sentToday}/${campaign.dailyLimit} sent today). ` +
-        'Try again tomorrow, raise the limit, or override with force.'
+        "Try again tomorrow, raise the limit, or override with force.",
     );
   }
 
@@ -348,14 +403,18 @@ export async function markRecipientSent(
       location: row.location,
       industry: row.industry,
     },
-    parseJsonColumn<Record<string, unknown> | null>(row.personalizedVars, null)
+    parseJsonColumn<Record<string, unknown> | null>(row.personalizedVars, null),
   );
   const message = renderMessage(sequence[currentStep]!, vars);
 
   const nextStep = currentStep + 1;
   const finished = nextStep >= sequence.length;
-  const scheduledAt = finished ? null : new Date(now.getTime() + campaign.steps[nextStep - 1]!.delayDays * DAY_MS).toISOString();
-  const nextStatus: RecipientStatus = finished ? 'sent' : 'scheduled';
+  const scheduledAt = finished
+    ? null
+    : new Date(
+        now.getTime() + campaign.steps[nextStep - 1]!.delayDays * DAY_MS,
+      ).toISOString();
+  const nextStatus: RecipientStatus = finished ? "sent" : "scheduled";
 
   const updates = {
     status: nextStatus,
@@ -364,7 +423,7 @@ export async function markRecipientSent(
     scheduledAt,
     errorMessage: null,
   };
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     await conn.db
       .update(conn.schema.campaignRecipients)
       .set(updates)
@@ -382,30 +441,40 @@ export async function markRecipientSent(
     conn,
     {
       contactId: row.contactId,
-      type: 'email_sent',
-      direction: 'outbound',
-      channel: 'email',
+      type: "email_sent",
+      direction: "outbound",
+      channel: "email",
       subject: message.subject.slice(0, 200),
       content: message.body,
       campaignId: campaign.id,
       occurredAt: now,
     },
-    { now }
+    { now },
+    scope,
   );
 
-  await refreshCampaignStats(conn, campaignId, now);
-  await writeActivityLog(conn, {
-    action: 'campaign.message_sent',
-    entityType: 'campaign',
-    entityId: campaignId,
-    metadata: { recipientId: row.id, contactId: row.contactId, step: currentStep, interactionId: interaction.id },
-  });
+  await refreshCampaignStats(conn, campaignId, now, scope);
+  await writeActivityLog(
+    conn,
+    {
+      action: "campaign.message_sent",
+      entityType: "campaign",
+      entityId: campaignId,
+      metadata: {
+        recipientId: row.id,
+        contactId: row.contactId,
+        step: currentStep,
+        interactionId: interaction.id,
+      },
+    },
+    scope,
+  );
 
   const updatedRow: RecipientJoinRow = { ...row, ...updates };
   return {
     recipient: toRenderedRecipient(updatedRow, sequence),
     interactionId: interaction.id,
-    campaign: (await getCampaign(conn, campaignId))!,
+    campaign: (await getCampaign(conn, campaignId, scope))!,
   };
 }
 
@@ -425,34 +494,36 @@ export async function markRecipientReplied(
   conn: SqliteConn | PgConn,
   campaignId: string,
   recipientId: string,
-  opts: CrmOptions = {}
+  opts: CrmOptions = {},
+  scope?: WorkspaceScope,
 ): Promise<MarkActionResult> {
   const now = resolveNow(opts);
-  const campaign = await getCampaign(conn, campaignId);
-  if (!campaign) throw new CrmError('not_found', `No campaign with id "${campaignId}".`);
-  const row = await selectRecipientRow(conn, campaignId, recipientId);
+  const campaign = await getCampaign(conn, campaignId, scope);
+  if (!campaign)
+    throw new CrmError("not_found", `No campaign with id "${campaignId}".`);
+  const row = await selectRecipientRow(conn, campaignId, recipientId, scope);
   if (!row) {
     throw new CrmError(
-      'not_found',
-      `Recipient "${recipientId}" is not part of campaign "${campaign.name}".`
+      "not_found",
+      `Recipient "${recipientId}" is not part of campaign "${campaign.name}".`,
     );
   }
-  const status = (row.status ?? 'pending') as RecipientStatus;
-  if (status !== 'sent' && status !== 'scheduled') {
+  const status = (row.status ?? "pending") as RecipientStatus;
+  if (status !== "sent" && status !== "scheduled") {
     throw new CrmError(
-      'conflict',
-      status === 'replied'
+      "conflict",
+      status === "replied"
         ? `A reply from "${row.fullName}" is already recorded.`
-        : `Recipient "${row.fullName}" is ${status} — replies can only be recorded after a send.`
+        : `Recipient "${row.fullName}" is ${status} — replies can only be recorded after a send.`,
     );
   }
 
   const updates = {
-    status: 'replied' as const,
+    status: "replied" as const,
     repliedAt: now.toISOString(),
     scheduledAt: null,
   };
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     await conn.db
       .update(conn.schema.campaignRecipients)
       .set(updates)
@@ -467,7 +538,10 @@ export async function markRecipientReplied(
   // Subject of the last message sent, prefixed — best-effort context for the
   // inbound interaction (the actual reply text is not captured in v1.5).
   const sequence = campaignSequence(campaign);
-  const lastSentIndex = Math.min(Math.max((row.currentStep ?? 1) - 1, 0), sequence.length - 1);
+  const lastSentIndex = Math.min(
+    Math.max((row.currentStep ?? 1) - 1, 0),
+    sequence.length - 1,
+  );
   const vars = contactToTemplateVars({
     fullName: row.fullName,
     firstName: row.firstName,
@@ -485,27 +559,36 @@ export async function markRecipientReplied(
     conn,
     {
       contactId: row.contactId,
-      type: 'email_received',
-      direction: 'inbound',
-      channel: 'email',
+      type: "email_received",
+      direction: "inbound",
+      channel: "email",
       subject: `Re: ${lastSubject}`.slice(0, 200),
       campaignId: campaign.id,
       occurredAt: now,
     },
-    { now }
+    { now },
+    scope,
   );
 
-  await refreshCampaignStats(conn, campaignId, now);
-  await writeActivityLog(conn, {
-    action: 'campaign.replied',
-    entityType: 'campaign',
-    entityId: campaignId,
-    metadata: { recipientId: row.id, contactId: row.contactId, interactionId: interaction.id },
-  });
+  await refreshCampaignStats(conn, campaignId, now, scope);
+  await writeActivityLog(
+    conn,
+    {
+      action: "campaign.replied",
+      entityType: "campaign",
+      entityId: campaignId,
+      metadata: {
+        recipientId: row.id,
+        contactId: row.contactId,
+        interactionId: interaction.id,
+      },
+    },
+    scope,
+  );
 
   return {
     recipient: toRenderedRecipient({ ...row, ...updates }, sequence),
-    campaign: (await getCampaign(conn, campaignId))!,
+    campaign: (await getCampaign(conn, campaignId, scope))!,
     interactionId: interaction.id,
   };
 }
@@ -518,32 +601,34 @@ export async function markRecipientSkipped(
   conn: SqliteConn | PgConn,
   campaignId: string,
   recipientId: string,
-  opts: CrmOptions = {}
+  opts: CrmOptions = {},
+  scope?: WorkspaceScope,
 ): Promise<MarkActionResult> {
   const now = resolveNow(opts);
-  const campaign = await getCampaign(conn, campaignId);
-  if (!campaign) throw new CrmError('not_found', `No campaign with id "${campaignId}".`);
-  const row = await selectRecipientRow(conn, campaignId, recipientId);
+  const campaign = await getCampaign(conn, campaignId, scope);
+  if (!campaign)
+    throw new CrmError("not_found", `No campaign with id "${campaignId}".`);
+  const row = await selectRecipientRow(conn, campaignId, recipientId, scope);
   if (!row) {
     throw new CrmError(
-      'not_found',
-      `Recipient "${recipientId}" is not part of campaign "${campaign.name}".`
+      "not_found",
+      `Recipient "${recipientId}" is not part of campaign "${campaign.name}".`,
     );
   }
-  const status = (row.status ?? 'pending') as RecipientStatus;
-  if (status !== 'pending' && status !== 'scheduled') {
+  const status = (row.status ?? "pending") as RecipientStatus;
+  if (status !== "pending" && status !== "scheduled") {
     throw new CrmError(
-      'conflict',
-      `Recipient "${row.fullName}" is ${status} — only pending or scheduled recipients can be skipped.`
+      "conflict",
+      `Recipient "${row.fullName}" is ${status} — only pending or scheduled recipients can be skipped.`,
     );
   }
 
   const updates = {
-    status: 'skipped' as const,
+    status: "skipped" as const,
     scheduledAt: null,
     errorMessage: null,
   };
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     await conn.db
       .update(conn.schema.campaignRecipients)
       .set(updates)
@@ -555,17 +640,24 @@ export async function markRecipientSkipped(
       .where(eq(conn.schema.campaignRecipients.id, row.id));
   }
 
-  await refreshCampaignStats(conn, campaignId, now);
-  await writeActivityLog(conn, {
-    action: 'campaign.skipped',
-    entityType: 'campaign',
-    entityId: campaignId,
-    metadata: { recipientId: row.id, contactId: row.contactId },
-  });
+  await refreshCampaignStats(conn, campaignId, now, scope);
+  await writeActivityLog(
+    conn,
+    {
+      action: "campaign.skipped",
+      entityType: "campaign",
+      entityId: campaignId,
+      metadata: { recipientId: row.id, contactId: row.contactId },
+    },
+    scope,
+  );
 
   return {
-    recipient: toRenderedRecipient({ ...row, ...updates }, campaignSequence(campaign)),
-    campaign: (await getCampaign(conn, campaignId))!,
+    recipient: toRenderedRecipient(
+      { ...row, ...updates },
+      campaignSequence(campaign),
+    ),
+    campaign: (await getCampaign(conn, campaignId, scope))!,
     interactionId: null,
   };
 }
@@ -574,20 +666,33 @@ export async function markRecipientSkipped(
 export async function findRecipientByContact(
   conn: SqliteConn | PgConn,
   campaignId: string,
-  contactId: string
+  contactId: string,
+  scope?: WorkspaceScope,
 ): Promise<{ recipientId: string } | null> {
-  if (conn.dialect === 'sqlite') {
+  if (conn.dialect === "sqlite") {
     const r = conn.schema.campaignRecipients;
     const rows = await conn.db
       .select({ id: r.id })
       .from(r)
-      .where(and(eq(r.campaignId, campaignId), eq(r.contactId, contactId)));
+      .where(
+        and(
+          eq(r.campaignId, campaignId),
+          eq(r.contactId, contactId),
+          workspacePredicate(scope, r.workspaceId),
+        ),
+      );
     return rows[0] ? { recipientId: rows[0].id } : null;
   }
   const r = conn.schema.campaignRecipients;
   const rows = await conn.db
     .select({ id: r.id })
     .from(r)
-    .where(and(eq(r.campaignId, campaignId), eq(r.contactId, contactId)));
+    .where(
+      and(
+        eq(r.campaignId, campaignId),
+        eq(r.contactId, contactId),
+        workspacePredicate(scope, r.workspaceId),
+      ),
+    );
   return rows[0] ? { recipientId: rows[0].id } : null;
 }

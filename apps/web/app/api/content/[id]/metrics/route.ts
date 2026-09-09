@@ -7,6 +7,7 @@
 // Snapshots are append-only: the owner's numbers land as a new row, and the
 // latest snapshot is the one the totals are read from — so a correction is a
 // new snapshot with the right numbers, and history stays honest.
+import { requireScope } from "@/lib/authz";
 import { conn } from "@/lib/db";
 import {
   getContentMetricsSeries,
@@ -40,14 +41,16 @@ export async function GET(
 ): Promise<Response> {
   const sp = new URL(request.url).searchParams;
   try {
+    const scope = await requireScope();
     const { id } = await context.params;
-    const content = await resolveOptionalContent(conn, id);
+    const content = await resolveOptionalContent(conn, id, scope);
     if (!content)
       throw new CrmRequestError(404, "A content id or URL is required.");
     const days = sp.get("days");
     const series = await getContentMetricsSeries(conn, content.id, {
       days: days === null ? undefined : boundedInt(days, 90, 1, 365),
       limit: boundedInt(sp.get("limit"), 365, 1, 365),
+      scope,
     });
     return crmJson(series);
   } catch (error) {
@@ -60,22 +63,27 @@ export async function POST(
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   try {
+    const scope = await requireScope("member");
     const { id } = await context.params;
-    const content = await resolveOptionalContent(conn, id);
+    const content = await resolveOptionalContent(conn, id, scope);
     if (!content)
       throw new CrmRequestError(404, "A content id or URL is required.");
     const body = await readCrmJson(request);
-    const metric = await recordMetrics(conn, {
-      contentId: content.id,
-      views: metricCount(body.views, "views"),
-      likes: metricCount(body.likes, "likes"),
-      comments: metricCount(body.comments, "comments"),
-      shares: metricCount(body.shares, "shares"),
-      bookmarks: metricCount(body.bookmarks, "bookmarks"),
-      fetchedAt:
-        typeof body.fetchedAt === "string" ? body.fetchedAt : undefined,
-      source: typeof body.source === "string" ? body.source : "manual",
-    });
+    const metric = await recordMetrics(
+      conn,
+      {
+        contentId: content.id,
+        views: metricCount(body.views, "views"),
+        likes: metricCount(body.likes, "likes"),
+        comments: metricCount(body.comments, "comments"),
+        shares: metricCount(body.shares, "shares"),
+        bookmarks: metricCount(body.bookmarks, "bookmarks"),
+        fetchedAt:
+          typeof body.fetchedAt === "string" ? body.fetchedAt : undefined,
+        source: typeof body.source === "string" ? body.source : "manual",
+      },
+      { scope },
+    );
     return crmJson({ metric }, 201);
   } catch (error) {
     return crmErrorResponse(error);

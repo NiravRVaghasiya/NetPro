@@ -5,12 +5,12 @@
 // bodies, and mapping the core module's CrmError codes to HTTP statuses so
 // every CRM route answers validation, not-found, and conflict failures the
 // same way — with no storage internals echoed to the client.
-import { CrmError } from '@netpro/core/src/crm';
-import { GraphError } from '@netpro/core/src/graph';
-import { EventError } from '@netpro/core/src/events';
-import { ViewsError } from '@netpro/core/src/views';
-import { ContentError } from '@netpro/core/src/content';
-import { WorkspaceError } from '@netpro/core/src/workspaces';
+import { CrmError } from "@netpro/core/src/crm";
+import { GraphError } from "@netpro/core/src/graph";
+import { EventError } from "@netpro/core/src/events";
+import { ViewsError } from "@netpro/core/src/views";
+import { ContentError } from "@netpro/core/src/content";
+import { WorkspaceError } from "@netpro/core/src/workspaces";
 
 /** Interactions cap at 5000 chars of content; 16 KiB of JSON is generous headroom. */
 export const MAX_CRM_BODY_BYTES = 16 * 1024;
@@ -18,33 +18,41 @@ export const MAX_CRM_BODY_BYTES = 16 * 1024;
 export class CrmRequestError extends Error {
   constructor(
     readonly status: number,
-    message: string
+    message: string,
   ) {
     super(message);
-    this.name = 'CrmRequestError';
+    this.name = "CrmRequestError";
   }
 }
 
 export function crmJson(body: unknown, status = 200): Response {
   return Response.json(body, {
     status,
-    headers: { 'Cache-Control': 'private, no-store' },
+    headers: { "Cache-Control": "private, no-store" },
   });
 }
 
 /** Bound the actual stream, not only Content-Length (same discipline as the card API). */
-export async function readCrmJson(request: Request): Promise<Record<string, unknown>> {
+export async function readCrmJson(
+  request: Request,
+): Promise<Record<string, unknown>> {
   if (
-    request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !==
-    'application/json'
+    request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
+    "application/json"
   ) {
-    throw new CrmRequestError(415, 'Content-Type must be application/json.');
+    throw new CrmRequestError(415, "Content-Type must be application/json.");
   }
-  const length = request.headers.get('content-length');
-  if (length !== null && (!/^\d+$/.test(length) || Number(length) > MAX_CRM_BODY_BYTES)) {
-    throw new CrmRequestError(413, `Request body must be ${MAX_CRM_BODY_BYTES / 1024} KiB or smaller.`);
+  const length = request.headers.get("content-length");
+  if (
+    length !== null &&
+    (!/^\d+$/.test(length) || Number(length) > MAX_CRM_BODY_BYTES)
+  ) {
+    throw new CrmRequestError(
+      413,
+      `Request body must be ${MAX_CRM_BODY_BYTES / 1024} KiB or smaller.`,
+    );
   }
-  if (!request.body) throw new CrmRequestError(400, 'A JSON body is required.');
+  if (!request.body) throw new CrmRequestError(400, "A JSON body is required.");
 
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -58,7 +66,7 @@ export async function readCrmJson(request: Request): Promise<Record<string, unkn
         await reader.cancel();
         throw new CrmRequestError(
           413,
-          `Request body must be ${MAX_CRM_BODY_BYTES / 1024} KiB or smaller.`
+          `Request body must be ${MAX_CRM_BODY_BYTES / 1024} KiB or smaller.`,
         );
       }
       chunks.push(value);
@@ -72,10 +80,10 @@ export async function readCrmJson(request: Request): Promise<Record<string, unkn
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new CrmRequestError(400, 'Request body must be valid JSON.');
+    throw new CrmRequestError(400, "Request body must be valid JSON.");
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new CrmRequestError(400, 'Request body must be a JSON object.');
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new CrmRequestError(400, "Request body must be a JSON object.");
   }
   return parsed as Record<string, unknown>;
 }
@@ -93,12 +101,12 @@ function concat(chunks: Uint8Array[]): Uint8Array {
 
 /** The core modules share one error-code vocabulary — so should HTTP. */
 type ErrorCode =
-  | CrmError['code']
-  | GraphError['code']
-  | EventError['code']
-  | ViewsError['code']
-  | ContentError['code']
-  | WorkspaceError['code'];
+  | CrmError["code"]
+  | GraphError["code"]
+  | EventError["code"]
+  | ViewsError["code"]
+  | ContentError["code"]
+  | WorkspaceError["code"];
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
   invalid_input: 400,
@@ -118,6 +126,14 @@ export function crmErrorResponse(error: unknown): Response {
   if (error instanceof CrmRequestError) {
     return crmJson({ error: error.message }, error.status);
   }
+  // v3.0 Phase 2 — authz errors (`requireScope` throws plain Errors carrying
+  // a `status`) map to their HTTP status without leaking internals.
+  if (error instanceof Error) {
+    const status = (error as { status?: unknown }).status;
+    if (status === 401 || status === 403) {
+      return crmJson({ error: error.message }, status);
+    }
+  }
   if (
     error instanceof CrmError ||
     error instanceof GraphError ||
@@ -126,17 +142,28 @@ export function crmErrorResponse(error: unknown): Response {
     error instanceof ContentError ||
     error instanceof WorkspaceError
   ) {
-    return crmJson({ error: error.message, code: error.code }, STATUS_BY_CODE[error.code as ErrorCode]);
+    return crmJson(
+      { error: error.message, code: error.code },
+      STATUS_BY_CODE[error.code as ErrorCode],
+    );
   }
-  return crmJson({ error: 'Unable to process the request. Please try again.' }, 500);
+  return crmJson(
+    { error: "Unable to process the request. Please try again." },
+    500,
+  );
 }
 
 /** Parse `?limit=`/`?offset=` with sane bounds, tolerant of garbage. */
-export function paginationParams(searchParams: URLSearchParams): { limit: number; offset: number } {
-  const rawLimit = Number(searchParams.get('limit') ?? '25');
-  const rawOffset = Number(searchParams.get('offset') ?? '0');
+export function paginationParams(searchParams: URLSearchParams): {
+  limit: number;
+  offset: number;
+} {
+  const rawLimit = Number(searchParams.get("limit") ?? "25");
+  const rawOffset = Number(searchParams.get("offset") ?? "0");
   return {
-    limit: Number.isFinite(rawLimit) ? Math.min(Math.max(Math.floor(rawLimit), 1), 100) : 25,
+    limit: Number.isFinite(rawLimit)
+      ? Math.min(Math.max(Math.floor(rawLimit), 1), 100)
+      : 25,
     offset: Number.isFinite(rawOffset) ? Math.max(Math.floor(rawOffset), 0) : 0,
   };
 }

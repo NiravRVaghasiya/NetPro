@@ -1,7 +1,8 @@
-import { privateAiProvider } from '@/lib/provider-privacy';
-import { providerEnvironment, vaultErrorResponse } from '@/lib/vault';
-import { VaultError } from '@netpro/core/src/crypto';
+import { privateAiProvider } from "@/lib/provider-privacy";
+import { providerEnvironment, vaultErrorResponse } from "@/lib/vault";
+import { VaultError } from "@netpro/core/src/crypto";
 import { NextResponse } from "next/server";
+import { requireScope } from "@/lib/authz";
 import { conn } from "@/lib/db";
 import {
   composeOutreachMessage,
@@ -54,13 +55,14 @@ function str(value: unknown, max: number, field: string): string | undefined {
 
 /** Resolve personal/workspace vault credentials, falling back to server env. */
 async function credentialsFromEnv(explicitProvider?: string) {
-  const env = await providerEnvironment(['outreach.openai', 'outreach.anthropic']);
+  const env = await providerEnvironment([
+    "outreach.openai",
+    "outreach.anthropic",
+  ]);
   const provider = explicitProvider ?? env.AI_PROVIDER;
   const model =
     env.AI_MODEL ??
-    (provider === "anthropic"
-      ? env.ANTHROPIC_MODEL
-      : env.OPENAI_MODEL);
+    (provider === "anthropic" ? env.ANTHROPIC_MODEL : env.OPENAI_MODEL);
   return {
     provider,
     openaiKey: env.OPENAI_API_KEY ?? null,
@@ -82,6 +84,9 @@ export async function POST(request: Request) {
   }
 
   try {
+    // The contact recipient is resolved inside the caller's workspace only
+    // (v3.0 Phase 2) — an ad-hoc `recipient` object needs no DB row.
+    const scope = await requireScope();
     const tone =
       body.tone === undefined || body.tone === null
         ? "professional"
@@ -111,7 +116,7 @@ export async function POST(request: Request) {
     let recipient: RecipientInput;
     const contactId = str(body.contactId, 100, "contactId");
     if (contactId) {
-      const ref = await getContactById(conn, contactId);
+      const ref = await getContactById(conn, contactId, scope);
       if (!ref) {
         return NextResponse.json(
           { error: `No contact found with id "${contactId}"` },
@@ -148,11 +153,17 @@ export async function POST(request: Request) {
       model,
     });
 
-    const aiProvider = privateAiProvider(resolveAiProvider(await credentialsFromEnv(provider)));
+    const aiProvider = privateAiProvider(
+      resolveAiProvider(await credentialsFromEnv(provider)),
+    );
     const draft = await composeOutreachMessage(input, { provider: aiProvider });
     return NextResponse.json(draft);
   } catch (error) {
-    if (error instanceof VaultError || (typeof error === 'object' && error !== null && 'status' in error)) return vaultErrorResponse(error);
+    if (
+      error instanceof VaultError ||
+      (typeof error === "object" && error !== null && "status" in error)
+    )
+      return vaultErrorResponse(error);
     if (error instanceof AiProviderError) {
       if (error.code === "not_configured") {
         return NextResponse.json(

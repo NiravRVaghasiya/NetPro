@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { requireScope } from "@/lib/authz";
 import { conn } from "@/lib/db";
 import {
   CardRequestError,
@@ -6,6 +6,7 @@ import {
   readCardRequest,
 } from "@/lib/card-request";
 import { ProfileValidationError } from "@netpro/core/src/card/types";
+import type { WorkspaceScope } from "@netpro/core/src/workspaces";
 import {
   getProfileCardState,
   publishProfileCard,
@@ -23,13 +24,23 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-async function authorize(request?: Request): Promise<Response | null> {
-  // Auth.js validates the configured GitHub owner on every JWT read.
-  const session = await auth();
-  if (!session?.user?.id) return json({ error: "Unauthorized" }, 401);
+async function authorize(
+  request?: Request,
+): Promise<{ denied: Response | null; scope: WorkspaceScope | null }> {
+  // Auth.js validates the configured owner on every JWT read; membership
+  // resolves the workspace the card belongs to (v3.0 Phase 2).
+  let scope: WorkspaceScope;
+  try {
+    scope = await requireScope("member");
+  } catch {
+    return { denied: json({ error: "Unauthorized" }, 401), scope: null };
+  }
   if (request && !isSameOriginRequest(request))
-    return json({ error: "A same-origin request is required." }, 403);
-  return null;
+    return {
+      denied: json({ error: "A same-origin request is required." }, 403),
+      scope: null,
+    };
+  return { denied: null, scope };
 }
 
 function unavailable(): Response {
@@ -41,9 +52,9 @@ function unavailable(): Response {
 
 export async function GET(): Promise<Response> {
   try {
-    const denied = await authorize();
+    const { denied, scope } = await authorize();
     if (denied) return denied;
-    return json(await getProfileCardState(conn));
+    return json(await getProfileCardState(conn, scope!));
   } catch {
     return unavailable();
   }
@@ -51,7 +62,7 @@ export async function GET(): Promise<Response> {
 
 async function write(request: Request, publish: boolean): Promise<Response> {
   try {
-    const denied = await authorize(request);
+    const { denied, scope } = await authorize(request);
     if (denied) return denied;
     let profile;
     try {
@@ -64,8 +75,8 @@ async function write(request: Request, publish: boolean): Promise<Response> {
       return json({ error: "Unable to read the JSON profile." }, 400);
     }
     const state = publish
-      ? await publishProfileCard(conn, profile)
-      : await saveProfileDraft(conn, profile);
+      ? await publishProfileCard(conn, profile, new Date(), scope!)
+      : await saveProfileDraft(conn, profile, new Date(), scope!);
     return json(state);
   } catch {
     // Storage/auth failures never echo raw errors, SQL, connection strings, or data.
@@ -83,9 +94,9 @@ export async function POST(request: Request): Promise<Response> {
 
 export async function DELETE(request: Request): Promise<Response> {
   try {
-    const denied = await authorize(request);
+    const { denied, scope } = await authorize(request);
     if (denied) return denied;
-    return json(await unpublishProfileCard(conn));
+    return json(await unpublishProfileCard(conn, new Date(), scope!));
   } catch {
     return unavailable();
   }

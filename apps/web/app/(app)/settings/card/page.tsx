@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { requireScope } from "@/lib/authz";
 import { conn } from "@/lib/db";
 import { getProfileCardState } from "@netpro/core/src/card/repository";
 import { getViewsOverview } from "@netpro/core/src/views";
@@ -42,9 +43,10 @@ export default async function CardSettingsPage(props?: {
   const q = (await props?.searchParams) ?? {};
   const days = analyticsDays(q);
   const includeBots = one(q.bots) === "1";
+  const scope = await requireScope();
   const [state, overview] = await Promise.all([
-    getProfileCardState(conn),
-    getViewsOverview(conn, { days, limit: 10, includeBots }),
+    getProfileCardState(conn, scope),
+    getViewsOverview(conn, { days, limit: 10, includeBots }, scope),
   ]);
   return (
     <>
@@ -52,7 +54,11 @@ export default async function CardSettingsPage(props?: {
       {/* CardEditor owns its page header + max-width container; the analytics
           and tracking panels continue inside identically shaped containers. */}
       <div className="mx-auto max-w-6xl space-y-10 pt-10">
-        <CardViewsAnalytics overview={overview} days={days} includeBots={includeBots} />
+        <CardViewsAnalytics
+          overview={overview}
+          days={days}
+          includeBots={includeBots}
+        />
         <CardTrackingPanel origin={publicOrigin(h)} />
       </div>
     </>
