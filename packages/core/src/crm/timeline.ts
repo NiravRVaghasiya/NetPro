@@ -13,6 +13,7 @@ import {
 } from './interactions';
 import { listFollowUps, type FollowUpRow } from './follow-ups';
 import { resolveNow, type CrmOptions } from './types';
+import type { WorkspaceScope } from '../workspaces/scope';
 
 export interface ContactTimeline {
   contact: ContactRef;
@@ -30,19 +31,24 @@ export interface ContactTimelineOptions extends CrmOptions {
 export async function getContactTimeline(
   conn: SqliteConn | PgConn,
   contactId: string,
-  opts: ContactTimelineOptions = {}
+  opts: ContactTimelineOptions = {},
+  scope?: WorkspaceScope
 ): Promise<ContactTimeline | null> {
   const now = resolveNow(opts);
-  const contact = await getContactById(conn, contactId);
+  const contact = await getContactById(conn, contactId, scope);
   if (!contact) return null;
 
   const [stats, interactions, followUpSummary] = await Promise.all([
-    getContactStats(conn, contact.id),
-    listInteractions(conn, {
-      contactId: contact.id,
-      limit: opts.interactionsLimit ?? 50,
-    }),
-    listFollowUps(conn, { view: 'pending', contactId: contact.id, limit: 50, now }),
+    getContactStats(conn, contact.id, scope),
+    listInteractions(
+      conn,
+      {
+        contactId: contact.id,
+        limit: opts.interactionsLimit ?? 50,
+      },
+      scope,
+    ),
+    listFollowUps(conn, { view: 'pending', contactId: contact.id, limit: 50, now }, scope),
   ]);
 
   return {

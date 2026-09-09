@@ -4,6 +4,7 @@ import {
   listInteractions,
   logInteraction,
 } from '@netpro/core/src/crm';
+import { requireScope } from '@/lib/authz';
 import {
   crmErrorResponse,
   crmJson,
@@ -18,11 +19,12 @@ import {
 export async function GET(request: Request): Promise<Response> {
   const p = new URL(request.url).searchParams;
   try {
+    const scope = await requireScope();
     const { limit, offset } = paginationParams(p);
     const contactId = p.get('contactId')?.trim() || undefined;
     const [interactions, total] = await Promise.all([
-      listInteractions(conn, { contactId, limit, offset }),
-      countInteractions(conn, contactId),
+      listInteractions(conn, { contactId, limit, offset }, scope),
+      countInteractions(conn, contactId, scope),
     ]);
     return crmJson({ interactions, total, limit, offset });
   } catch (error) {
@@ -39,16 +41,22 @@ export async function GET(request: Request): Promise<Response> {
  */
 export async function POST(request: Request): Promise<Response> {
   try {
+    const scope = await requireScope();
     const body = await readCrmJson(request);
-    const result = await logInteraction(conn, {
-      contactId: String(body.contactId ?? ''),
-      type: String(body.type ?? ''),
-      direction: (body.direction as string | null | undefined) ?? undefined,
-      subject: (body.subject as string | null | undefined) ?? undefined,
-      content: (body.content as string | null | undefined) ?? undefined,
-      channel: (body.channel as string | null | undefined) ?? undefined,
-      occurredAt: (body.occurredAt as string | null | undefined) ?? undefined,
-    });
+    const result = await logInteraction(
+      conn,
+      {
+        contactId: String(body.contactId ?? ''),
+        type: String(body.type ?? ''),
+        direction: (body.direction as string | null | undefined) ?? undefined,
+        subject: (body.subject as string | null | undefined) ?? undefined,
+        content: (body.content as string | null | undefined) ?? undefined,
+        channel: (body.channel as string | null | undefined) ?? undefined,
+        occurredAt: (body.occurredAt as string | null | undefined) ?? undefined,
+      },
+      {},
+      scope,
+    );
     return crmJson(
       { interaction: result.interaction, stats: result.stats, contact: result.contact },
       201

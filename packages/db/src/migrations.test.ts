@@ -872,3 +872,30 @@ describe("workspaces migration (v3.0 phase 1)", () => {
     }
   });
 });
+
+describe("authorship migration (v3.0 phase 2)", () => {
+  it("adds created_by_user and author indexes to interactions and follow_ups", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: folder });
+      for (const table of ["interactions", "follow_ups"]) {
+        const cols = sqlite
+          .prepare(`PRAGMA table_info(${table})`)
+          .all()
+          .map((r) => (r as { name: string }).name);
+        expect(cols).toEqual(expect.arrayContaining(["created_by_user"]));
+      }
+      const idx = sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%_author'",
+        )
+        .all()
+        .map((r) => (r as { name: string }).name)
+        .sort();
+      expect(idx).toEqual(["idx_followups_author", "idx_interactions_author"]);
+    } finally {
+      sqlite.close();
+    }
+  });
+});

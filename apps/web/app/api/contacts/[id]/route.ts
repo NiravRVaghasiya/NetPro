@@ -1,4 +1,5 @@
 import { conn } from '@/lib/db';
+import { requireScope } from '@/lib/authz';
 import { getContactTimeline } from '@netpro/core/src/crm';
 import { crmErrorResponse, crmJson } from '@/lib/crm-request';
 
@@ -13,7 +14,8 @@ export async function GET(
 ): Promise<Response> {
   const { id } = await params;
   try {
-    const timeline = await getContactTimeline(conn, id);
+    const scope = await requireScope();
+    const timeline = await getContactTimeline(conn, id, {}, scope);
     if (!timeline) {
       return crmJson({ error: `No contact with id "${id}".`, code: 'not_found' }, 404);
     }

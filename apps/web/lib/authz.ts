@@ -5,7 +5,7 @@
 
 import { auth } from './auth';
 import { getMembershipForUser } from './workspaces';
-import type { WorkspaceRole } from '@netpro/core/src/workspaces';
+import type { WorkspaceRole, WorkspaceScope } from '@netpro/core/src/workspaces';
 import { canAtLeast } from '@netpro/core/src/workspaces';
 
 export interface AuthContext {
@@ -41,4 +41,14 @@ export async function requireMembership(minRole: WorkspaceRole = 'viewer'): Prom
     workspaceId: membership.workspaceId,
     role: membership.role,
   };
+}
+
+/**
+ * v3.0 Phase 2 — the workspace-principal a scoped core function needs. Every
+ * route that touches data passes the authenticated principal's scope down into
+ * the core query; a request never supplies its own workspace id.
+ */
+export async function requireScope(minRole: WorkspaceRole = 'viewer'): Promise<WorkspaceScope> {
+  const { userId, workspaceId, role } = await requireMembership(minRole);
+  return { userId, workspaceId, role };
 }

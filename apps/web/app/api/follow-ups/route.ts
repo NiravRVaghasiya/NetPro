@@ -1,4 +1,5 @@
 import { conn } from '@/lib/db';
+import { requireScope } from '@/lib/authz';
 import {
   createFollowUp,
   listFollowUps,
@@ -36,11 +37,16 @@ export async function GET(request: Request): Promise<Response> {
     if (!VIEWS.includes(viewParam as FollowUpView)) {
       throw new CrmRequestError(400, `Unknown view "${viewParam}". Expected one of: ${VIEWS.join(', ')}.`);
     }
-    const summary = await listFollowUps(conn, {
-      view: viewParam as FollowUpView,
-      contactId: p.get('contactId')?.trim() || undefined,
-      limit,
-    });
+    const scope = await requireScope();
+    const summary = await listFollowUps(
+      conn,
+      {
+        view: viewParam as FollowUpView,
+        contactId: p.get('contactId')?.trim() || undefined,
+        limit,
+      },
+      scope,
+    );
     return crmJson(summary);
   } catch (error) {
     return crmErrorResponse(error);
@@ -55,20 +61,26 @@ export async function GET(request: Request): Promise<Response> {
  */
 export async function POST(request: Request): Promise<Response> {
   try {
+    const scope = await requireScope();
     const body = await readCrmJson(request);
     const dueInMs = body.dueInMs;
-    const followUp = await createFollowUp(conn, {
-      contactId: String(body.contactId ?? ''),
-      dueAt: (body.dueAt as string | undefined) ?? undefined,
-      dueInMs:
-        typeof dueInMs === 'number' && Number.isFinite(dueInMs)
-          ? dueInMs
-          : dueInMs === undefined || dueInMs === null
-            ? undefined
-            : Number(dueInMs),
-      reason: (body.reason as string | undefined) ?? undefined,
-      recurrenceRule: (body.recurrenceRule as string | undefined) ?? undefined,
-    });
+    const followUp = await createFollowUp(
+      conn,
+      {
+        contactId: String(body.contactId ?? ''),
+        dueAt: (body.dueAt as string | undefined) ?? undefined,
+        dueInMs:
+          typeof dueInMs === 'number' && Number.isFinite(dueInMs)
+            ? dueInMs
+            : dueInMs === undefined || dueInMs === null
+              ? undefined
+              : Number(dueInMs),
+        reason: (body.reason as string | undefined) ?? undefined,
+        recurrenceRule: (body.recurrenceRule as string | undefined) ?? undefined,
+      },
+      {},
+      scope,
+    );
     return crmJson(followUp, 201);
   } catch (error) {
     return crmErrorResponse(error);

@@ -1,4 +1,5 @@
 import { conn } from '@/lib/db';
+import { requireScope } from '@/lib/authz';
 import {
   cancelFollowUp,
   completeFollowUp,
@@ -19,7 +20,8 @@ export async function GET(
 ): Promise<Response> {
   const { id } = await params;
   try {
-    const followUp = await getFollowUp(conn, id);
+    const scope = await requireScope();
+    const followUp = await getFollowUp(conn, id, scope);
     if (!followUp) {
       return crmJson({ error: `No follow-up with id "${id}".`, code: 'not_found' }, 404);
     }
@@ -41,22 +43,29 @@ export async function PATCH(
 ): Promise<Response> {
   const { id } = await params;
   try {
+    const scope = await requireScope();
     const body = await readCrmJson(request);
     const action = String(body.action ?? '');
 
     if (action === 'complete') {
-      return crmJson(await completeFollowUp(conn, id));
+      return crmJson(await completeFollowUp(conn, id, {}, scope));
     }
     if (action === 'cancel') {
-      return crmJson(await cancelFollowUp(conn, id));
+      return crmJson(await cancelFollowUp(conn, id, {}, scope));
     }
     if (action === 'snooze') {
       const forMs = body.forMs;
       return crmJson(
-        await snoozeFollowUp(conn, id, {
-          untilIso: (body.untilIso as string | undefined) ?? undefined,
-          forMs: typeof forMs === 'number' && Number.isFinite(forMs) ? forMs : undefined,
-        })
+        await snoozeFollowUp(
+          conn,
+          id,
+          {
+            untilIso: (body.untilIso as string | undefined) ?? undefined,
+            forMs: typeof forMs === 'number' && Number.isFinite(forMs) ? forMs : undefined,
+          },
+          {},
+          scope,
+        )
       );
     }
     throw new CrmRequestError(

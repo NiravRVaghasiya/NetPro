@@ -3,6 +3,7 @@
 
 export * from './types';
 export * from './tokens';
+export * from './scope';
 export * as repository from './repository';
 export * as service from './service';
 export {
