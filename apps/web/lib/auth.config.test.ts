@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authConfig } from "./auth.config";
 
@@ -11,6 +12,7 @@ beforeEach(() => vi.stubEnv("NETPRO_OWNER_GITHUB_ID", "12345"));
 const callbacks = authConfig.callbacks;
 const jwt = (input: Record<string, unknown>) =>
   callbacks.jwt(input as Parameters<typeof callbacks.jwt>[0]);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const signIn = (provider: string, id: string) =>
   callbacks.signIn({
     account: { provider, providerAccountId: id, type: "oauth" },
