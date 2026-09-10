@@ -15,6 +15,7 @@
 // thanks to the advisory lock. Any other migration failure fails the build.
 
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -22,6 +23,11 @@ import { dirname, resolve } from 'node:path';
 // directory (e.g. apps/web) rather than the repository root. All paths in
 // this script (workspace flags, migration binaries, turbo filters) assume
 // the repo root, so chdir there up front.
+//
+// `npm run vercel-build` is defined in *both* package.json files for exactly
+// this reason: Vercel prefers a `vercel-build` script over the framework
+// default, and it runs it from whichever directory it decided the app lives
+// in (repo root or apps/web). Both entry points land here.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 process.chdir(repoRoot);
 
@@ -35,6 +41,12 @@ function run(command, args, options = {}) {
   if (result.error) throw result.error;
   return result.status ?? 1;
 }
+
+// Prefer the turbo binary npm installed at the repo root; `npx turbo` would
+// silently fetch (and run) a different turbo from the registry if the local
+// one were ever missing — a slow failure that is hard to read in a log. If
+// turbo is genuinely absent, fall back to the plain workspace order below.
+const localTurbo = resolve(repoRoot, 'node_modules', '.bin', 'turbo');
 
 const dialect = process.env.DB_DIALECT ?? 'postgresql';
 const hasDatabase = Boolean(process.env.DATABASE_URL?.trim());
@@ -62,4 +74,21 @@ if (dialect === 'postgresql' && !hasDatabase) {
 }
 
 console.log('[vercel-build] Building the web application...');
-process.exit(run('npx', ['turbo', 'run', 'build', '--filter=@netpro/web']));
+if (existsSync(localTurbo)) {
+  process.exit(
+    run(process.execPath, [localTurbo, 'run', 'build', '--filter=@netpro/web'])
+  );
+}
+
+// No turbo (turbo is a root devDependency, so this means the install step
+// changed). Build the dependency chain by hand instead of failing: the
+// packages are consumed as source via next.config `transpilePackages`, so
+// their `build` is a typecheck that must pass before the web build runs.
+console.warn(
+  '[vercel-build] turbo not found at node_modules/.bin/turbo — building workspaces directly.'
+);
+for (const workspace of ['@netpro/core', '@netpro/db', '@netpro/config']) {
+  const status = run('npm', ['run', 'build', '-w', workspace, '--if-present']);
+  if (status !== 0) process.exit(status);
+}
+process.exit(run('npm', ['run', 'build', '-w', '@netpro/web']));

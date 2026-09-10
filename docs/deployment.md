@@ -75,6 +75,20 @@ then update the callback URL and `NEXTAUTH_URL`, then redeploy.
 set yet on the very first build, migration is skipped with a warning and the
 app migrates on first boot instead.
 
+Leave the Vercel project's **Root Directory** empty (the repository root):
+`installCommand` runs `npm ci --include dev`, which only works where
+`package-lock.json` lives. Vercel still finds the Next.js app in `apps/web` on
+its own.
+
+> **Why `vercel-build` is declared twice.** Vercel prefers a `vercel-build`
+> script over the framework's default build command, but it runs that command
+> from whichever directory it decided the app lives in — here `apps/web`,
+> not the repo root. Both `package.json` files therefore declare it (the root
+> one as `node scripts/vercel-build.mjs`, `apps/web` as
+> `node ../../scripts/vercel-build.mjs`) and both land in the same script,
+> which `chdir`s to the repo root before doing anything else. Removing either
+> one breaks the deploy with `Missing script: "vercel-build"`.
+
 ### 5. Verify
 
 ```bash
