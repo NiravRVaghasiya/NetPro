@@ -1,13 +1,18 @@
 import { createCipheriv, createDecipheriv, randomBytes, scrypt } from 'node:crypto';
 import { promisify } from 'node:util';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir, hostname } from 'node:os';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
+// Phase 3: secrets live in the same install directory as the database, so
+// NETPRO_HOME relocates them together. Imported from the dependency-free
+// local-layout module — pulling @netpro/db's index here would load the
+// better-sqlite3 native addon for every `netpro config` call.
+import { netproHome } from '@netpro/db/src/local';
 
 const scryptAsync = promisify(scrypt);
 
 function getConfigDir(): string {
-  const dir = join(homedir(), '.netpro');
+  const dir = netproHome();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return dir;
 }

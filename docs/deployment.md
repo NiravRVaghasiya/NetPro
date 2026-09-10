@@ -54,6 +54,12 @@ out to many instances, and each one opens its own connections.
 | `AI_PROVIDER`, `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Optional | AI outreach drafting (BYO key) |
 | `EMBEDDINGS_PROVIDER`, `EMBEDDINGS_API_KEY` | Optional | Semantic search arm — see [Search](#search) |
 
+Environment variables always win over `~/.netpro/config.toml` (where the
+local-first `netpro init` / `netpro serve` path stores its settings — see
+[local-first.md](local-first.md)). A container has no meaningful home
+directory config by default, so this table remains the source of truth for
+Docker deployments.
+
 `NETPRO_OWNER_GITHUB_ID` is the **only** access control. Get it wrong and either
 nobody can sign in (fails closed, safe) or the wrong account can. It is your
 numeric account ID, not your username and not the OAuth client ID.

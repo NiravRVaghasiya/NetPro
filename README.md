@@ -380,10 +380,26 @@ Deferred section.
 The [CHANGELOG](CHANGELOG.md) records what each phase shipped and the
 reasoning behind its design decisions.
 
+## Local-first quickstart
+
+Run the whole application on your machine — no Vercel, no cloud, no GitHub
+OAuth, no `DATABASE_URL`:
+
+```bash
+npm install && npm run build -w apps/cli
+node apps/cli/dist/index.js init     # creates ~/.netpro (config, SQLite db, logs, keys)
+node apps/cli/dist/index.js serve    # http://127.0.0.1:3777
+node apps/cli/dist/index.js status   # install, database, and server health
+```
+
+SQLite at `~/.netpro/netpro.db` is the default; PostgreSQL stays available
+for Docker/team deployments via `~/.netpro/config.toml` or environment. See
+[`docs/local-first.md`](docs/local-first.md).
+
 ## Structure
 
 - `apps/web` — Next.js app (App Router), Auth.js v5 with GitHub OAuth
-- `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|reindex|outreach|analyze|path|track|edge|campaign|export|card|migrate|skills|events|content`)
+- `apps/cli` — commander CLI (`netpro init|serve|status|config|import|enrich|search|reindex|outreach|analyze|path|track|edge|campaign|export|card|migrate|skills|events|content`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
 - `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths), the Phase 3 pathfinder surface (ranking, first-ask, per-contact graph position), the v2.0 skills taxonomy/gap analyzer, the Phase 6 event matcher (CSV import, attendee matching, recommendations), the v2.5 profile-view beacon + viewer analytics (privacy-hardened ingestion, windowed stats, timelines, known-visitor matches), the v2.5 content tracker data model (URL identity, CSV/feed import, metrics snapshots, mentions, provider interface), the v2.5 daily retention purge (90-day views / 365-day snapshots with latest-per-piece survival, at-most-once-per-24 h, audit-logged), and v3.0 Phase 2's workspace-scoped CRM engine (explicit `workspace_id` predicates threading an optional `WorkspaceScope`, authorship on interactions/follow-ups, and a cross-tenant scope-guard suite)
 - `packages/config` — shared ESLint and Tailwind configs

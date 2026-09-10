@@ -8,10 +8,25 @@ describe('CLI root program', () => {
     expect(program.version()).toBe('3.0.0');
   });
 
-  it('registers all twenty-one top-level commands (v3.0 Phase 1 adds team, Phase 5 adds plugin, Phase 7 adds webhook)', () => {
+  it('registers all twenty-three top-level commands (v3.0 Phase 1 adds team, Phase 5 adds plugin, Phase 7 adds webhook; local-first adds serve + status)', () => {
     const program = createProgram();
     const names = program.commands.map((c) => c.name());
-    expect(names).toEqual(['init', 'config', 'import', 'enrich', 'search', 'reindex', 'outreach', 'analyze', 'path', 'track', 'edge', 'campaign', 'export', 'card', 'migrate', 'skills', 'events', 'content', 'team', 'plugin', 'webhook']);
+    expect(names).toEqual(['init', 'serve', 'status', 'config', 'import', 'enrich', 'search', 'reindex', 'outreach', 'analyze', 'path', 'track', 'edge', 'campaign', 'export', 'card', 'migrate', 'skills', 'events', 'content', 'team', 'plugin', 'webhook']);
+  });
+
+  it('wires netpro serve with host/port options (local-first Phase 2)', () => {
+    const program = createProgram();
+    const serve = program.commands.find((c) => c.name() === 'serve');
+    expect(serve).toBeDefined();
+    const names = (serve as import('commander').Command).options.map((o) => o.long);
+    expect(names).toEqual(['--host', '--port']);
+  });
+
+  it('wires netpro status with a --json flag (local-first Phase 2)', () => {
+    const program = createProgram();
+    const status = program.commands.find((c) => c.name() === 'status');
+    expect(status).toBeDefined();
+    expect((status as import('commander').Command).options.map((o) => o.long)).toEqual(['--json']);
   });
 
   it('registers the content subcommands (v2.5 Phase 5)', () => {
