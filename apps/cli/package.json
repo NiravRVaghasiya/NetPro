@@ -8,7 +8,7 @@
     "netpro": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "node ../../node_modules/tsup/dist/cli-default.js",
     "dev": "tsx src/index.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -17,16 +17,11 @@
   "engines": {
     "node": ">=20"
   },
-  "devDependencies": {
-    "tsup": "^8.5.1",
-    "tsx": "^4.23.13",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.11"
-  },
   "dependencies": {
     "@netpro/config": "^3.0.0",
     "@netpro/core": "^3.0.0",
     "@netpro/db": "^3.0.0",
-    "commander": "^14.0.3"
+    "commander": "^14.0.3",
+    "tsup": "^8.5.1"
   }
 }
