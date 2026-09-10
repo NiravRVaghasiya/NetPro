@@ -1,8 +1,8 @@
 {
   "name": "netpro",
   "private": true,
-  "version": "2.5.0",
-  "description": "NetPro \u2014 open source LinkedIn Premium alternative",
+  "version": "3.0.0",
+  "description": "NetPro — open source LinkedIn Premium alternative",
   "license": "MIT",
   "engines": {
     "node": ">=20"
