@@ -96,7 +96,7 @@ export function extractViewerIp(headers: BeaconHeaders): string | null {
 const GEO_FIELD_MAX_LENGTH = 64;
 
 /**
- * Geo from platform headers only (Vercel `x-vercel-ip-country/city`,
+ * Geo from platform headers only (Cloudflare `cf-ipcountry`.
  * Cloudflare `cf-ipcountry`). NetPro never runs a geo lookup itself —
  * headers are the only source, per the plan.
  */
@@ -105,8 +105,8 @@ export function extractViewerGeo(headers: BeaconHeaders): {
   city: string | null;
 } {
   const country =
-    headers.get("x-vercel-ip-country") ?? headers.get("cf-ipcountry") ?? null;
-  const city = headers.get("x-vercel-ip-city") ?? null;
+    headers.get("cf-ipcountry") ?? null;
+  const city = headers.get("cf-ip-city") ?? null;
   const cap = (value: string | null): string | null => {
     if (!value) return null;
     const trimmed = value.trim();

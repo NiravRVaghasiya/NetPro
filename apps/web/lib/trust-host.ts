@@ -11,7 +11,7 @@
 // Auth.js v5 derives `trustHost` from the environment like this
 // (@auth/core/lib/utils/env.js):
 //
-//   config.trustHost ??= !!(AUTH_URL ?? AUTH_TRUST_HOST ?? VERCEL ?? CF_PAGES
+//   config.trustHost ??= !!(AUTH_URL ?? AUTH_TRUST_HOST ?? CF_PAGES
 //                           ?? NODE_ENV !== "production")
 //
 // Note what is absent: **NEXTAUTH_URL**. next-auth reads NEXTAUTH_URL for the

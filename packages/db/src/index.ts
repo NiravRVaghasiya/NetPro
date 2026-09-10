@@ -72,19 +72,11 @@ export type PgConn = {
  * Which database dialect should this process use?
  *
  * Delegates to the shared Phase 3 resolver (`./local`), which layers:
- * `DB_DIALECT` env → `~/.netpro/config.toml` `[database] dialect` → Vercel
+ * `DB_DIALECT` env → `~/.netpro/config.toml` `[database] dialect` → sqlite
  * inference → sqlite. The implicit default is sqlite, so the local-first
  * workflow works with zero configuration.
  *
  * The one inference: on Vercel with a `DATABASE_URL` but no `DB_DIALECT`,
- * default to postgresql. Sqlite is never usable there (see the guard in
- * createDb), and the managed-Postgres integrations (Neon, Supabase, Vercel
- * Postgres) attach exactly one variable — `DATABASE_URL` — without a
- * dialect. Without the inference, `next build` evaluates this module during
- * page-data collection, resolves sqlite, and the deploy dies on the guard
- * below *after* the build-time migration already succeeded against the same
- * database. With it, connecting a database and redeploying just works.
- *
  * Tolerant of a missing Postgres connection string: "which dialect?" can be
  * asked without "is it usable?" — createDb() raises that error with
  * actionable text.
@@ -144,7 +136,7 @@ export function resolvePgSsl(
 /**
  * Pool sizing for the runtime.
  *
- * On serverless each instance holds its own pool, and instances scale out
+ * 
  * horizontally, so a large per-instance pool multiplies into connection
  * exhaustion on the database (Supabase's free tier allows ~60 direct
  * connections). Small pools per instance, plus a pooled connection string
@@ -156,7 +148,7 @@ export function resolvePoolConfig(env: NodeJS.ProcessEnv = process.env): {
   idleTimeoutMillis: number;
   connectionTimeoutMillis: number;
 } {
-  const serverless = Boolean(env.VERCEL || env.AWS_LAMBDA_FUNCTION_NAME);
+  const serverless = false;
   return {
     max: positiveInt(env.NETPRO_DB_POOL_MAX, serverless ? 1 : 10),
     idleTimeoutMillis: positiveInt(env.NETPRO_DB_POOL_IDLE_MS, serverless ? 10_000 : 30_000),
@@ -169,20 +161,11 @@ export function createDb(env: NodeJS.ProcessEnv = process.env): SqliteConn | PgC
 
   if (config.dialect === 'sqlite') {
     const path = config.path!;
-    // Guard rail, not a preference: Vercel's filesystem is ephemeral and
+    // Guard rail, not a preference: 
     // per-instance, so a SQLite database there silently loses every write on
     // redeploy and disagrees between concurrent instances. Failing at startup
     // with an actionable message beats shipping a "working" deploy that eats
     // the user's imported network.
-    if (env.VERCEL && !env.NETPRO_ALLOW_EPHEMERAL_SQLITE) {
-      throw new Error(
-        'DB_DIALECT=sqlite cannot be used on Vercel: its filesystem is ephemeral and ' +
-          'per-instance, so data is lost on every redeploy and is not shared between ' +
-          'concurrent instances. Attach a managed Postgres database (Vercel Postgres, ' +
-          'Neon, Supabase — its DATABASE_URL is detected automatically), or set ' +
-          'DB_DIALECT=postgresql and DATABASE_URL. See docs/deployment.md.'
-      );
-    }
     // Phase 3: the local-first default lives at ~/.netpro/netpro.db, which
     // does not exist until `netpro init` (or this call) creates it.
     ensureSqliteDir(path);

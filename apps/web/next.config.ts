@@ -59,7 +59,7 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   // Arena's HTTPS reverse-proxy previews (development only).
   allowedDevOrigins: ["*.e2b.app"],
-  // Standalone output powers the Docker image. Vercel ignores it and uses its
+  // Standalone output powers the Docker image. It is ignored by non-Vercel platforms
   // own serverless build, so a single setting serves both targets.
   output: "standalone",
   // Never ship a build whose types are broken. (There is no `eslint` key in

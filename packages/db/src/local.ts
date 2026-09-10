@@ -390,9 +390,9 @@ export function resolveDialectStep(
   if (typeof fileDialect === 'string') {
     return { dialect: parseDialect(fileDialect, configTomlPath(env)), source: 'config' };
   }
-  if (env.VERCEL && env.DATABASE_URL?.trim()) {
-    // See resolveDialect(): managed-Postgres integrations attach exactly
-    // DATABASE_URL without a dialect. Phase 4 removes this inference.
+  if (env.DATABASE_URL?.trim() && !env.DB_DIALECT) {
+    // // Managed-Postgres integrations attach
+    // DATABASE_URL without a dialect. Explicit DB_DIALECT is required for sqlite.
     return { dialect: 'postgresql', source: 'inferred' };
   }
   return { dialect: 'sqlite', source: 'default' };
@@ -404,8 +404,8 @@ export function resolveDialectStep(
  * Dialect precedence:
  *   1. `DB_DIALECT` environment variable
  *   2. `[database] dialect` in `~/.netpro/config.toml`
- *   3. Vercel inference (pre-Phase 4 behaviour): `VERCEL` + `DATABASE_URL`
- *      means postgresql — SQLite is never usable on an ephemeral filesystem
+ `*   3. SQLite (the local-first default)
+ *   4. PostgreSQL when DATABASE_URL is set without DB_DIALECT
  *   4. SQLite (the local-first default)
  *
  * SQLite path precedence: `DB_PATH` env → config `[database] path`

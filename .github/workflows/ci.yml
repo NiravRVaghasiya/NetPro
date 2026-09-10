@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         # 20 is the workspace-wide `engines` floor; 22 is what contributors and
-        # Vercel actually run. A native addon (better-sqlite3) and Next.js 16
+        # Run on runner (no Vercel required). A native addon (better-sqlite3) and Next.js 16
         # make the difference worth covering.
         node-version: ['20', '22']
     steps:
@@ -66,7 +66,7 @@ jobs:
   postgres:
     # Phases 1–5 shipped Postgres support that compiled but was never executed
     # against a real server. That gap hid a migration race that failed 5 of 6
-    # concurrent cold starts — precisely what a Vercel deploy does. This job
+    # concurrent cold starts — for reference only. This job
     # exists so that can never regress unnoticed again.
     name: PostgreSQL integration
     runs-on: ubuntu-latest

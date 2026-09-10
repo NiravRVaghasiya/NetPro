@@ -17,7 +17,7 @@ export interface MigrateResult {
  * `netpro migrate` — apply pending migrations as an explicit, observable step.
  *
  * Phase 6 exists partly because migration-on-startup is the wrong model for
- * serverless: on Vercel a deploy cold-starts many instances at once and each
+ * serverless: many instances cold-start concurrently
  * one races to run the same DDL. The recommended production setup is to run
  * this command once from the build step and set NETPRO_AUTO_MIGRATE=false so
  * request paths never attempt DDL at all. It is also the right tool for a

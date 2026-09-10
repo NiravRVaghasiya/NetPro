@@ -5,12 +5,12 @@
 //
 // PHASE 6 — the migration logic itself moved to @netpro/db's runMigrations(),
 // shared with the CLI and the `netpro-migrate` deploy command. That runner
-// takes a Postgres advisory lock, which is what makes a Vercel deploy safe:
+// takes a Postgres advisory lock, which is safe for long-running processes:
 // many instances cold-start at once and would otherwise race to run the same
 // DDL (measured: 5 of 6 concurrent migrators failed). See
 // packages/db/src/migrate.ts.
 //
-// On Vercel the recommended setup is to run migrations once at build time
+// On a serverless host migrations are recommended once at build time
 // (`npm run db:migrate`) and set NETPRO_AUTO_MIGRATE=false, so request paths
 // never attempt DDL at all. This hook stays the default for Docker and local
 // development, where there is no separate deploy step.
