@@ -16,8 +16,90 @@ This package is the application backend. The Web UI (`apps/web`) is a client.
   defaults, actionable listen errors, graceful SIGINT/SIGTERM shutdown
 - **Phase 3:** server settings and the database resolve through
   `~/.netpro/config.toml` + `NETPRO_*` env (see `docs/local-first.md`)
+- **Phase 6:** stable Web API contract — every Web UI data requirement has
+  a server API; routes orchestrate `@netpro/core` (no business logic duplicated
+  in the web layer). See [API](#api) below.
+- **Phase 7:** observable job system — `queued → running → completed|failed|cancelled`
+  with `0–100` progress, shared by CLI (`apps/cli/src/lib/jobs.ts`) and server
+  (`packages/server/src/jobs`). One operation → one core implementation → one
+  job → one event stream → multiple interfaces.
+- **Phase 8:** `GET /api/events` SSE transport (see [Events](#events)).
 
-Later phases expand routes (Phase 6), jobs (Phase 7), and SSE (Phase 8).
+## API
+
+All routes are authenticated per the Phase-5 policy (loopback trusted in
+`local` mode, bearer token `Authorization: Bearer <token>` / `X-NetPro-Token` /
+`?token=` otherwise, `open` mode trusts the deployer). `GET /api/health`
+and `GET /api/server-info` are public.
+
+| Method | Path | Core | Notes |
+|--------|------|------|-------|
+| GET | `/api/health` | `searchIndexStatus` + migrations | `?verbose=1` adds migrations + search mode for trusted callers |
+| GET | `/api/server-info` | — | service identity |
+| GET | `/api/identity` | `readInstallationIdentity` | installation id + auth mode, never the token |
+| GET | `/api/contacts` | `listCrmContacts` | `?limit=&offset=&sort=recent\|score\|name\|follow-up` |
+| GET | `/api/contacts/:id` | `getContactTimeline` | profile + stats + interactions + follow-ups; 404 when deleted |
+| GET | `/api/search` | `searchContacts` | `?q=&company=&role=&location=&industry=&seniority=&hasEmail=&minScore=&activeWithin=&skills=&sort=&limit=&offset=&mode=portable\|keyword\|hybrid` |
+| GET | `/api/graph` <br> `GET /api/graph/overview` <br> `GET /api/graph/network` | `getNetworkGraph` | communities, centrality, components, warm-intro candidates; `?limit=&depth=&relation=&status=&minConfidence=` |
+| GET | `/api/graph/path` <br> `GET /api/graph/paths` | `planIntroPaths` | `?target=&from=&k=&depth=`; `target` required |
+| GET | `/api/analytics` <br> `GET /api/analytics/network` | `getNetworkOverview` | metrics, score, growth, clusters, dormant, graph, views, content; `?days=&activeDays=&months=&limit=&graph=&views=&content=` |
+| POST | `/api/import` | `runImport` | `multipart/form-data` `file` **or** `application/json` `{csv}` **or** `text/csv` body; creates a `type: import` job |
+| GET | `/api/import/:id` | job registry | import job by id (alias for `GET /api/jobs/:id`) |
+| POST | `/api/scan` | — (emulated scan) | creates a `type: scan` job with `15 → 40 → 70 → 90 → 100` progress |
+| GET | `/api/jobs` | job registry | `?type=&status=&limit=&offset=`; newest first |
+| GET | `/api/jobs/:id` | job registry | |
+| POST | `/api/jobs` | job registry | `{type, metadata}` → `201` queued job |
+| POST | `/api/jobs/:id/cancel` | job registry | cancels `queued`/`running` |
+| GET | `/api/events` | `EventBus` | **SSE** when `Accept: text/event-stream`, else calendar events JSON |
+| GET | `/api/events/stream` | `EventBus` | SSE alias |
+| GET | `/api/events/:id` | `getEvent` | calendar event detail |
+| GET | `/api/settings` | `readLocalConfig` + `describeConn` | server, database, auth, installation; file-managed note on PUT |
+| PUT | `/api/settings` | — | validates keys, returns file-managed guidance |
+| GET | `/` | — | local console HTML (loopback only) |
+
+## Jobs
+
+```ts
+type Job = {
+  id: string;
+  type: 'import'|'scan'|'enrich'|'index'|'embed'|'graph'|'analyze';
+  status: 'queued'|'running'|'completed'|'failed'|'cancelled';
+  progress: number;            // 0–100
+  startedAt: string | null;    // + started_at alias
+  completedAt: string | null;  // + completed_at alias
+  error: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;           // + created_at alias
+  updatedAt: string;           // + updated_at alias
+};
+```
+
+Progress ladder from the plan (§Phase 7):
+
+```text
+Scan 0% queued → 15% discovering → 40% processing → 70% enriching → 90% indexing → 100% completed
+```
+
+The registry is in-memory today (persisted in a future phase) but the shape
+is the contract: `apps/cli/src/lib/jobs.ts` re-exports the same types and
+`createJobRegistry()` so a CLI `netpro import` and a Web UI `POST /api/import`
+produce byte-identical job records.
+
+## Events
+
+`GET /api/events` with `Accept: text/event-stream` opens an SSE stream:
+
+```
+retry: 3000
+: connected
+
+event: job.queued
+data: {"type":"job.queued","jobId":"abc","progress":0,"timestamp":"..."}
+```
+
+Every `Job` transition publishes `job.*`; domain operations publish
+`scan.*`, `import.*`, `contact.imported`, etc. The CLI's `runWithJob`
+helper emits the same events when an operation is driven locally.
 
 ## Layout
 
@@ -30,11 +112,22 @@ packages/server/
 │   ├── app.ts          # composition root
 │   ├── config.ts       # host/port/autoMigrate (env > config.toml > defaults)
 │   ├── server.ts       # listen / shutdown
-│   ├── routes/         # HTTP handlers (orchestrate core)
+│   ├── routes/
+│   │   ├── health.ts
+│   │   ├── contacts.ts      # GET /api/contacts
+│   │   ├── search.ts        # GET /api/search
+│   │   ├── graph.ts         # GET /api/graph* + pathfinder
+│   │   ├── analytics.ts     # GET /api/analytics*
+│   │   ├── import.ts        # POST /api/import
+│   │   ├── scan.ts          # POST /api/scan
+│   │   ├── jobs.ts          # GET|POST /api/jobs*
+│   │   ├── events.ts        # GET /api/events (SSE)
+│   │   ├── calendar-events.ts # GET /api/events JSON fallback
+│   │   └── settings.ts      # GET|PUT /api/settings
 │   ├── middleware/     # request-id, JSON helpers
-│   ├── jobs/           # job registry scaffold (Phase 7)
-│   ├── events/         # event bus scaffold (Phase 8)
-│   └── auth/           # local trust scaffold (Phase 5)
+│   ├── jobs/           # job registry (Phase 7: queued → running → completed)
+│   ├── events/         # event bus (Phase 8: SSE fan-out)
+│   └── auth/           # local trust (Phase 5)
 └── package.json
 ```
 

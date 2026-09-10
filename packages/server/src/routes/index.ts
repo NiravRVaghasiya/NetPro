@@ -10,7 +10,7 @@
 //     before anyone holds a credential, and both are deliberately terse.
 //   • Everything else needs the local operator: a direct loopback request
 //     (mode `local`), a valid access token (modes `local`/`token`), or open
-//     mode's explicit "something else authenticates callers".
+//     mode's explicit \"something else authenticates callers\".
 //   • The console page at `/` is local-only: it names the database path.
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -27,6 +27,19 @@ import { assignRequestId } from '../middleware/request-id';
 import { sendJson } from '../middleware/json';
 import { handleHealth } from './health';
 import { handleHome, handleLocked } from './home';
+import { handleListContacts, handleGetContact } from './contacts';
+import { handleSearch } from './search';
+import { handleGraphOverview, handleGraphPaths } from './graph';
+import { handleAnalytics } from './analytics';
+import { handleImportPost, handleImportGet } from './import';
+import { handleListJobs, handleGetJob, handleCreateJob, handleCancelJob } from './jobs';
+import { handleEvents } from './events';
+import { handleGetSettings, handlePutSettings } from './settings';
+import { handleScanPost } from './scan';
+import {
+  handleGetCalendarEvent,
+  handleListCalendarEvents,
+} from './calendar-events';
 
 export type RouteContext = {
   conn: SqliteConn | PgConn;
@@ -34,6 +47,8 @@ export type RouteContext = {
   events: EventBus;
   /** Phase 5 authentication policy for this process. */
   auth: AuthPolicy;
+  /** App config for settings route. */
+  config?: { host: string; port: number; autoMigrate: boolean; auth: { mode: string } };
 };
 
 /**
@@ -128,6 +143,7 @@ export async function dispatch(
     return true;
   }
 
+  // ── Public probes ──────────────────────────────────────────────────
   if (method === 'GET' && (path === '/api/health' || path === '/health')) {
     await handleHealth(req, res, { conn: ctx.conn, auth });
     return true;
@@ -146,8 +162,6 @@ export async function dispatch(
   }
 
   if (method === 'GET' && path === '/api/identity') {
-    // The local installation identity (Phase 5). Operator-only: it names the
-    // install, and it is what the Web UI shows instead of a user profile.
     if (!auth.authenticated) {
       unauthorized(res, auth, ctx.auth);
       return true;
@@ -165,32 +179,244 @@ export async function dispatch(
             owner: identity.owner ?? null,
           }
         : null,
-      // Never the token itself — only whether remote access has a credential.
     });
     return true;
   }
 
-  if (!auth.authenticated && (path.startsWith('/api') || path.startsWith('/api/'))) {
-    // Fail closed for every future route as well as today's: an API path is
-    // private unless it is in PUBLIC_API_PATHS.
+  // Guard the API: private unless public.
+  if (!auth.authenticated && path.startsWith('/api')) {
     if (!isPublicApiPath(path)) {
       unauthorized(res, auth, ctx.auth);
       return true;
     }
   }
 
+  // ── Home console (local-only) ─────────────────────────────────────
   if (method === 'GET' && path === '/') {
     if (!auth.authenticated) {
       handleLocked(res, { authMode: ctx.auth.mode, reason: auth.reason });
       return true;
     }
-    // The local console: identity + live health, linked to /api/health.
     handleHome(res, {
       dialect: ctx.conn.dialect,
       database: describeConn(ctx.conn),
       installation: ctx.auth.installation,
       authMode: ctx.auth.mode,
     });
+    return true;
+  }
+
+  // ── Phase 6 Web API ────────────────────────────────────────────────
+  // Contacts
+  if (path === '/api/contacts' && method === 'GET') {
+    await handleListContacts(req, res, { conn: ctx.conn, auth });
+    return true;
+  }
+  if (path.startsWith('/api/contacts/') && method === 'GET') {
+    const id = path.slice('/api/contacts/'.length).split('/')[0] ?? '';
+    // Exclude the list path — /api/contacts/ itself is not a detail.
+    if (id) {
+      await handleGetContact(req, res, { conn: ctx.conn, auth }, decodeURIComponent(id));
+      return true;
+    }
+  }
+
+  // Search
+  if ((path === '/api/search' || path === '/api/contacts/search') && method === 'GET') {
+    await handleSearch(req, res, { conn: ctx.conn, auth });
+    return true;
+  }
+
+  // Graph — overview variants
+  if (
+    (path === '/api/graph' ||
+      path === '/api/graph/overview' ||
+      path === '/api/graph/network') &&
+    method === 'GET'
+  ) {
+    await handleGraphOverview(req, res, { conn: ctx.conn, auth });
+    return true;
+  }
+  // Graph — pathfinder
+  if (
+    (path === '/api/graph/path' || path === '/api/graph/paths') &&
+    method === 'GET'
+  ) {
+    await handleGraphPaths(req, res, { conn: ctx.conn, auth });
+    return true;
+  }
+  // Alias: /api/graph/path and /api/graph/paths via query style already
+  // covered; also support /api/graph/path?target=&from= as specified in Phase 6.
+
+  // Analytics
+  if (
+    (path === '/api/analytics' ||
+      path === '/api/analytics/network' ||
+      path === '/api/analytics/overview') &&
+    method === 'GET'
+  ) {
+    await handleAnalytics(req, res, { conn: ctx.conn, auth });
+    return true;
+  }
+
+  // Import
+  if (path === '/api/import' && method === 'POST') {
+    await handleImportPost(req, res, {
+      conn: ctx.conn,
+      auth,
+      jobs: ctx.jobs,
+      events: ctx.events,
+    });
+    return true;
+  }
+  if (path.startsWith('/api/import/') && method === 'GET') {
+    await handleImportGet(req, res, {
+      conn: ctx.conn,
+      auth,
+      jobs: ctx.jobs,
+      events: ctx.events,
+    });
+    return true;
+  }
+
+  // Scan
+  if (path === '/api/scan' && method === 'POST') {
+    await handleScanPost(req, res, {
+      conn: ctx.conn,
+      auth,
+      jobs: ctx.jobs,
+      events: ctx.events,
+    });
+    return true;
+  }
+  // Scan status aliases (job-based)
+  if (path.startsWith('/api/scan/') && method === 'GET') {
+    const id = path.slice('/api/scan/'.length).split('/')[0] ?? '';
+    if (id) {
+      const job = ctx.jobs.get(id);
+      if (!job || job.type !== 'scan') {
+        sendJson(res, 404, { error: `No scan job with id \"${id}\".`, code: 'not_found' });
+        return true;
+      }
+      sendJson(res, 200, { job });
+      return true;
+    }
+  }
+
+  // Jobs
+  if (path === '/api/jobs' && method === 'GET') {
+    await handleListJobs(req, res, {
+      conn: ctx.conn,
+      auth,
+      jobs: ctx.jobs,
+      events: ctx.events,
+    });
+    return true;
+  }
+  if (path === '/api/jobs' && method === 'POST') {
+    await handleCreateJob(req, res, {
+      conn: ctx.conn,
+      auth,
+      jobs: ctx.jobs,
+      events: ctx.events,
+    });
+    return true;
+  }
+  // /api/jobs/:id/cancel must be matched before /api/jobs/:id
+  if (path.startsWith('/api/jobs/') && path.endsWith('/cancel') && method === 'POST') {
+    const id = path.slice('/api/jobs/'.length, -'/cancel'.length).replace(/\/$/, '');
+    await handleCancelJob(req, res, { conn: ctx.conn, auth, jobs: ctx.jobs, events: ctx.events }, decodeURIComponent(id));
+    return true;
+  }
+  if (path.startsWith('/api/jobs/') && method === 'GET') {
+    const id = path.slice('/api/jobs/'.length).split('/')[0] ?? '';
+    if (id) {
+      await handleGetJob(req, res, { conn: ctx.conn, auth, jobs: ctx.jobs, events: ctx.events }, decodeURIComponent(id));
+      return true;
+    }
+  }
+  if (path.startsWith('/api/jobs/') && method === 'POST') {
+    // POST /api/jobs/:id/cancel already handled; POST /api/jobs/:id as cancel alias
+    const rest = path.slice('/api/jobs/'.length);
+    if (rest && !rest.includes('/')) {
+      // Treat POST /api/jobs/:id with body { action: 'cancel' } as cancel.
+      // Consume the body and proxy to cancel if requested — otherwise 405.
+      // Read body lazily; we implement a small check.
+      try {
+        const { readJsonBody } = await import('../middleware/json');
+        const body = await readJsonBody(req).catch(() => null);
+        const action = (body as { action?: string } | null)?.action;
+        if (action === 'cancel') {
+          await handleCancelJob(req, res, { conn: ctx.conn, auth, jobs: ctx.jobs, events: ctx.events }, decodeURIComponent(rest));
+          return true;
+        }
+      } catch {
+        // fallthrough to 405
+      }
+      sendJson(res, 405, { error: 'Method not allowed. Use POST /api/jobs/:id/cancel.' });
+      return true;
+    }
+  }
+
+  // Events — dual meaning:
+  //   * Accept: text/event-stream  → SSE stream (Phase 8)
+  //   * otherwise                 → calendar events (GET /api/events JSON)
+  if (path === '/api/events' && method === 'GET') {
+    const accept = (req.headers.accept ?? '').toString();
+    if (accept.includes('text/event-stream')) {
+      handleEvents(req, res, { events: ctx.events });
+      return true;
+    }
+    await handleListCalendarEvents(req, res, { conn: ctx.conn, auth });
+    return true;
+  }
+  // SSE explicit alias — always a stream regardless of Accept.
+  if (path === '/api/events/stream' && method === 'GET') {
+    handleEvents(req, res, { events: ctx.events });
+    return true;
+  }
+  if (path.startsWith('/api/events/') && method === 'GET') {
+    const id = path.slice('/api/events/'.length).split('/')[0] ?? '';
+    if (id && id !== 'stream') {
+      // Calendar event detail — not the SSE endpoint.
+      await handleGetCalendarEvent(req, res, { conn: ctx.conn, auth }, decodeURIComponent(id));
+      return true;
+    }
+  }
+
+  // Settings
+  if (path === '/api/settings' && method === 'GET') {
+    await handleGetSettings(req, res, {
+      conn: ctx.conn,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      config: (ctx.config ?? { host: '127.0.0.1', port: 3777, autoMigrate: true, auth: { mode: ctx.auth.mode } }) as any,
+      auth: ctx.auth,
+    });
+    return true;
+  }
+  if ((path === '/api/settings' || path === '/api/config') && (method === 'PUT' || method === 'PATCH')) {
+    await handlePutSettings(req, res, {
+      conn: ctx.conn,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      config: (ctx.config ?? { host: '127.0.0.1', port: 3777, autoMigrate: true, auth: { mode: ctx.auth.mode } }) as any,
+      auth: ctx.auth,
+    });
+    return true;
+  }
+  // Alias: GET /api/config for CLI compat
+  if (path === '/api/config' && method === 'GET') {
+    await handleGetSettings(req, res, {
+      conn: ctx.conn,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      config: (ctx.config ?? { host: '127.0.0.1', port: 3777, autoMigrate: true, auth: { mode: ctx.auth.mode } }) as any,
+      auth: ctx.auth,
+    });
+    return true;
+  }
+
+  // ── Fallback: API 404 so the web UI gets JSON, not HTML ──────────
+  if (path.startsWith('/api')) {
+    sendJson(res, 404, { error: `Not found: ${method} ${path}` });
     return true;
   }
 

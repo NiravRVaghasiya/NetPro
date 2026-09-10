@@ -75,7 +75,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<NetProA
   }
 
   const handler = (req: IncomingMessage, res: ServerResponse): void => {
-    void dispatch(req, res, { conn, jobs, events, auth }).then((handled) => {
+    void dispatch(req, res, { conn, jobs, events, auth, config }).then((handled) => {
       if (!handled && !res.headersSent) {
         sendJson(res, 404, { error: 'Not found' });
       }
