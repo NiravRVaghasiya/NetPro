@@ -50,9 +50,10 @@ if (dialect === 'postgresql' && !hasDatabase) {
   // Build the CLI first: `netpro migrate` is the same code path operators run
   // locally and in Docker, so the deploy step cannot drift from it.
   // Invoke tsup directly via node to bypass npm 11 workspace PATH issues
-  // where the hoisted binary isn't found in sh -c.
+  // where the hoisted binary isn't found in sh -c. tsup is hoisted to the
+  // root node_modules in npm workspaces.
   const built = run('node', ['node_modules/tsup/dist/cli-default.js'], {
-    cwd: resolve(repoRoot, 'apps/cli'),
+    cwd: repoRoot,
   });
   if (built !== 0) process.exit(built);
 
