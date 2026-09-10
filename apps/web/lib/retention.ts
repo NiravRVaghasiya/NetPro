@@ -3,8 +3,8 @@
 //
 // The work itself is core (`runRetentionPurge`): at most one purge per 24 h,
 // decided by the newest `retention.purge` audit row, deleting expired raw
-// profile views and content snapshots. This module only reads the operator
-// environment and keeps the cadence alive:
+// profile views, content snapshots, and webhook deliveries. This module only
+// reads the operator environment and keeps the cadence alive:
 //
 //   * one run at process start (self-guarded — cold starts of a serverless
 //     deploy all re-check the audit log and no-op unless a day has passed),
@@ -17,12 +17,14 @@ import type { PgConn, SqliteConn } from "@netpro/db";
 import { CONTENT_METRIC_RETENTION_DAYS } from "@netpro/core/src/content";
 import { runRetentionPurge, RETENTION_PURGE_INTERVAL_MS } from "@netpro/core/src/retention";
 import { VIEW_RETENTION_DAYS } from "@netpro/core/src/views";
+import { WEBHOOK_DELIVERY_RETENTION_DAYS } from "@netpro/core/src/webhooks";
 
 export interface RetentionConfig {
   /** `NETPRO_DISABLE_RETENTION=true` → the schedule never starts. */
   enabled: boolean;
   viewRetentionDays: number;
   contentMetricRetentionDays: number;
+  webhookDeliveryRetentionDays: number;
 }
 
 /** `NETPRO_DISABLE_RETENTION=true` → no purge runs at all. */
@@ -56,6 +58,11 @@ export function retentionConfig(env: Record<string, string | undefined> = proces
       "NETPRO_CONTENT_METRIC_RETENTION_DAYS",
       CONTENT_METRIC_RETENTION_DAYS,
     ),
+    webhookDeliveryRetentionDays: envDayCount(
+      env,
+      "NETPRO_WEBHOOK_DELIVERY_RETENTION_DAYS",
+      WEBHOOK_DELIVERY_RETENTION_DAYS,
+    ),
   };
 }
 
@@ -78,19 +85,18 @@ export function scheduleRetentionPurge(
     runRetentionPurge(conn, {
       viewRetentionDays: config.viewRetentionDays,
       contentMetricRetentionDays: config.contentMetricRetentionDays,
+      webhookDeliveryRetentionDays: config.webhookDeliveryRetentionDays,
     })
       .then((result) => {
         if (!result.ran) return;
         console.info(
           `[netpro] retention purge: deleted ${result.profileViewsDeleted} profile view(s) ` +
-            `(${result.viewRetentionDays}d window) and ${result.contentMetricsDeleted} content snapshot(s) ` +
-            `(${result.contentMetricRetentionDays}d window)`,
+            `(${result.viewRetentionDays}d window), ${result.contentMetricsDeleted} content snapshot(s) ` +
+            `(${result.contentMetricRetentionDays}d window), and ${result.webhookDeliveriesDeleted} webhook delivery(s) ` +
+            `(${result.webhookDeliveryRetentionDays}d window)`,
         );
       })
       .catch((error) => {
-        // Best-effort by design: the audit log and the deletes both live in
-        // the same database, and a purge failure is an operator problem,
-        // not a request-path problem.
         console.error("[netpro] retention purge failed:", (error as Error).message);
       });
   };

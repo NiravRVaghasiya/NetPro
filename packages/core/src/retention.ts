@@ -1,11 +1,12 @@
 // v2.5 Phase 6 — the daily retention purge.
 //
-// Cross-cuts the two bounded tables the plan names:
+// Cross-cuts the bounded tables the plan names:
 //
 //   * `profile_views` — raw views older than 90 days (Phase 1's window) go;
 //     aggregated analytics (Phase 3) are what live longer.
 //   * `content_metrics` — snapshots older than 365 days go, but the latest
 //     snapshot per content item always survives.
+//   * `webhook_deliveries` — v3.0 Phase 7, 30-day delivery log retention.
 //
 // Cadence: **at most one run per 24 hours, decided by the data, not the
 // process.** The guard reads the newest `activity_log` row with
@@ -17,7 +18,7 @@
 // cron table, no new migration: the audit log *is* the state.
 //
 // Concurrency is tolerated, not eliminated: two instances that both see
-// "due" in the same second both delete (idempotent — the second removes
+// \"due\" in the same second both delete (idempotent — the second removes
 // nothing) and both log. A duplicate run costs one extra row with zeros;
 // correctness never depends on the race.
 //
@@ -38,6 +39,10 @@ import {
   VIEW_RETENTION_DAYS,
   purgeExpiredProfileViews,
 } from "./views/retention";
+import {
+  WEBHOOK_DELIVERY_RETENTION_DAYS,
+  purgeExpiredWebhookDeliveries,
+} from "./webhooks";
 
 type Conn = SqliteConn | PgConn;
 
@@ -54,6 +59,8 @@ export interface RunRetentionPurgeOptions {
   viewRetentionDays?: number;
   /** Content-snapshot retention window in days. Default 365. */
   contentMetricRetentionDays?: number;
+  /** Webhook delivery retention window in days. Default 30. */
+  webhookDeliveryRetentionDays?: number;
   /** Minimum time between runs. Default 24 h; `0` disables the guard. */
   minIntervalMs?: number;
   /** Ignore the "last run" guard (manual re-runs, tests). */
@@ -75,8 +82,10 @@ export interface RetentionPurgeResult {
   lastRunAt: string | null;
   profileViewsDeleted: number;
   contentMetricsDeleted: number;
+  webhookDeliveriesDeleted: number;
   viewRetentionDays: number;
   contentMetricRetentionDays: number;
+  webhookDeliveryRetentionDays: number;
 }
 
 async function lastPurgeAt(
@@ -96,12 +105,6 @@ async function lastPurgeAt(
 
 /**
  * Run the daily retention purge if it is due.
- *
- * Reads the last `retention.purge` audit row, skips when it is younger than
- * `minIntervalMs` (unless `force`), otherwise deletes expired profile views
- * and content snapshots and writes one audit row with the counts. The
- * audit write is best-effort (a failed log must not take the purge down);
- * if it fails, the next tick simply re-runs the — idempotent — deletes.
  */
 export async function runRetentionPurge(
   conn: Conn,
@@ -111,6 +114,8 @@ export async function runRetentionPurge(
   const viewRetentionDays = options.viewRetentionDays ?? VIEW_RETENTION_DAYS;
   const contentMetricRetentionDays =
     options.contentMetricRetentionDays ?? CONTENT_METRIC_RETENTION_DAYS;
+  const webhookDeliveryRetentionDays =
+    options.webhookDeliveryRetentionDays ?? WEBHOOK_DELIVERY_RETENTION_DAYS;
   const minIntervalMs = options.minIntervalMs ?? RETENTION_PURGE_INTERVAL_MS;
   if (!Number.isFinite(minIntervalMs) || minIntervalMs < 0) {
     throw new RangeError(
@@ -124,8 +129,10 @@ export async function runRetentionPurge(
     lastRunAt: null,
     profileViewsDeleted: 0,
     contentMetricsDeleted: 0,
+    webhookDeliveriesDeleted: 0,
     viewRetentionDays,
     contentMetricRetentionDays,
+    webhookDeliveryRetentionDays,
   };
 
   const lastRunAt = await lastPurgeAt(conn, options.scope);
@@ -137,7 +144,7 @@ export async function runRetentionPurge(
     }
   }
 
-  const [views, metrics] = await Promise.all([
+  const [views, metrics, webhookDeliveries] = await Promise.all([
     purgeExpiredProfileViews(conn, {
       now,
       olderThanDays: viewRetentionDays,
@@ -146,6 +153,11 @@ export async function runRetentionPurge(
     purgeExpiredContentMetrics(conn, {
       now,
       olderThanDays: contentMetricRetentionDays,
+      scope: options.scope,
+    }),
+    purgeExpiredWebhookDeliveries(conn, {
+      now,
+      olderThanDays: webhookDeliveryRetentionDays,
       scope: options.scope,
     }),
   ]);
@@ -158,8 +170,10 @@ export async function runRetentionPurge(
       metadata: {
         profileViewsDeleted: views.deleted,
         contentMetricsDeleted: metrics.deleted,
+        webhookDeliveriesDeleted: webhookDeliveries.deleted,
         viewRetentionDays,
         contentMetricRetentionDays,
+        webhookDeliveryRetentionDays,
       },
       createdAt: now.toISOString(),
     },
@@ -171,5 +185,6 @@ export async function runRetentionPurge(
     ran: true,
     profileViewsDeleted: views.deleted,
     contentMetricsDeleted: metrics.deleted,
+    webhookDeliveriesDeleted: webhookDeliveries.deleted,
   };
 }

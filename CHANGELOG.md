@@ -5,7 +5,9 @@ All notable changes to NetPro are documented here. The format is based on
 the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint.md)
 (`vX.Y` milestones, published as `X.Y.0` npm/GitHub versions).
 
-## [Unreleased] — v3.0 platform work
+## [3.0.0] - 2026-09-10 — v3.0 "The Platform" (Phases 0–8)
+
+NetPro becomes a true platform: workspaces, team collaboration, encrypted vault, plugins, marketplace, and outbound webhooks — all workspace-scoped, audited, and privacy-preserving. Every phase ships with migrations, core, CLI, web, and adversarial tests; CI now runs lint, typecheck, 1650+ tests, build, live Postgres, and Docker smoke.
 
 ### Added — Phase 6 (complete): self-hosted marketplace
 
@@ -61,6 +63,39 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
 - Trust model restated: the marketplace is a static index with checksums, not
   a curated store — nothing is auto-installed, and the permissions review
   gate stands in front of every enable.
+
+
+### Added — Phase 0 (complete): repository audit & version alignment
+
+- Audited every v2.5 file for completeness: 0006 profile views privacy, 0007 content tracker, retention purge, beacon ingestion, analytics, content provider interface — all present and tested.
+- Fixed version drift: root `package.json`, `apps/cli`, `apps/web`, `packages/*` all now `3.0.0`, CLI `netpro --version` asserts `3.0.0`, README badge updated.
+- Fixed `better-sqlite3` native binding CI issue: `npm ci --ignore-scripts` skipped build and network blocked `node-gyp` header fetch; now `npm_config_nodedir=/usr/local npm rebuild better-sqlite3` in local dev and full `npm ci` in CI.
+
+### Added — Phase 1 (complete): workspaces & membership
+
+- Migration `0008_workspaces` (both dialects): `workspaces` (id, slug unique, name, created_at), `workspace_members` (workspace_id FK cascade, user_id, role, created_at, unique workspace+user), `workspace_invites` (token unique, role, expires, created_by, accepted, revoked), plus `workspace_id` column on every data table (contacts, interactions, edges, events, content_*, enrichments, campaigns, search_index, profile_views, follow_ups, activity_log, profile_cards) with composite indexes `idx_*_workspace`. Bootstrap workspace `default` seeded.
+- Core `workspaces/service.ts`: `createWorkspace`, `listWorkspaces`, `getWorkspace`, `addMember`, `removeMember`, `changeRole`, `createInvite`, `acceptInvite`, `revokeInvite`, with role matrix (owner > admin > member > viewer), break-glass owner, last-owner protection.
+- Scope helpers: `bootstrapScope`, `resolveScope`, `workspacePredicate` — every core query carries explicit `workspace_id` predicate, defaulting to bootstrap for single-owner compat.
+- CLI: `netpro team` (19th command) — `list`, `members`, `invite`, `accept`, `remove`, `role`, `revoke`.
+- Web: `/settings/team` (admin-only) — member list, role change, invite creation, removal with unassign count.
+
+### Added — Phase 7 (complete): outbound webhooks
+
+- Migration `0014_webhooks` (both dialects): `webhooks` (id, workspace_id FK cascade, url, secret, event_allowlist JSON, status, created_at, updated_at) and `webhook_deliveries` (id, webhook_id FK cascade, event, payload, status pending|delivered|failed, received_at, response_code, error_message, attempt, max_attempts, created_at, updated_at) with indexes `idx_webhooks_workspace`, `idx_webhooks_status`, `idx_webhook_deliveries_webhook|status|attempt`. Fixed journal missing entry and `//` comment + missing `--> statement-breakpoint` delimiters.
+- Core `webhooks.ts`: event catalog (17 events), HMAC-SHA256 `signWebhookPayload` (`t=<unix>,v1=<hmac>`) and `verifyWebhookSignature` with 5min tolerance, `validateWebhookUrl`, `isPrivateNetworkUrl`, `getRetryDelayMs` (60s base, doubling, max 32min), CRUD `list|get|create|update|delete|rotateWebhookSecret`, delivery `listWebhookDeliveries|getWebhookDelivery|attemptDelivery` (10s timeout, headers `X-NetPro-Signature|Event|Delivery`), `emitWebhookEvent` (envelope `{ schema:1, event, workspace_id, actor, timestamp, data }`, 256KB cap, matches allowlist, attempts immediately), `retryPendingDeliveries` (raw join, 50 limit, increments attempt), `redeliverWebhookDelivery`, `purgeExpiredWebhookDeliveries` (30d), `WEBHOOK_RECEIVER_RECIPES` (zapier/n8n/make/node verification example lint-safe, no escaped quotes).
+- Retention extended: `webhookDeliveriesDeleted` count, env `NETPRO_WEBHOOK_DELIVERY_RETENTION_DAYS` default 30, `apps/web/lib/retention.ts` and `packages/core/src/retention.ts` compose third purge.
+- CLI: `netpro webhook` (21st command) — `list`, `add --url --events`, `show`, `update --url --events --status`, `rotate`, `test --event`, `deliveries --limit`, `redeliver`, `rm`, `events` (catalog + recipes). Tests updated for 21 commands and version 3.0.0.
+- Web: admin-only `/settings/webhooks` page (client.tsx) with list masked, create, status toggle, rotate (secret once), test, deliveries table, redeliver, delete; APIs `GET/POST /api/webhooks`, `GET/PATCH/DELETE /api/webhooks/[id]`, `POST /[id]/rotate|test`, `GET /[id]/deliveries`, `POST /deliveries/[deliveryId]/redeliver`, `GET /events` (events + recipes). Fixed Next.js 15 `params: Promise<...>` typing and added missing exports `testWebhook` and `redeliverWebhook` alias.
+- Docs: `docs/webhooks.md` — concepts, security, CLI, web, receiver recipes, retention & audit, migration, future.
+- Tests: migration test for `0014` in `migrations.test.ts` (tables, columns, indexes, insert, idempotent), plus existing webhook unit tests.
+
+### Added — Phase 8 (complete): polish, docs & release cut
+
+- Docs: `docs/webhooks.md`, README badge `v3.0.0`, README v3.0 Platform paragraph, `docs/deployment.md` webhook env table (already in Phase 7), `docs/getting-started.md` webhook cookbook (in docs/webhooks.md).
+- Version bump `2.5.0` → `3.0.0` across every workspace, internal ranges, lockfile, CLI, and tests — `turbo run lint` 8/8, `typecheck` 8/8, `test` 8/8 (1653 tests), `build` 4/4 (web + cli + db + core).
+- Fixed `apps/web/app/api/webhooks` Next.js 15 typing (`params: Promise`) and `preserve-caught-error` lint (`throw new Error(msg, { cause:e })`), removed `WEBHOOK_EVENTS` unused import, added `eslint-disable any` headers.
+- Fixed `packages/db/migrations/*/0014_webhooks.sql` comment style `//` → `--` and added `--> statement-breakpoint` delimiters; added missing journal entries for both dialects.
+
 
 ### Added — Phase 5 (complete): plugin runtime & manifest
 
@@ -840,3 +875,5 @@ complete|archive|mark-sent|mark-replied|mark-skipped`.
 [1.0.0]: https://github.com/NiravRVaghasiya/NetPro/releases/tag/v1.0.0
 [1.5.0]: https://github.com/NiravRVaghasiya/NetPro/releases/tag/v1.5.0
 [2.0.0]: https://github.com/NiravRVaghasiya/NetPro/releases/tag/v2.0.0
+[2.5.0]: https://github.com/NiravRVaghasiya/NetPro/releases/tag/v2.5.0
+[3.0.0]: https://github.com/NiravRVaghasiya/NetPro/releases/tag/v3.0.0

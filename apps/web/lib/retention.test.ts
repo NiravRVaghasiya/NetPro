@@ -76,11 +76,12 @@ describe("retentionDisabled (v2.5 phase 6)", () => {
 });
 
 describe("retentionConfig (v2.5 phase 6)", () => {
-  it("defaults to enabled with the shipped 90 / 365-day windows", () => {
+  it("defaults to enabled with the shipped 90 / 365 / 30-day windows", () => {
     expect(retentionConfig({})).toEqual({
       enabled: true,
       viewRetentionDays: 90,
       contentMetricRetentionDays: 365,
+      webhookDeliveryRetentionDays: 30,
     });
   });
 
@@ -89,11 +90,13 @@ describe("retentionConfig (v2.5 phase 6)", () => {
       retentionConfig({
         NETPRO_VIEW_RETENTION_DAYS: "30",
         NETPRO_CONTENT_METRIC_RETENTION_DAYS: "100",
+        NETPRO_WEBHOOK_DELIVERY_RETENTION_DAYS: "14",
       }),
     ).toEqual({
       enabled: true,
       viewRetentionDays: 30,
       contentMetricRetentionDays: 100,
+      webhookDeliveryRetentionDays: 14,
     });
   });
 
@@ -109,11 +112,13 @@ describe("retentionConfig (v2.5 phase 6)", () => {
         retentionConfig({
           NETPRO_VIEW_RETENTION_DAYS: garbage,
           NETPRO_CONTENT_METRIC_RETENTION_DAYS: garbage,
+          NETPRO_WEBHOOK_DELIVERY_RETENTION_DAYS: garbage,
         }),
       ).toEqual({
         enabled: true,
         viewRetentionDays: 90,
         contentMetricRetentionDays: 365,
+        webhookDeliveryRetentionDays: 30,
       });
     }
   });
