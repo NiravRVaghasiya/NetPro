@@ -17,6 +17,11 @@
   "engines": {
     "node": ">=20"
   },
+  "devDependencies": {
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  },
   "dependencies": {
     "@netpro/config": "^3.0.0",
     "@netpro/core": "^3.0.0",

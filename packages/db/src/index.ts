@@ -36,8 +36,27 @@ export type PgConn = {
   pool: Pool;
 };
 
-function resolveDialect(): 'sqlite' | 'postgresql' {
-  const dialect = process.env.DB_DIALECT ?? 'sqlite';
+/**
+ * Which database dialect should this process use?
+ *
+ * An explicit `DB_DIALECT` always wins. The implicit default is sqlite, so
+ * the CLI's local file workflow works with zero configuration.
+ *
+ * The one inference: on Vercel with a `DATABASE_URL` but no `DB_DIALECT`,
+ * default to postgresql. Sqlite is never usable there (see the guard in
+ * createDb), and the managed-Postgres integrations (Neon, Supabase, Vercel
+ * Postgres) attach exactly one variable — `DATABASE_URL` — without a
+ * dialect. Without the inference, `next build` evaluates this module during
+ * page-data collection, resolves sqlite, and the deploy dies on the guard
+ * below *after* the build-time migration already succeeded against the same
+ * database. With it, connecting a database and redeploying just works.
+ */
+export function resolveDialect(
+  env: NodeJS.ProcessEnv = process.env
+): 'sqlite' | 'postgresql' {
+  const dialect =
+    env.DB_DIALECT ??
+    (env.VERCEL && env.DATABASE_URL?.trim() ? 'postgresql' : 'sqlite');
   if (dialect !== 'sqlite' && dialect !== 'postgresql') {
     throw new Error(`Unknown DB_DIALECT "${dialect}". Expected "sqlite" or "postgresql".`);
   }
@@ -129,8 +148,9 @@ export function createDb(): SqliteConn | PgConn {
       throw new Error(
         'DB_DIALECT=sqlite cannot be used on Vercel: its filesystem is ephemeral and ' +
           'per-instance, so data is lost on every redeploy and is not shared between ' +
-          'concurrent instances. Set DB_DIALECT=postgresql and DATABASE_URL to a managed ' +
-          'Postgres database. See docs/deployment.md.'
+          'concurrent instances. Attach a managed Postgres database (Vercel Postgres, ' +
+          'Neon, Supabase — its DATABASE_URL is detected automatically), or set ' +
+          'DB_DIALECT=postgresql and DATABASE_URL. See docs/deployment.md.'
       );
     }
     const sqlite = new Database(path);

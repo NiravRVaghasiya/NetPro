@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { autoMigrateEnabled } from './migrate';
-import { createDb, resolvePgSsl, resolvePoolConfig } from './index';
+import { createDb, resolveDialect, resolvePgSsl, resolvePoolConfig } from './index';
 
 const saved = { ...process.env };
 afterEach(() => {

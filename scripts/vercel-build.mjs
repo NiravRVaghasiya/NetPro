@@ -51,6 +51,31 @@ const localTurbo = resolve(repoRoot, 'node_modules', '.bin', 'turbo');
 const dialect = process.env.DB_DIALECT ?? 'postgresql';
 const hasDatabase = Boolean(process.env.DATABASE_URL?.trim());
 
+/**
+ * Neon's Vercel integration attaches a *pooled* connection string (host
+ * contains "-pooler", port 6543). That is the right URL for serverless
+ * runtime traffic, but the migration runner serializes on a session-level
+ * Postgres advisory lock (packages/db/src/migrate.ts), and through a
+ * transaction pooler the unlock statement can land on a different backend
+ * than the one holding the lock. The leaked holder then blocks the *next*
+ * deploy's migrator for the full 60 s lock timeout — an intermittent
+ * "Migration failed" one redeploy after everything worked. DDL and session
+ * locks belong on the direct endpoint, so for this step only, derive it by
+ * stripping "-pooler" and using the direct port. Non-Neon (or already
+ * direct) URLs are returned unchanged (null means "use it as-is").
+ */
+function directMigrationUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.includes('-pooler')) return null;
+    parsed.hostname = parsed.hostname.replaceAll('-pooler', '');
+    if (parsed.port === '' || parsed.port === '6543') parsed.port = '5432';
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 if (dialect === 'postgresql' && !hasDatabase) {
   console.warn(
     '\n[vercel-build] DATABASE_URL is not set — skipping the build-time migration.\n' +
@@ -64,12 +89,38 @@ if (dialect === 'postgresql' && !hasDatabase) {
   const built = run('npm', ['run', 'build', '-w', '@netpro/cli']);
   if (built !== 0) process.exit(built);
 
-  const migrated = run('node', ['apps/cli/dist/index.js', 'migrate'], {
-    env: { DB_DIALECT: dialect },
-  });
-  if (migrated !== 0) {
-    console.error('[vercel-build] Migration failed — aborting the deployment.');
-    process.exit(migrated);
+  const databaseUrl = process.env.DATABASE_URL.trim();
+  const directUrl = directMigrationUrl(databaseUrl);
+  const migrate = (url) =>
+    run('node', ['apps/cli/dist/index.js', 'migrate'], {
+      env: { DB_DIALECT: dialect, ...(url ? { DATABASE_URL: url } : {}) },
+    });
+
+  if (directUrl) {
+    console.log(
+      '[vercel-build] DATABASE_URL is a pooled endpoint — migrating via the direct connection.'
+    );
+    const direct = migrate(directUrl);
+    if (direct !== 0) {
+      // The direct endpoint can be unreachable (network rules, a provider
+      // without one). The pooled URL still migrates correctly most of the
+      // time — the advisory-lock leak is intermittent, not fatal — so fall
+      // back rather than failing a deploy that could work.
+      console.warn(
+        '[vercel-build] Direct connection failed — retrying the migration over the pooled URL.'
+      );
+      const pooled = migrate(null);
+      if (pooled !== 0) {
+        console.error('[vercel-build] Migration failed — aborting the deployment.');
+        process.exit(pooled);
+      }
+    }
+  } else {
+    const migrated = migrate(null);
+    if (migrated !== 0) {
+      console.error('[vercel-build] Migration failed — aborting the deployment.');
+      process.exit(migrated);
+    }
   }
 }
 
@@ -80,8 +131,13 @@ if (existsSync(localTurbo)) {
   );
 }
 
-// No turbo (turbo is a root devDependency, so this means the install step
-// changed). Build the dependency chain by hand instead of failing: the
+// No turbo — expected on Vercel, not a sign that the install step changed.
+// When the Vercel project's root directory is `apps/web`, npm runs the
+// install from there and builds only *that workspace's* dependency closure
+// (`apps/web` dev-depends on `@netpro/cli` for exactly this reason — the
+// deploy builds and runs the CLI for migrations). `turbo` is a
+// devDependency of the *root* package, outside that closure, so it is
+// simply not installed. Build the dependency chain by hand instead: the
 // packages are consumed as source via next.config `transpilePackages`, so
 // their `build` is a typecheck that must pass before the web build runs.
 console.warn(
