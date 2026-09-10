@@ -22,6 +22,7 @@ export type Conn = SqliteConn | PgConn;
 export function contactColumns(conn: Conn): ContactsColumns {
   const t = conn.schema.contacts;
   return {
+    id: t.id,
     fullName: t.fullName,
     email: t.email,
     headline: t.headline,
@@ -34,6 +35,7 @@ export function contactColumns(conn: Conn): ContactsColumns {
     lastInteraction: t.lastInteraction,
     deletedAt: t.deletedAt,
     skills: t.skills,
+    tags: t.tags,
     workspaceId: t.workspaceId,
   };
 }
@@ -52,6 +54,37 @@ export interface PageRow {
   relationshipScore: number | null;
   lastInteraction: string | null;
   source: string;
+  /** Raw JSON-array column: an array on SQLite (json mode), text on Postgres. */
+  tags: unknown;
+  /** Raw JSON-array column: an array on SQLite (json mode), text on Postgres. */
+  skills: unknown;
+}
+
+/**
+ * Parse a JSON-array contact column (Phase 12).
+ *
+ * SQLite's json-mode columns arrive as arrays; the Postgres schema stores the
+ * same JSON as plain text. Both shapes — plus null/blank/corrupt — collapse
+ * here so every surface sees `string[] | null` regardless of dialect.
+ */
+export function parseStringArray(value: unknown): string[] | null {
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(value)) {
+    return value.filter((v): v is string => typeof v === "string");
+  }
+  if (typeof value === "string") {
+    if (value.trim() === "") return null;
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((v): v is string => typeof v === "string");
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 export function mapRow(r: PageRow): ContactSearchResult {
@@ -69,6 +102,8 @@ export function mapRow(r: PageRow): ContactSearchResult {
     relationshipScore: r.relationshipScore,
     lastInteraction: r.lastInteraction,
     source: r.source,
+    tags: parseStringArray(r.tags),
+    skills: parseStringArray(r.skills),
   };
 }
 

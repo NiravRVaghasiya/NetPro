@@ -197,7 +197,8 @@ export default async function GraphPage({
       <p style={{ color: "#475569" }}>
         Pick a target and NetPro ranks the shortest chains of confirmed links to
         them — you choose whom to ask, NetPro drafts the note (nothing sends
-        itself). <Link href="/edges">Manage edges</Link> ·{" "}
+        itself). <Link href="/pathfinder">Open in Pathfinder</Link> ·{" "}
+        <Link href="/edges">Manage edges</Link> ·{" "}
         <Link href="/dashboard">Graph analytics</Link>
       </p>
 

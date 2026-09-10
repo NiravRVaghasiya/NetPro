@@ -131,8 +131,12 @@ export function renderPathPlan(plan: IntroPathPlan): string[] {
   const lines = [header];
   for (const p of plan.paths) {
     const chain = p.path.map((n) => `${n.fullName}${nodeMeta(n)}`).join(" → ");
+    // Phase 13 — the first-class path summary: strength, weakest tie, and
+    // average hop strength beside the hop count, matching the Web UI cards.
+    const weakest =
+      p.score.weakestTie === null ? "direct" : p.score.weakestTie.toFixed(2);
     lines.push(
-      `  #${p.rank} (${hopLabel(p)}) · score ${p.score.score.toFixed(2)}`,
+      `  #${p.rank} (${hopLabel(p)}) · score ${p.score.score.toFixed(2)} · weakest ${weakest} · avg ${p.score.avgHopStrength.toFixed(2)}`,
     );
     lines.push(`    ${chain}`);
     lines.push(`    → ${p.ask.suggestion}`);

@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import type { SqliteConn, PgConn } from "@netpro/db";
 import {
   createEmbeddingProvider,
+  explainMatch,
   isSearchMode,
   searchContacts,
   SEARCH_MODES,
@@ -33,12 +34,15 @@ export interface SearchCommandOptions {
   semantic?: boolean;
   // v2.0 Phase 5 — derived skills filter (comma-separated, all required).
   skills?: string;
+  // Phase 12 — name/tags/community filters and match explanations.
+  name?: string;
+  tags?: string;
+  community?: string;
+  explain?: boolean;
 }
 
 /** Split a comma/semicolon list into trimmed, non-empty values (undefined when empty). */
-export function parseSkillsFlag(
-  value: string | undefined,
-): string[] | undefined {
+export function parseListFlag(value: string | undefined): string[] | undefined {
   if (value === undefined) return undefined;
   const list = value
     .split(/[,;]/)
@@ -46,6 +50,9 @@ export function parseSkillsFlag(
     .filter(Boolean);
   return list.length > 0 ? list : undefined;
 }
+
+/** Historic name for {@link parseListFlag} (skills were the first list flag). */
+export const parseSkillsFlag = parseListFlag;
 
 const VALID_SORTS: SearchSort[] = ["relevance", "score", "recent", "name"];
 
@@ -90,8 +97,14 @@ export function toSearchOptions(
     throw new Error("--min-score must be between 0 and 1");
   }
 
+  const trim = (v: string | undefined): string | undefined => {
+    const s = v?.trim();
+    return s ? s : undefined;
+  };
+
   return {
     query: opts.query,
+    name: trim(opts.name),
     role: opts.role,
     company: opts.company,
     location: opts.location,
@@ -102,7 +115,9 @@ export function toSearchOptions(
     hasEmail: opts.hasEmail,
     minScore,
     lastActiveWithinDays: parseNumber(opts.activeWithin, "active-within"),
-    skills: parseSkillsFlag(opts.skills),
+    skills: parseListFlag(opts.skills),
+    tags: parseListFlag(opts.tags),
+    community: trim(opts.community),
     sort,
     limit: parseNumber(opts.limit, "limit"),
     offset: parseNumber(opts.offset, "offset"),
@@ -181,8 +196,31 @@ export async function executeSearch(
 
   const res = await searchContacts(conn, searchOptions, embedder, scope);
 
+  // Phase 12 — `--explain` attributes every hit with core's pure explainer:
+  // the same lines the Web UI renders under "Matched because".
+  const reasonsById = new Map<string, string[]>();
+  if (options.explain) {
+    for (const c of res.contacts) {
+      reasonsById.set(
+        c.id,
+        explainMatch(c, searchOptions).map((r) => r.text),
+      );
+    }
+  }
+
   if (options.json) {
-    return JSON.stringify(res, null, 2);
+    if (!options.explain) return JSON.stringify(res, null, 2);
+    return JSON.stringify(
+      {
+        ...res,
+        contacts: res.contacts.map((c) => ({
+          ...c,
+          matchReasons: explainMatch(c, searchOptions),
+        })),
+      },
+      null,
+      2,
+    );
   }
 
   const engineNote = engineLine(res.engine);
@@ -198,6 +236,9 @@ export async function executeSearch(
     lines.push(`${c.fullName}  [score ${scoreLabel(c.relationshipScore)}]`);
     if (meta) lines.push(`   ${meta}`);
     if (c.email) lines.push(`   ${c.email}`);
+    for (const reason of reasonsById.get(c.id) ?? []) {
+      lines.push(`   ✓ ${reason}`);
+    }
   }
 
   const shownRange = `${res.offset + 1}–${Math.min(res.offset + res.contacts.length, res.total)}`;
@@ -244,6 +285,16 @@ export function registerSearchCommand(program: Command): void {
       "--skills <list>",
       "Only contacts whose derived skills include every listed skill (comma-separated; run `netpro skills extract` first)",
     )
+    .option("--name <name>", "Filter by full name (substring)")
+    .option(
+      "--tags <list>",
+      "Only contacts carrying every listed tag (comma-separated)",
+    )
+    .option(
+      "--community <label>",
+      "Only contacts in a Louvain community (label, `Community N`, or 0-based id)",
+    )
+    .option("--explain", "Show why each result matched")
     .option("--sort <order>", "relevance | score | recent | name", "relevance")
     .option(
       "--mode <engine>",

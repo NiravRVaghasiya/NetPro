@@ -284,7 +284,7 @@ export default async function NetworkPage({
         >
           Find path
         </button>
-        <Link href="/graph" style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: "0.4rem 0.8rem", textDecoration: "none", color: "#374151", fontSize: "0.9rem" }}>
+        <Link href="/pathfinder" style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: "0.4rem 0.8rem", textDecoration: "none", color: "#374151", fontSize: "0.9rem" }}>
           Pathfinder full →
         </Link>
       </form>

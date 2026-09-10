@@ -96,3 +96,97 @@ export async function getCommunities(
   const result = communitiesOf(graph, louvain(graph), resolved.limits.communityMembers);
   return { ...result, top: result.top.slice(0, resolved.limit) };
 }
+
+export interface ResolvedCommunity {
+  /**
+   * Display label: the single matched community's label, or a
+   * `"N communities matching …"` line when a substring matched several.
+   */
+  label: string;
+  /** 0-based community ids that matched, sorted. */
+  communityIds: number[];
+  /** Union of member contact ids across every matched community, sorted. */
+  memberIds: string[];
+}
+
+/**
+ * Resolve a community selector to member ids (Phase 12 — search filtering).
+ *
+ * Accepts, in order:
+ *   1. a 0-based community id (`0`, `1`, …) — digits mean an id, nothing else;
+ *   2. `Community N` (1-based, the human label the UI shows);
+ *   3. an exact label match (case-insensitive, e.g. `acme`);
+ *   4. a label substring (case-insensitive) — every matching community
+ *      contributes its members, so `e` over `acme` + `globex` returns both.
+ *
+ * Returns null when nothing matches (unknown id/label, or an edge-less graph
+ * with no communities at all). Callers treat null as "match nothing" — the
+ * same posture as an unknown skill filter: a typo narrows to zero, never
+ * silently widens. Runs over the analyzed graph (default: confirmed edges).
+ */
+export async function resolveCommunityMembers(
+  conn: SqliteConn | PgConn,
+  selector: string,
+  opts: GraphAnalysisOptions = {}
+): Promise<ResolvedCommunity | null> {
+  const needle = selector.trim().toLowerCase();
+  if (!needle) return null;
+
+  const graph = await loadGraph(conn, opts);
+  const found = louvain(graph);
+  if (found.communities.length === 0) return null;
+
+  const labeled = found.communities.map((members, communityId) => ({
+    communityId,
+    label: communityLabel(graph, members, communityId),
+    members,
+  }));
+
+  const pack = (
+    matches: typeof labeled,
+    label: string,
+  ): ResolvedCommunity => ({
+    label,
+    communityIds: matches.map((c) => c.communityId).sort((a, b) => a - b),
+    memberIds: Array.from(new Set(matches.flatMap((c) => c.members))).sort(),
+  });
+
+  // 1. Pure digits address a community id directly.
+  if (/^\d+$/.test(needle)) {
+    const id = Number(needle);
+    const exact = labeled.find((c) => c.communityId === id);
+    return exact ? pack([exact], exact.label) : null;
+  }
+
+  // 2. `Community N` is the 1-based human label.
+  const human = needle.match(/^community\s+(\d+)$/);
+  if (human) {
+    const id = Number(human[1]) - 1;
+    const exact = labeled.find((c) => c.communityId === id);
+    return exact ? pack([exact], exact.label) : null;
+  }
+
+  // 3. Exact label beats substring (deterministic when one label extends
+  // another, e.g. `acme` vs `acme labs`).
+  const exactLabel = labeled.filter((c) => c.label.toLowerCase() === needle);
+  if (exactLabel.length > 0) {
+    return pack(
+      exactLabel,
+      exactLabel.length === 1
+        ? exactLabel[0]!.label
+        : `${exactLabel.length} communities matching "${selector.trim()}"`,
+    );
+  }
+
+  // 4. Substring union.
+  const partial = labeled.filter((c) =>
+    c.label.toLowerCase().includes(needle),
+  );
+  if (partial.length === 0) return null;
+  return pack(
+    partial,
+    partial.length === 1
+      ? partial[0]!.label
+      : `${partial.length} communities matching "${selector.trim()}"`,
+  );
+}

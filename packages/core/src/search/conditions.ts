@@ -17,6 +17,7 @@ import { resolveScope, type WorkspaceScope } from "../workspaces/scope";
 
 /** Structural view of the contacts columns the search touches. */
 export interface ContactsColumns {
+  id: AnyColumn;
   fullName: AnyColumn;
   email: AnyColumn;
   headline: AnyColumn;
@@ -30,6 +31,8 @@ export interface ContactsColumns {
   deletedAt: AnyColumn;
   /** Derived skills verdict (JSON array text) — v2.0 Phase 5. */
   skills: AnyColumn;
+  /** Free-form tags (JSON array text) — Phase 12. */
+  tags: AnyColumn;
   /** Tenancy column (v3.0 Phase 2) — every search query is scoped through it. */
   workspaceId: AnyColumn;
 }
@@ -43,7 +46,12 @@ export interface PreparedTermFilters {
   fullQuery: string | null;
 }
 
-const SEARCHABLE_COLUMNS = [
+/**
+ * Columns the free-text terms match against. Exported so the Phase 12 match
+ * explainer attributes terms to exactly the fields the SQL tests — one list,
+ * two readers, no drift.
+ */
+export const SEARCHABLE_COLUMNS = [
   "fullName",
   "email",
   "headline",
@@ -60,6 +68,7 @@ const SEARCHABLE_COLUMNS = [
 export function buildSearchConditions(
   c: ContactsColumns,
   opts: {
+    name?: string;
     company?: string;
     role?: string;
     location?: string;
@@ -68,6 +77,8 @@ export function buildSearchConditions(
     hasEmail?: boolean;
     minScore?: number;
     skills?: string[];
+    tags?: string[];
+    contactIds?: string[];
   },
   filters: PreparedTermFilters,
   scope?: WorkspaceScope,
@@ -97,6 +108,7 @@ export function buildSearchConditions(
     if (value)
       conds.push(sql`lower(${col}) LIKE ${"%" + value.toLowerCase() + "%"}`);
   };
+  icontains(c.fullName, opts.name);
   icontains(c.company, opts.company);
   icontains(c.role, opts.role);
   icontains(c.location, opts.location);
@@ -128,6 +140,34 @@ export function buildSearchConditions(
     conds.push(
       sql`${c.skills} IS NOT NULL AND ${c.skills} LIKE ${'%"' + skill + '"%'}`,
     );
+  }
+
+  // Tags (Phase 12): same quoted-match trick as skills, but case-insensitive
+  // — tags are free-form owner labels, not taxonomy names. Quotes are
+  // stripped from the needle so a malicious tag cannot break out of the
+  // quoted match; a tag containing a quote simply matches nothing.
+  for (const raw of opts.tags ?? []) {
+    const tag = raw.trim().toLowerCase().replace(/"/g, "");
+    if (!tag) continue;
+    conds.push(
+      sql`${c.tags} IS NOT NULL AND lower(${c.tags}) LIKE ${'%"' + tag + '"%'}`,
+    );
+  }
+
+  // Id-set restriction (Phase 12): the community filter resolves to member
+  // ids before this runs, so every engine path shares one intersection
+  // mechanism. An empty set matches nothing — never everything.
+  if (opts.contactIds !== undefined) {
+    if (opts.contactIds.length === 0) {
+      conds.push(sql`1 = 0`);
+    } else {
+      conds.push(
+        sql`${c.id} IN (${sql.join(
+          opts.contactIds.map((id) => sql`${id}`),
+          sql`, `,
+        )})`,
+      );
+    }
   }
 
   return and(...conds) ?? undefined;

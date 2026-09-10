@@ -333,3 +333,77 @@ describe("executeSearch — hybrid output", () => {
     expect(output).not.toContain("Engine:");
   });
 });
+
+// ── Phase 12: name/tags/community filters and --explain ────────────────────
+
+describe("toSearchOptions — Phase 12 filters", () => {
+  it("maps --name/--tags/--community to core options", () => {
+    expect(
+      toSearchOptions({ name: "  ada ", tags: "founder, ai", community: " acme " }),
+    ).toMatchObject({
+      name: "ada",
+      tags: ["founder", "ai"],
+      community: "acme",
+    });
+  });
+
+  it("drops blank list flags and blank community selectors", () => {
+    const opts = toSearchOptions({ tags: " , ", community: "   " });
+    expect(opts.tags).toBeUndefined();
+    expect(opts.community).toBeUndefined();
+  });
+});
+
+describe("executeSearch — Phase 12 filters and --explain", () => {
+  it("filters by tags end to end", async () => {
+    const { conn } = createTestSqliteConn();
+    const now = new Date().toISOString();
+    conn.db
+      .insert(conn.schema.contacts)
+      .values([
+        { id: "t1", fullName: "Tag One", tags: ["founder"], source: "test", createdAt: now, updatedAt: now },
+        { id: "t2", fullName: "Tag Two", tags: ["design"], source: "test", createdAt: now, updatedAt: now },
+      ])
+      .run();
+    const output = await executeSearch({ tags: "founder" }, conn);
+    expect(output).toContain("Tag One");
+    expect(output).not.toContain("Tag Two");
+  });
+
+  it("prints match reasons with --explain and stays quiet without it", async () => {
+    const { conn } = createTestSqliteConn();
+    const now = new Date().toISOString();
+    conn.db
+      .insert(conn.schema.contacts)
+      .values({
+        id: "e1", fullName: "Jane Doe", company: "Stripe", role: "Engineer",
+        source: "test", relationshipScore: 0.8, createdAt: now, updatedAt: now,
+      })
+      .run();
+    const explained = await executeSearch({ query: "stripe", explain: true }, conn);
+    expect(explained).toContain("✓");
+    expect(explained).toContain("Works at Stripe");
+    const quiet = await executeSearch({ query: "stripe" }, conn);
+    expect(quiet).not.toContain("✓");
+  });
+
+  it("attaches matchReasons to --json output when --explain is set", async () => {
+    const { conn } = createTestSqliteConn();
+    const now = new Date().toISOString();
+    conn.db
+      .insert(conn.schema.contacts)
+      .values({
+        id: "j1", fullName: "Jane Doe", company: "Stripe",
+        source: "test", createdAt: now, updatedAt: now,
+      })
+      .run();
+    const parsed = JSON.parse(
+      await executeSearch({ query: "stripe", json: true, explain: true }, conn),
+    );
+    expect(parsed.contacts[0].matchReasons.length).toBeGreaterThan(0);
+    const plain = JSON.parse(
+      await executeSearch({ query: "stripe", json: true }, conn),
+    );
+    expect(plain.contacts[0].matchReasons).toBeUndefined();
+  });
+});

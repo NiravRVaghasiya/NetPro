@@ -55,6 +55,7 @@ export default async function AppLayout({
         <Link href="/observatory">Observatory</Link>
         <Link href="/network">Network</Link>
         <Link href="/search">Search</Link>
+        <Link href="/pathfinder">Pathfinder</Link>
         <Link href="/people">People</Link>
         <Link href="/activity">Activity</Link>
         <Link href="/settings">Settings</Link>
