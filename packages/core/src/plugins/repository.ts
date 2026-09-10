@@ -288,6 +288,53 @@ export async function updatePluginSettings(
   return { ...existing, settings, updatedAt: now };
 }
 
+// v3.0 Phase 6 — marketplace install-over: replace the recorded version and
+// manifest, keep the enabled state and settings untouched.
+export async function updatePluginVersion(
+  conn: Conn,
+  name: string,
+  input: { version: string; manifest: PluginManifest; installedFrom?: string | null },
+  scope?: WorkspaceScope
+): Promise<PluginListItem> {
+  const existing = await getPluginByName(conn, name, scope);
+  if (!existing) throw new PluginError('not_found', `Plugin ${name} not found.`);
+  const resolved = resolveScope(scope);
+  const now = new Date().toISOString();
+  const manifestJson = JSON.stringify(input.manifest);
+
+  if (conn.dialect === 'sqlite') {
+    const t = conn.schema.plugins;
+    await conn.db
+      .update(t)
+      .set({
+        version: input.version,
+        manifest: manifestJson,
+        installedFrom: input.installedFrom ?? existing.installedFrom,
+        updatedAt: now,
+      })
+      .where(and(eq(t.workspaceId, resolved.workspaceId), eq(t.name, name.trim())));
+  } else {
+    const t = conn.schema.plugins;
+    await conn.db
+      .update(t)
+      .set({
+        version: input.version,
+        manifest: manifestJson,
+        installedFrom: input.installedFrom ?? existing.installedFrom,
+        updatedAt: now,
+      })
+      .where(and(eq(t.workspaceId, resolved.workspaceId), eq(t.name, name.trim())));
+  }
+
+  return {
+    ...existing,
+    version: input.version,
+    manifest: input.manifest,
+    installedFrom: input.installedFrom ?? existing.installedFrom,
+    updatedAt: now,
+  };
+}
+
 export async function deletePlugin(conn: Conn, name: string, scope?: WorkspaceScope): Promise<void> {
   const existing = await getPluginByName(conn, name, scope);
   if (!existing) throw new PluginError('not_found', `Plugin ${name} not found.`);

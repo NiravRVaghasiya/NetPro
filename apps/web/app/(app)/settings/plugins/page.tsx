@@ -22,7 +22,7 @@ export default async function PluginsPage() {
         Plugins run in-process with Node privileges. The permission manifest enforces the network boundary and scopes the data boundary, but a malicious plugin is defended only by operator review — nothing is auto-installed. Review permissions before enabling.
       </p>
       <p className="text-xs text-slate-400 mb-6">
-        Trust model: operator-trusted in-process code. Network hosts are allowlisted; data API is workspace-scoped. Marketplace (Phase 6) will show permissions before install.
+        Trust model: operator-trusted in-process code. Network hosts are allowlisted; data API is workspace-scoped. The marketplace below lists the configured static index — every install is checksum-verified, manifest-matched, and lands disabled until you review its permissions and enable it.
       </p>
       <PluginsClient initialPlugins={plugins} workspaceId={scope.workspaceId} role={scope.role} />
     </div>

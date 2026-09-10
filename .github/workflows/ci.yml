@@ -45,6 +45,24 @@ jobs:
       - name: Build
         run: npm run build
 
+      # v3.0 Phase 6: the reference plugin installs from the shipped index
+      # end-to-end — index fetch, checksum verify, extract, register
+      # disabled, permissions-gated enable — over a scratch sqlite database.
+      # file:// URLs keep the smoke hermetic (no network beyond npm).
+      - name: Marketplace end-to-end smoke
+        run: |
+          export MARKETPLACE_INDEX_URL="file://$PWD/marketplace/index.json"
+          export MARKETPLACE_NO_CACHE=true
+          export NETPRO_PLUGIN_DIR="$RUNNER_TEMP/netpro-plugins"
+          export DB_DIALECT=sqlite
+          export DB_PATH="$RUNNER_TEMP/netpro-marketplace.db"
+          node apps/cli/dist/index.js plugin search example
+          node apps/cli/dist/index.js plugin install example-event-discovery
+          node apps/cli/dist/index.js plugin update example-event-discovery
+          node apps/cli/dist/index.js plugin enable example-event-discovery --i-have-reviewed-permissions
+          node apps/cli/dist/index.js plugin list
+          test -f "$NETPRO_PLUGIN_DIR/example-event-discovery/manifest.json"
+
   postgres:
     # Phases 1–5 shipped Postgres support that compiled but was never executed
     # against a real server. That gap hid a migration race that failed 5 of 6

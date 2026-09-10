@@ -7,6 +7,61 @@ the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint
 
 ## [Unreleased] — v3.0 platform work
 
+### Added — Phase 6 (complete): self-hosted marketplace
+
+- Reference index `marketplace/index.json` (schema 1) in this repo with the
+  example plugin as entry #1, plus its GNU-tar-built tarball in
+  `marketplace/tarballs/` and a `marketplace/README.md` documenting the entry
+  format, the verifier's five checks, and how to rebuild the tarball. Tarball
+  URLs may be relative to the index, so a mirrored directory self-hosts with
+  no edits. No migration — the Phase 5 `plugins` table already stores
+  everything install/update needs.
+- Core `plugins/marketplace.ts`: static index fetch (plain GET, static user
+  agent, no telemetry, 1-hour local cache with `--refresh`/`?refresh=1`
+  bypass), strict index validation (schema drift, entry reuse of the full
+  manifest validation, sha256/git-sha shapes, credential-bearing URLs
+  refused), multi-word search, and the install/update/remove orchestration.
+  Installs download, checksum-verify (mismatch = hard audited refusal),
+  extract, verify the archive manifest matches the index listing exactly
+  (name, version, permissions), check the engine range, and register
+  **disabled** behind the Phase 5 permissions review gate. Updates are
+  install-over with version monotonicity (identical = no-op, downgrades
+  refused unless forced, enabled state and settings preserved, enabled
+  plugins reloaded). `rm` now unregisters **and** deletes the files.
+  Git sources clone non-interactively (https/file only) and verify the
+  checked-out HEAD against the pinned commit; the `.git` directory never
+  ships into the plugin dir.
+- Core `plugins/tarball.ts`: vendored minimal USTAR reader over Node's
+  `zlib` (no new dependencies) — regular files + directories in, symlinks,
+  hardlinks, absolute paths, `..` escapes, truncation, bad checksums, and
+  oversized archives out (8 MiB compressed / 32 MiB inflated / 1000 files /
+  8 MiB per file). GNU tar compatibility is proven by extracting the shipped
+  tarball in the test suite.
+- CLI: `netpro plugin search [term]` (index URL + cache state in the header),
+  `netpro plugin install <marketplace-name>` (existing-file args keep the
+  Phase 5 local-manifest behavior; marketplace installs print the permissions
+  review and the enable command), `netpro plugin update <name> [--force]`
+  (noop/downgrade messaging), and `netpro plugin rm` deleting files. New
+  `plugin-marketplace.test.ts` covers the executors against fixture indexes.
+- Web (admin+): `GET /api/plugins/marketplace` (`?q=`, `?refresh=1`),
+  `POST /api/plugins/install` (201 + permissions review payload),
+  `POST /api/plugins/[name]/update`, `DELETE /api/plugins/[name]` (now also
+  removes files), and a shared `pluginErrorResponse` mapping supply-chain
+  failures to 502 with user-facing messages. `/settings/plugins` gained a
+  marketplace browser (search, refresh, per-entry permissions, install) with
+  update badges on installed plugins and a confirm-step enable dialog (review
+  checkbox before the first enable). Role-floor tests assert 403s.
+- Operator surface: `MARKETPLACE_INDEX_URL` (default: this repo's raw
+  `marketplace/index.json`), `NETPRO_PLUGIN_DIR`, and `MARKETPLACE_NO_CACHE`
+  in both `.env.example` files; a deployment.md marketplace section (index
+  format, self-hosting, verification checks, limits, serverless note, audit
+  events); a getting-started install cookbook; the Docker image now ships
+  `plugins/` + `marketplace/`; and CI installs the reference plugin from the
+  shipped index end-to-end (search → install → enable → list over sqlite).
+- Trust model restated: the marketplace is a static index with checksums, not
+  a curated store — nothing is auto-installed, and the permissions review
+  gate stands in front of every enable.
+
 ### Added — Phase 5 (complete): plugin runtime & manifest
 
 - Migration `0013_plugins` (both dialects): `plugins` table with `id`, `workspace_id` (FK cascade), `name`, `version`, `manifest` JSON, `enabled` bool default false, `installed_from`, `installed_by_user`, `plugin_settings` JSON, `created_at`, `updated_at`; UNIQUE `(workspace_id, name)` plus indexes on workspace and workspace+enabled. Additive, idempotent, single-workspace single-member behaves identically to v2.5 (no plugins, empty registry, existing queries unchanged).

@@ -4,9 +4,26 @@
 import type { PluginManifest, SettingSpec, PluginCapability } from './types';
 import { PLUGIN_CAPABILITIES, MAX_SETTINGS, MAX_MANIFEST_SIZE } from './types';
 
+export type PluginErrorCode =
+  | 'invalid_manifest'
+  | 'engine_mismatch'
+  | 'not_found'
+  | 'conflict'
+  | 'forbidden'
+  // v3.0 Phase 6 — marketplace codes (same error class, widened vocabulary).
+  | 'invalid_input'
+  | 'invalid_index'
+  | 'fetch_failed'
+  | 'too_large'
+  | 'checksum_mismatch'
+  | 'manifest_mismatch'
+  | 'downgrade_refused'
+  | 'git_source_failed'
+  | 'unsupported_scheme';
+
 export class PluginError extends Error {
-  readonly code: 'invalid_manifest' | 'engine_mismatch' | 'not_found' | 'conflict' | 'forbidden';
-  constructor(code: PluginError['code'], message: string) {
+  readonly code: PluginErrorCode;
+  constructor(code: PluginErrorCode, message: string) {
     super(message);
     this.name = 'PluginError';
     this.code = code;
@@ -272,6 +289,20 @@ function satisfiesSingle(ver: SemVer, rangePart: string): boolean {
     default:
       return false;
   }
+}
+
+/**
+ * Compare two semver versions for marketplace update monotonicity.
+ * Returns -1 / 0 / 1. Throws PluginError(invalid_input) on malformed input.
+ */
+export function compareSemver(a: string, b: string): -1 | 0 | 1 {
+  const parsedA = parseSemver(a);
+  const parsedB = parseSemver(b);
+  if (!parsedA || !parsedB) {
+    throw new PluginError('invalid_input', `Cannot compare non-semver versions: ${a} vs ${b}`);
+  }
+  const cmp = compare(parsedA, parsedB);
+  return cmp < 0 ? -1 : cmp > 0 ? 1 : 0;
 }
 
 export function definePlugin(manifest: PluginManifest, register: (api: import('./types').PluginApi) => void | Promise<void>) {
