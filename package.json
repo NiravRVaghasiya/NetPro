@@ -7,6 +7,10 @@
   "engines": {
     "node": ">=20"
   },
+  "allowScripts": {
+    "better-sqlite3": true,
+    "esbuild": true
+  },
   "packageManager": "npm@11.17.0",
   "workspaces": [
     "apps/*",
