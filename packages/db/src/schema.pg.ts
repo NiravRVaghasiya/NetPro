@@ -538,7 +538,7 @@ export const plugins = pgTable('plugins', {
   workspaceNameUnique: unique('plugins_workspace_name_unique').on(t.workspaceId, t.name),
   workspaceIdx: index('idx_plugins_workspace').on(t.workspaceId),
   workspaceEnabledIdx: index('idx_plugins_workspace_enabled').on(t.workspaceId, t.enabled),
-})));
+}));
 
 // Webhooks (v3.0 Phase 7 — outbound webhooks with HMAC-SHA256 signatures)
 export const webhooks = pgTable('webhooks', {

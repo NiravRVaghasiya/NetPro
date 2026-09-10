@@ -4,11 +4,11 @@
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FNiravRVaghasiya%2FNetPro&env=DB_DIALECT,DATABASE_URL,NEXTAUTH_SECRET,GITHUB_CLIENT_ID,GITHUB_CLIENT_SECRET,NETPRO_OWNER_GITHUB_ID&envDescription=NetPro%20needs%20a%20Postgres%20URL%2C%20an%20auth%20secret%2C%20a%20GitHub%20OAuth%20app%2C%20and%20your%20numeric%20GitHub%20user%20ID&envLink=https%3A%2F%2Fgithub.com%2FNiravRVaghasiya%2FNetPro%2Fblob%2Fmaster%2Fdocs%2Fdeployment.md&project-name=netpro&repository-name=netpro)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Release: v2.5.0](https://img.shields.io/badge/Release-v2.5.0-2ea44f)](https://github.com/NiravRVaghasiya/NetPro/releases)
+[![Release: v3.0.0](https://img.shields.io/badge/Release-v3.0.0-2ea44f)](https://github.com/NiravRVaghasiya/NetPro/releases)
 [![Changelog](https://img.shields.io/badge/Changelog-CHANGELOG.md-8A2BE2)](CHANGELOG.md)
 
-**v1.0 (Phases 1–6), v1.5 (Phases 7–8), v2.0 "The Strategist", and v2.5
-"The Observer" are implemented** on top of the v0.1-alpha scaffold:
+**v1.0 (Phases 1–6), v1.5 (Phases 7–8), v2.0 "The Strategist", v2.5
+"The Observer", and v3.0 "The Platform" are implemented** on top of the v0.1-alpha scaffold:
 
 - **Phase 1 — Import, Enrichment & Export:** LinkedIn CSV import with
   dedup/merge, three-provider contact enrichment (Hunter.io, People Data Labs,

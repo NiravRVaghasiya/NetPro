@@ -19,6 +19,7 @@ import { registerEventsCommand } from "./commands/events";
 import { registerContentCommand } from "./commands/content";
 import { registerTeamCommand } from "./commands/team";
 import { registerPluginCommand } from "./commands/plugin";
+import { registerWebhookCommand } from "./commands/webhook";
 
 export function createProgram(): Command {
   const program = new Command();
@@ -26,7 +27,7 @@ export function createProgram(): Command {
   program
     .name("netpro")
     .description("NetPro — your professional network, owned by you")
-    .version("2.5.0")
+    .version("3.0.0")
     // v3.0 Phase 2 — one workspace scope per invocation. Precedence:
     // flag → NETPRO_WORKSPACE → config → bootstrap workspace.
     .option(
@@ -54,6 +55,7 @@ export function createProgram(): Command {
   registerContentCommand(program);
   registerTeamCommand(program);
   registerPluginCommand(program);
+  registerWebhookCommand(program);
 
   return program;
 }

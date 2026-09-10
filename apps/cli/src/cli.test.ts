@@ -5,13 +5,13 @@ describe('CLI root program', () => {
   it('is named netpro with a version', () => {
     const program = createProgram();
     expect(program.name()).toBe('netpro');
-    expect(program.version()).toBe('2.5.0');
+    expect(program.version()).toBe('3.0.0');
   });
 
-  it('registers all twenty top-level commands (v3.0 Phase 1 adds team, Phase 5 adds plugin)', () => {
+  it('registers all twenty-one top-level commands (v3.0 Phase 1 adds team, Phase 5 adds plugin, Phase 7 adds webhook)', () => {
     const program = createProgram();
     const names = program.commands.map((c) => c.name());
-    expect(names).toEqual(['init', 'config', 'import', 'enrich', 'search', 'reindex', 'outreach', 'analyze', 'path', 'track', 'edge', 'campaign', 'export', 'card', 'migrate', 'skills', 'events', 'content', 'team', 'plugin']);
+    expect(names).toEqual(['init', 'config', 'import', 'enrich', 'search', 'reindex', 'outreach', 'analyze', 'path', 'track', 'edge', 'campaign', 'export', 'card', 'migrate', 'skills', 'events', 'content', 'team', 'plugin', 'webhook']);
   });
 
   it('registers the content subcommands (v2.5 Phase 5)', () => {

@@ -1,9 +1,6 @@
 import Link from "next/link";
 import { isOwnerGitHubId } from "@/lib/owner";
 
-// Read-only integration status. The web app is configured server-side via
-// environment variables (self-hosted, single-owner deployment); this panel
-// reports presence only and never renders secret values.
 export const metadata = {
   title: "Settings — NetPro",
 };
@@ -127,6 +124,18 @@ export default function SettingsPage() {
           className="text-sm font-medium text-emerald-800 underline underline-offset-4"
         >
           Manage plugins →
+        </Link>
+      </section>
+      <section className="my-5 rounded-xl border border-slate-200 p-5">
+        <h2 className="text-base font-semibold text-[#183c30]">Webhooks</h2>
+        <p className="my-2 text-sm leading-6 text-slate-500">
+          Outbound webhooks push workspace events to Zapier, n8n, Make, or any URL. Signed with HMAC-SHA256, retried with backoff, 30-day delivery log. v3.0 Phase 7.
+        </p>
+        <Link
+          href="/settings/webhooks"
+          className="text-sm font-medium text-emerald-800 underline underline-offset-4"
+        >
+          Manage webhooks →
         </Link>
       </section>
       <p style={{ color: "#555" }}>

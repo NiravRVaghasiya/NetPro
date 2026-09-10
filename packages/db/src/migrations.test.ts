@@ -1084,3 +1084,108 @@ describe("plugins migration (v3.0 phase 5)", () => {
     }
   });
 });
+
+describe("webhooks migration (v3.0 phase 7)", () => {
+  it("creates webhooks and webhook_deliveries tables with workspace scoping and is idempotent", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: folder });
+
+      const tables = sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('webhooks','webhook_deliveries') ORDER BY name",
+        )
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(tables).toEqual(["webhook_deliveries", "webhooks"]);
+
+      const whCols = sqlite
+        .prepare("PRAGMA table_info(webhooks)")
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(whCols).toEqual(
+        expect.arrayContaining([
+          "id",
+          "workspace_id",
+          "url",
+          "secret",
+          "event_allowlist",
+          "status",
+          "created_at",
+          "updated_at",
+        ]),
+      );
+
+      const wdCols = sqlite
+        .prepare("PRAGMA table_info(webhook_deliveries)")
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(wdCols).toEqual(
+        expect.arrayContaining([
+          "id",
+          "webhook_id",
+          "event",
+          "payload",
+          "status",
+          "attempt",
+          "max_attempts",
+          "created_at",
+          "updated_at",
+        ]),
+      );
+
+      const idxNames = sqlite
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_webhook%'")
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(idxNames).toEqual(
+        expect.arrayContaining([
+          "idx_webhooks_workspace",
+          "idx_webhooks_status",
+          "idx_webhook_deliveries_webhook",
+          "idx_webhook_deliveries_status",
+        ]),
+      );
+
+      // Insert via drizzle
+      db.insert(schema.webhooks)
+        .values({
+          id: "wh1",
+          workspaceId: "default",
+          url: "https://example.com/hook",
+          secret: "secret123",
+          eventAllowlist: JSON.stringify(["contact.created"]),
+          status: "enabled",
+          createdAt: "2026-09-10T00:00:00.000Z",
+          updatedAt: "2026-09-10T00:00:00.000Z",
+        })
+        .run();
+      db.insert(schema.webhookDeliveries)
+        .values({
+          id: "d1",
+          webhookId: "wh1",
+          event: "contact.created",
+          payload: "{}",
+          status: "pending",
+          attempt: 1,
+          maxAttempts: 8,
+          createdAt: "2026-09-10T00:00:00.000Z",
+          updatedAt: "2026-09-10T00:00:00.000Z",
+        })
+        .run();
+      expect(sqlite.prepare("SELECT url FROM webhooks WHERE id = 'wh1'").get()).toEqual({
+        url: "https://example.com/hook",
+      });
+      expect(sqlite.prepare("SELECT event FROM webhook_deliveries WHERE id = 'd1'").get()).toEqual({
+        event: "contact.created",
+      });
+
+      // Idempotent re-run
+      migrate(db, { migrationsFolder: folder });
+      expect(sqlite.prepare("SELECT count(*) AS n FROM webhooks WHERE id = 'wh1'").get()).toEqual({ n: 1 });
+    } finally {
+      sqlite.close();
+    }
+  });
+});
