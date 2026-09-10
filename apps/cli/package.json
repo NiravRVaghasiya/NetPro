@@ -8,7 +8,7 @@
     "netpro": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "node ../../node_modules/tsup/dist/cli-default.js",
     "dev": "tsx src/index.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
