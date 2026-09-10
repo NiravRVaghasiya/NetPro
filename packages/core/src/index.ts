@@ -28,3 +28,6 @@ export * as vault from './crypto';
 
 // v3.0 Phase 5 — plugin runtime & manifest.
 export * as plugins from './plugins';
+
+// v3.0 Phase 7 — outbound webhooks
+export * as webhooks from './webhooks';

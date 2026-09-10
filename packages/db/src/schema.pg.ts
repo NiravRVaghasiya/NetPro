@@ -538,6 +538,41 @@ export const plugins = pgTable('plugins', {
   workspaceNameUnique: unique('plugins_workspace_name_unique').on(t.workspaceId, t.name),
   workspaceIdx: index('idx_plugins_workspace').on(t.workspaceId),
   workspaceEnabledIdx: index('idx_plugins_workspace_enabled').on(t.workspaceId, t.enabled),
+})));
+
+// Webhooks (v3.0 Phase 7 — outbound webhooks with HMAC-SHA256 signatures)
+export const webhooks = pgTable('webhooks', {
+  id: text('id').primaryKey().notNull(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  url: text('url').notNull(),
+  secret: text('secret').notNull(),
+  eventAllowlist: text('event_allowlist').notNull().default('[]'),
+  status: text('status').notNull().default('paused'),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+}, (t) => ({
+  workspaceIdx: index('idx_webhooks_workspace').on(t.workspaceId),
+  statusIdx: index('idx_webhooks_status').on(t.status),
+}));
+
+// Webhook deliveries audit trail (v3.0 Phase 7)
+export const webhookDeliveries = pgTable('webhook_deliveries', {
+  id: text('id').primaryKey().notNull(),
+  webhookId: text('webhook_id').notNull().references(() => webhooks.id, { onDelete: 'cascade' }),
+  event: text('event').notNull(),
+  payload: text('payload').notNull(),
+  status: text('status').notNull().default('pending'),
+  receivedAt: timestamp('received_at', { mode: 'date' }),
+  responseCode: integer('response_code'),
+  errorMessage: text('error_message'),
+  attempt: integer('attempt').notNull().default(1),
+  maxAttempts: integer('max_attempts').notNull().default(8),
+  createdAt: timestamp('created_at', { mode: 'date' }).notNull().$defaultFn(() => new Date()),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).notNull().$defaultFn(() => new Date()),
+}, (t) => ({
+  webhookIdx: index('idx_webhook_deliveries_webhook').on(t.webhookId),
+  statusIdx: index('idx_webhook_deliveries_status').on(t.status),
+  attemptIdx: index('idx_webhook_deliveries_attempt').on(t.attempt),
 }));
 
 // Separate partial indexes make the nullable workspace principal truly unique.
