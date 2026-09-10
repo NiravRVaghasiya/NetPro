@@ -105,6 +105,18 @@ export default function SettingsPage() {
           Manage team →
         </Link>
       </section>
+      <section className="my-5 rounded-xl border border-slate-200 p-5">
+        <h2 className="text-base font-semibold text-[#183c30]">Activity log</h2>
+        <p className="my-2 text-sm leading-6 text-slate-500">
+          Audit trail of workspace actions — CRM, invites, campaigns, member changes. Admin+ only, filterable.
+        </p>
+        <Link
+          href="/settings/activity"
+          className="text-sm font-medium text-emerald-800 underline underline-offset-4"
+        >
+          View activity →
+        </Link>
+      </section>
       <p style={{ color: "#555" }}>
         Integrations are configured with server-side environment variables (BYO
         API keys — NetPro never stores them). Restart the server after changing

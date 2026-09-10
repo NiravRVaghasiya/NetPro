@@ -10,11 +10,14 @@
 // House pattern: exported execute*/render* functions take an injected conn
 // and clock (testable without a process), and the commander actions are thin
 // wrappers that open the database and print.
+// v3.0 Phase 3 — assignment: follow-ups gain assigned_to, list filters
+// assignedToMe/unassigned, assign/unassign commands, author stamps in output.
 import type { Command } from "commander";
 import type { SqliteConn, PgConn } from "@netpro/db";
 import { resolveContactRef } from "@netpro/core/src/ai";
 import type { WorkspaceScope } from "@netpro/core/src/workspaces/scope";
 import {
+  assignFollowUp,
   cancelFollowUp,
   completeFollowUp,
   createFollowUp,
@@ -49,6 +52,7 @@ export interface TrackAddOptions {
   followUp?: string | boolean;
   reason?: string;
   channel?: string;
+  assignedTo?: string;
   json?: boolean;
 }
 
@@ -60,6 +64,15 @@ export interface TrackListOptions {
   all?: boolean;
   contact?: string;
   limit?: string;
+  assignedTo?: string;
+  assignedToMe?: boolean;
+  unassigned?: boolean;
+  json?: boolean;
+}
+
+export interface TrackAssignOptions {
+  to?: string;
+  unassign?: boolean;
   json?: boolean;
 }
 
@@ -151,7 +164,9 @@ export function renderFollowUpLine(f: FollowUpRow, now: Date): string {
   const recurring =
     f.recurring && f.recurrenceRule ? ` · every ${f.recurrenceRule}` : "";
   const company = f.contactCompany ? ` (${f.contactCompany})` : "";
-  return `  ${marker} ${f.contactName}${company} — due ${utcDay(f.effectiveDueAt)} (${relativeDay(f.effectiveDueAt, now)})${reason}${recurring}  [${f.id.slice(0, 8)}]`;
+  const assigned = f.assignedTo ? ` · assigned to ${f.assignedTo.slice(0, 8)}` : " · unassigned";
+  const author = f.createdByUser ? ` · by ${f.createdByUser.slice(0, 8)}` : "";
+  return `  ${marker} ${f.contactName}${company} — due ${utcDay(f.effectiveDueAt)} (${relativeDay(f.effectiveDueAt, now)})${reason}${recurring}${assigned}${author}  [${f.id.slice(0, 8)}]`;
 }
 
 export function renderInteractionLine(
@@ -162,7 +177,8 @@ export function renderInteractionLine(
   const direction = i.direction
     ? ` ${i.direction === "outbound" ? "→" : "←"}`
     : "";
-  return `  ${utcDay(i.occurredAt)} (${relativeDay(i.occurredAt, now)}) · ${i.type}${direction} · ${i.contactName}${detail ? ` — "${detail}"` : ""}`;
+  const author = (i as { createdByUser?: string | null }).createdByUser ? ` · by ${((i as { createdByUser?: string | null }).createdByUser as string).slice(0, 8)}` : "";
+  return `  ${utcDay(i.occurredAt)} (${relativeDay(i.occurredAt, now)}) · ${i.type}${direction} · ${i.contactName}${author}${detail ? ` — "${detail}"` : ""}`;
 }
 
 function summaryLine(counts: {
@@ -281,6 +297,7 @@ export async function executeTrackAdd(
         contactId: contact.id,
         dueInMs: followUpMs,
         reason: opts.reason ?? `Follow up from ${metAt}`,
+        assignedTo: opts.assignedTo?.trim() || null,
       },
       { now },
       scope,
@@ -335,7 +352,15 @@ export async function executeTrackList(
   const view: FollowUpView = section === "pending" ? "pending" : section;
   const summary = await listFollowUps(
     conn,
-    { view, contactId, limit, now },
+    {
+      view,
+      contactId,
+      limit,
+      now,
+      assignedTo: opts.assignedTo?.trim() || undefined,
+      assignedToMe: opts.assignedToMe ? scope?.userId : undefined,
+      unassigned: opts.unassigned ? true : undefined,
+    },
     scope,
   );
   if (opts.json) return JSON.stringify(summary, null, 2);
@@ -427,6 +452,22 @@ export async function executeTrackCancel(
   return `✗ Cancelled follow-up for ${cancelled.contactName} (${utcDay(cancelled.dueAt)}).`;
 }
 
+export async function executeTrackAssign(
+  idOrPrefix: string,
+  opts: TrackAssignOptions,
+  conn: SqliteConn | PgConn,
+  now: Date = new Date(),
+  scope?: WorkspaceScope,
+): Promise<string> {
+  const id = await resolveFollowUpId(conn, idOrPrefix, scope);
+  const assignedTo = opts.unassign ? null : opts.to?.trim() || null;
+  const assigned = await assignFollowUp(conn, id, assignedTo, { now }, scope);
+  if (opts.json) return JSON.stringify(assigned, null, 2);
+  return assigned.assignedTo
+    ? `✓ Assigned follow-up ${assigned.id.slice(0, 8)} to ${assigned.assignedTo}`
+    : `✓ Unassigned follow-up ${assigned.id.slice(0, 8)}`;
+}
+
 async function run(
   cmd: Command,
   fn: (conn: SqliteConn | PgConn, scope?: WorkspaceScope) => Promise<string>,
@@ -493,6 +534,7 @@ export function registerTrackCommand(program: Command): void {
     )
     .option("--reason <text>", "Why the follow-up is needed")
     .option("--channel <channel>", "Meeting channel (default in_person)")
+    .option("--assigned-to <userId>", "Assign follow-up to a workspace user id")
     .option("--json", "Print the result as JSON")
     .action((contact: string, opts: TrackAddOptions) =>
       run(track, (conn, scope) =>
@@ -513,6 +555,9 @@ export function registerTrackCommand(program: Command): void {
       "Filter to one contact (email, id, or full name)",
     )
     .option("--limit <n>", "Max rows (default 20, max 200)", "20")
+    .option("--assigned-to <userId>", "Filter to assigned user id")
+    .option("--assigned-to-me", "Only follow-ups assigned to current workspace user")
+    .option("--unassigned", "Only unassigned follow-ups")
     .option("--json", "Print the result as JSON")
     .action((opts: TrackListOptions) =>
       run(track, (conn, scope) =>
@@ -549,6 +594,18 @@ export function registerTrackCommand(program: Command): void {
     .action((id: string, opts: { json?: boolean }) =>
       run(track, (conn, scope) =>
         executeTrackCancel(id, opts, conn, new Date(), scope),
+      ),
+    );
+
+  track
+    .command("assign <followUpId>")
+    .description("Assign a follow-up to a user or unassign")
+    .option("--to <userId>", "User id to assign to")
+    .option("--unassign", "Unassign (assigned_to = null)")
+    .option("--json", "Print the result as JSON")
+    .action((id: string, opts: TrackAssignOptions) =>
+      run(track, (conn, scope) =>
+        executeTrackAssign(id, opts, conn, new Date(), scope),
       ),
     );
 }

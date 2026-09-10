@@ -38,12 +38,18 @@ export async function GET(request: Request): Promise<Response> {
       throw new CrmRequestError(400, `Unknown view "${viewParam}". Expected one of: ${VIEWS.join(', ')}.`);
     }
     const scope = await requireScope();
+    const assignedToParam = p.get('assignedTo')?.trim() || undefined;
+    const assignedToMe = p.get('assignedToMe') === '1' || p.get('assignedToMe') === 'true';
+    const unassigned = p.get('unassigned') === '1' || p.get('unassigned') === 'true';
     const summary = await listFollowUps(
       conn,
       {
         view: viewParam as FollowUpView,
         contactId: p.get('contactId')?.trim() || undefined,
         limit,
+        assignedTo: assignedToParam ?? undefined,
+        assignedToMe: assignedToMe ? scope.userId : undefined,
+        unassigned: unassigned ? true : undefined,
       },
       scope,
     );
@@ -77,6 +83,7 @@ export async function POST(request: Request): Promise<Response> {
               : Number(dueInMs),
         reason: (body.reason as string | undefined) ?? undefined,
         recurrenceRule: (body.recurrenceRule as string | undefined) ?? undefined,
+        assignedTo: (body.assignedTo as string | undefined) ?? undefined,
       },
       {},
       scope,

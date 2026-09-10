@@ -959,3 +959,58 @@ describe("workspace default migration (v3.0 phase 2)", () => {
     }
   });
 });
+
+describe("team collaboration migration (v3.0 phase 3)", () => {
+  it("adds assigned_to to follow_ups with indexes and is idempotent", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: folder });
+
+      const cols = sqlite
+        .prepare("PRAGMA table_info(follow_ups)")
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(cols).toContain("assigned_to");
+
+      const idxNames = sqlite
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_followups_%'")
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(idxNames).toEqual(
+        expect.arrayContaining([
+          "idx_followups_assigned_to",
+          "idx_followups_workspace_assigned",
+          "idx_followups_workspace_status_assigned_due",
+        ]),
+      );
+
+      // Insert a follow-up with assigned_to via drizzle
+      sqlite
+        .prepare("INSERT INTO contacts (id, full_name, source, created_at, updated_at, workspace_id) VALUES (?,?,?,?,?,?)")
+        .run("c1", "Ada", "test", "2026-01-01", "2026-01-01", "default");
+      db.insert(schema.followUps)
+        .values({
+          id: "f1",
+          workspaceId: "default",
+          contactId: "c1",
+          reason: "test",
+          dueAt: "2026-09-10T00:00:00.000Z",
+          assignedTo: "user-123",
+          createdAt: "2026-09-10T00:00:00.000Z",
+        })
+        .run();
+      expect(sqlite.prepare("SELECT assigned_to FROM follow_ups WHERE id = 'f1'").get()).toEqual({
+        assigned_to: "user-123",
+      });
+
+      // Idempotent re-run
+      migrate(db, { migrationsFolder: folder });
+      expect(
+        sqlite.prepare("SELECT count(*) AS n FROM follow_ups WHERE id = 'f1'").get(),
+      ).toEqual({ n: 1 });
+    } finally {
+      sqlite.close();
+    }
+  });
+});

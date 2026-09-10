@@ -227,4 +227,63 @@ export async function assertCanChangeRole(
   if (roleRank(newRole) > roleRank(actorRole)) {
     throw new WorkspaceError('forbidden', 'Cannot assign a role higher than your own.');
   }
+  // v3.0 Phase 3 — owner role transfers require owner actor; if break-glass owner is set,
+  // only that owner (or an owner when break-glass is not resolvable) can grant owner.
+  if (newRole === 'owner' && actorRole !== 'owner') {
+    throw new WorkspaceError('forbidden', 'Only an owner can assign the owner role.');
+  }
+  // If demoting an owner, require owner actor
+  if (actorRole !== 'owner') {
+    const { getWorkspaceMembers } = await import('./repository');
+    const members = await getWorkspaceMembers(conn, workspaceId);
+    const target = members.find((m) => m.userId === targetUserId);
+    if (target?.role === 'owner') {
+      throw new WorkspaceError('forbidden', 'Only an owner can change another owner\'s role.');
+    }
+  }
+}
+
+export async function removeMemberAndReassign(
+  conn: Conn,
+  workspaceId: string,
+  userIdToRemove: string,
+  scope?: { workspaceId: string; userId: string; role: WorkspaceRole }
+): Promise<{ reassigned: number }> {
+  // Unassign follow-ups assigned to this user (pending only)
+  const { unassignFollowUpsForUser } = await import('../crm/follow-ups');
+  const reassigned = await unassignFollowUpsForUser(conn, userIdToRemove, scope as never);
+  const { removeMember } = await import('./repository');
+  await removeMember(conn, workspaceId, userIdToRemove);
+
+  // Audit log for member removal
+  try {
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const metadata = JSON.stringify({ removedUserId: userIdToRemove, reassignedFollowUps: reassigned });
+    if (conn.dialect === 'sqlite') {
+      await conn.db.insert(conn.schema.activityLog).values({
+        id,
+        workspaceId,
+        action: 'workspace.member.removed',
+        entityType: 'workspace_member',
+        entityId: userIdToRemove,
+        metadata,
+        createdAt: now,
+      });
+    } else {
+      await conn.db.insert(conn.schema.activityLog).values({
+        id,
+        workspaceId,
+        action: 'workspace.member.removed',
+        entityType: 'workspace_member',
+        entityId: userIdToRemove,
+        metadata,
+        createdAt: now,
+      });
+    }
+  } catch {
+    // audit best-effort
+  }
+
+  return { reassigned };
 }

@@ -107,7 +107,7 @@ function clampInt(
 /** Escape LIKE wildcards so a search for `100%` is not "anything". */
 function likePattern(query: string): string {
   const trimmed = query.trim().slice(0, EVENT_LIMITS.query).toLowerCase();
-  return `%${trimmed.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  return `%${trimmed.replace(/[!%_]/g, (c) => `!${c}`)}%`;
 }
 
 function num(value: unknown): number {
@@ -214,7 +214,7 @@ export interface ListEventsResult {
 function buildEventFilters(opts: ListEventsOptions): { where: SQL } {
   const q = opts.query?.trim();
   const parts: SQL[] = [workspaceSql(opts.scope, "e.workspace_id")];
-  if (q) parts.push(sql`lower(e.name) LIKE ${likePattern(q)} ESCAPE '\\'`);
+  if (q) parts.push(sql`lower(e.name) LIKE ${likePattern(q)} ESCAPE '!'`);
   if (opts.upcoming === true) {
     const nowIso = resolveNow(opts).toISOString();
     parts.push(sql`e.starts_at IS NOT NULL AND e.starts_at >= ${nowIso}`);

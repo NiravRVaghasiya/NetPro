@@ -9,6 +9,11 @@
 // moves a follow-up *later*: its effective due date is
 // max(dueAt, snoozedUntil). Everything is ANSI SQL + pure JS bucketing, so
 // SQLite and Postgres behave identically.
+//
+// v3.0 Phase 3 — assignment: follow-ups gain `assigned_to` (nullable user id;
+// null = anyone). Filters "assigned to me" and "unassigned" surface in
+// /contacts and dashboard. Reassignment on member removal falls back to
+// unassigned with an audit log entry.
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { SqliteConn, PgConn } from '@netpro/db';
@@ -35,6 +40,8 @@ export interface FollowUpRow {
   contactCompany: string | null;
   /** v3.0 Phase 2 — workspace user id that created this, null for system path. */
   createdByUser?: string | null;
+  /** v3.0 Phase 3 — who this is assigned to, null = anyone/unassigned. */
+  assignedTo?: string | null;
   reason: string | null;
   dueAt: string;
   snoozedUntil: string | null;
@@ -78,6 +85,7 @@ interface FollowUpDbRow {
   contactName: string;
   contactCompany: string | null;
   createdByUser?: string | null;
+  assignedTo?: string | null;
   reason: string | null;
   dueAt: string;
   snoozedUntil: string | null;
@@ -95,6 +103,7 @@ function toFollowUpRow(row: FollowUpDbRow): FollowUpRow {
     contactName: row.contactName,
     contactCompany: row.contactCompany,
     createdByUser: row.createdByUser ?? null,
+    assignedTo: row.assignedTo ?? null,
     reason: row.reason,
     dueAt: row.dueAt,
     snoozedUntil: row.snoozedUntil,
@@ -116,11 +125,13 @@ export interface CreateFollowUpInput {
   reason?: string | null;
   /** Simple duration rule (`7d`, `30d`) — presence makes it recurring. */
   recurrenceRule?: string | null;
+  /** v3.0 Phase 3 — assign to a workspace user id (null = unassigned). */
+  assignedTo?: string | null;
 }
 
 /**
  * Create a pending follow-up. Requires exactly a due target (`dueAt` or
- * `dueInMs`); past due dates are allowed and simply land in "overdue".
+ * `dueInMs`); past due dates are allowed and simply land in \"overdue\".
  */
 export async function createFollowUp(
   conn: SqliteConn | PgConn,
@@ -160,11 +171,16 @@ export async function createFollowUp(
   const reason = optionalText(input.reason, CRM_LIMITS.reason, 'reason') ?? null;
   const recurrenceRule = optionalText(input.recurrenceRule, 50, 'recurrenceRule') ?? null;
   if (recurrenceRule !== null) parseDurationMs(recurrenceRule); // validate or throw
+  const assignedTo =
+    input.assignedTo !== undefined && input.assignedTo !== null
+      ? String(input.assignedTo).trim() || null
+      : null;
 
   const row = {
     id: randomUUID(),
     workspaceId: resolved.workspaceId,
     createdByUser: resolved.userId === 'system' ? null : resolved.userId,
+    assignedTo,
     contactId: contact.id,
     reason,
     dueAt,
@@ -188,7 +204,7 @@ export async function createFollowUp(
       action: 'followup.created',
       entityType: 'contact',
       entityId: contact.id,
-      metadata: { followUpId: row.id, dueAt, recurring: row.recurring },
+      metadata: { followUpId: row.id, dueAt, recurring: row.recurring, assignedTo },
     },
     scope,
   );
@@ -205,8 +221,12 @@ const MAX_LIST_LIMIT = 200;
 async function selectPendingRows(
   conn: SqliteConn | PgConn,
   contactId?: string,
-  scope?: WorkspaceScope
+  scope?: WorkspaceScope,
+  filters?: { assignedTo?: string | null; assignedToMe?: string; unassigned?: boolean }
 ): Promise<FollowUpDbRow[]> {
+  const assignedTo = filters?.assignedTo;
+  const assignedToMe = filters?.assignedToMe;
+  const unassigned = filters?.unassigned;
   if (conn.dialect === 'sqlite') {
     const f = conn.schema.followUps;
     const c = conn.schema.contacts;
@@ -217,6 +237,7 @@ async function selectPendingRows(
         contactName: c.fullName,
         contactCompany: c.company,
         createdByUser: f.createdByUser,
+        assignedTo: f.assignedTo,
         reason: f.reason,
         dueAt: f.dueAt,
         snoozedUntil: f.snoozedUntil,
@@ -234,6 +255,9 @@ async function selectPendingRows(
           isNull(c.deletedAt),
           workspacePredicate(scope, f.workspaceId),
           contactId ? eq(f.contactId, contactId) : undefined,
+          assignedTo !== undefined ? (assignedTo === null ? isNull(f.assignedTo) : eq(f.assignedTo, assignedTo)) : undefined,
+          assignedToMe ? eq(f.assignedTo, assignedToMe) : undefined,
+          unassigned ? isNull(f.assignedTo) : undefined,
         ),
       );
   }
@@ -246,6 +270,7 @@ async function selectPendingRows(
       contactName: c.fullName,
       contactCompany: c.company,
       createdByUser: f.createdByUser,
+      assignedTo: f.assignedTo,
       reason: f.reason,
       dueAt: f.dueAt,
       snoozedUntil: f.snoozedUntil,
@@ -263,6 +288,9 @@ async function selectPendingRows(
         isNull(c.deletedAt),
         workspacePredicate(scope, f.workspaceId),
         contactId ? eq(f.contactId, contactId) : undefined,
+        assignedTo !== undefined ? (assignedTo === null ? isNull(f.assignedTo) : eq(f.assignedTo, assignedTo)) : undefined,
+        assignedToMe ? eq(f.assignedTo, assignedToMe) : undefined,
+        unassigned ? isNull(f.assignedTo) : undefined,
       ),
     );
 }
@@ -272,8 +300,12 @@ async function selectByStatus(
   status: string,
   contactId: string | undefined,
   limit: number,
-  scope?: WorkspaceScope
+  scope?: WorkspaceScope,
+  filters?: { assignedTo?: string | null; assignedToMe?: string; unassigned?: boolean }
 ): Promise<FollowUpDbRow[]> {
+  const assignedTo = filters?.assignedTo;
+  const assignedToMe = filters?.assignedToMe;
+  const unassigned = filters?.unassigned;
   if (conn.dialect === 'sqlite') {
     const f = conn.schema.followUps;
     const c = conn.schema.contacts;
@@ -284,6 +316,7 @@ async function selectByStatus(
         contactName: c.fullName,
         contactCompany: c.company,
         createdByUser: f.createdByUser,
+        assignedTo: f.assignedTo,
         reason: f.reason,
         dueAt: f.dueAt,
         snoozedUntil: f.snoozedUntil,
@@ -300,6 +333,9 @@ async function selectByStatus(
           eq(f.status, status),
           workspacePredicate(scope, f.workspaceId),
           contactId ? eq(f.contactId, contactId) : undefined,
+          assignedTo !== undefined ? (assignedTo === null ? isNull(f.assignedTo) : eq(f.assignedTo, assignedTo)) : undefined,
+          assignedToMe ? eq(f.assignedTo, assignedToMe) : undefined,
+          unassigned ? isNull(f.assignedTo) : undefined,
         ),
       )
       .orderBy(desc(f.completedAt))
@@ -314,6 +350,7 @@ async function selectByStatus(
       contactName: c.fullName,
       contactCompany: c.company,
       createdByUser: f.createdByUser,
+      assignedTo: f.assignedTo,
       reason: f.reason,
       dueAt: f.dueAt,
       snoozedUntil: f.snoozedUntil,
@@ -330,6 +367,9 @@ async function selectByStatus(
         eq(f.status, status),
         workspacePredicate(scope, f.workspaceId),
         contactId ? eq(f.contactId, contactId) : undefined,
+        assignedTo !== undefined ? (assignedTo === null ? isNull(f.assignedTo) : eq(f.assignedTo, assignedTo)) : undefined,
+        assignedToMe ? eq(f.assignedTo, assignedToMe) : undefined,
+        unassigned ? isNull(f.assignedTo) : undefined,
       ),
     )
     .orderBy(desc(f.completedAt))
@@ -346,22 +386,34 @@ async function selectByStatus(
  */
 export async function listFollowUps(
   conn: SqliteConn | PgConn,
-  options: { view?: FollowUpView; contactId?: string; limit?: number } & CrmOptions = {},
+  options: {
+    view?: FollowUpView;
+    contactId?: string;
+    limit?: number;
+    assignedTo?: string | null;
+    assignedToMe?: string;
+    unassigned?: boolean;
+  } & CrmOptions = {},
   scope?: WorkspaceScope
 ): Promise<FollowUpSummary> {
   const now = resolveNow(options);
   const view = options.view ?? 'pending';
   const limit = Math.min(Math.max(options.limit ?? 50, 1), MAX_LIST_LIMIT);
+  const filters = {
+    assignedTo: options.assignedTo,
+    assignedToMe: options.assignedToMe,
+    unassigned: options.unassigned,
+  };
 
   if (view === 'completed' || view === 'cancelled') {
-    const rows = await selectByStatus(conn, view, options.contactId, limit, scope);
+    const rows = await selectByStatus(conn, view, options.contactId, limit, scope, filters);
     return {
       followUps: rows.map(toFollowUpRow),
-      counts: await pendingCounts(conn, options.contactId, now, scope),
+      counts: await pendingCounts(conn, options.contactId, now, scope, filters),
     };
   }
 
-  const pending = (await selectPendingRows(conn, options.contactId, scope)).map(toFollowUpRow);
+  const pending = (await selectPendingRows(conn, options.contactId, scope, filters)).map(toFollowUpRow);
   pending.sort((a, b) =>
     a.effectiveDueAt === b.effectiveDueAt
       ? a.contactName.localeCompare(b.contactName)
@@ -392,7 +444,7 @@ export async function listFollowUps(
   else if (view === 'due-today') rows = pending.filter((r) => bucketOf(r) === 'dueToday');
   else if (view === 'upcoming') rows = pending.filter((r) => bucketOf(r) === 'upcoming');
   else if (view === 'all') {
-    const others = (await selectByStatus(conn, 'completed', options.contactId, limit, scope)).map(
+    const others = (await selectByStatus(conn, 'completed', options.contactId, limit, scope, filters)).map(
       toFollowUpRow
     );
     rows = [...pending, ...others];
@@ -405,9 +457,10 @@ async function pendingCounts(
   conn: SqliteConn | PgConn,
   contactId: string | undefined,
   now: Date,
-  scope?: WorkspaceScope
+  scope?: WorkspaceScope,
+  filters?: { assignedTo?: string | null; assignedToMe?: string; unassigned?: boolean }
 ): Promise<FollowUpCounts> {
-  const pending = (await selectPendingRows(conn, contactId, scope)).map(toFollowUpRow);
+  const pending = (await selectPendingRows(conn, contactId, scope, filters)).map(toFollowUpRow);
   const todayStart = startOfUtcDay(now);
   const tomorrowStart = new Date(todayStart.getTime() + DAY_MS);
   const counts: FollowUpCounts = { overdue: 0, dueToday: 0, upcoming: 0, pending: pending.length };
@@ -435,6 +488,7 @@ async function selectById(
         contactName: c.fullName,
         contactCompany: c.company,
         createdByUser: f.createdByUser,
+        assignedTo: f.assignedTo,
         reason: f.reason,
         dueAt: f.dueAt,
         snoozedUntil: f.snoozedUntil,
@@ -463,6 +517,7 @@ async function selectById(
       contactName: c.fullName,
       contactCompany: c.company,
       createdByUser: f.createdByUser,
+      assignedTo: f.assignedTo,
       reason: f.reason,
       dueAt: f.dueAt,
       snoozedUntil: f.snoozedUntil,
@@ -505,7 +560,7 @@ export interface CompleteFollowUpResult {
 /**
  * Complete a pending follow-up. Recurring follow-ups re-arm: the next
  * occurrence is due one interval after *now* (not after the old due date —
- * "every 30 days" means 30 days from the last touch, and completing late
+ * \"every 30 days\" means 30 days from the last touch, and completing late
  * must not instantly re-trigger).
  */
 export async function completeFollowUp(
@@ -556,6 +611,7 @@ export async function completeFollowUp(
           dueInMs: intervalMs,
           reason: row.reason,
           recurrenceRule: row.recurrenceRule,
+          assignedTo: row.assignedTo ?? null,
         },
         { now },
         scope,
@@ -706,7 +762,7 @@ export async function getFollowUp(
 }
 
 function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+  return value.replace(/[!%_]/g, (ch) => `!${ch}`);
 }
 
 /**
@@ -737,7 +793,7 @@ export async function resolveFollowUpId(
         and(
           eq(f.status, 'pending'),
           workspacePredicate(scope, f.workspaceId),
-          sql`${f.id} LIKE ${pattern} ESCAPE '\\'`,
+          sql`${f.id} LIKE ${pattern} ESCAPE '!'`,
         ),
       );
   } else {
@@ -749,7 +805,7 @@ export async function resolveFollowUpId(
         and(
           eq(f.status, 'pending'),
           workspacePredicate(scope, f.workspaceId),
-          sql`${f.id} LIKE ${pattern} ESCAPE '\\'`,
+          sql`${f.id} LIKE ${pattern} ESCAPE '!'`,
         ),
       );
   }
@@ -794,4 +850,133 @@ export async function countFollowUps(
     .from(f)
     .where(where);
   return Number(rows[0]?.n ?? 0);
+}
+
+/**
+ * v3.0 Phase 3 — assign a pending follow-up to a workspace user (or unassign).
+ */
+export async function assignFollowUp(
+  conn: SqliteConn | PgConn,
+  id: string,
+  assignedTo: string | null,
+  _opts: CrmOptions = {},
+  scope?: WorkspaceScope
+): Promise<FollowUpRow> {
+  const row = await requirePending(conn, id, scope);
+  const trimmed = assignedTo ? assignedTo.trim() || null : null;
+
+  if (conn.dialect === 'sqlite') {
+    await conn.db
+      .update(conn.schema.followUps)
+      .set({ assignedTo: trimmed })
+      .where(
+        and(
+          eq(conn.schema.followUps.id, id),
+          workspacePredicate(scope, conn.schema.followUps.workspaceId),
+        ),
+      );
+  } else {
+    await conn.db
+      .update(conn.schema.followUps)
+      .set({ assignedTo: trimmed })
+      .where(
+        and(
+          eq(conn.schema.followUps.id, id),
+          workspacePredicate(scope, conn.schema.followUps.workspaceId),
+        ),
+      );
+  }
+
+  await writeActivityLog(
+    conn,
+    {
+      action: 'followup.assigned',
+      entityType: 'contact',
+      entityId: row.contactId,
+      metadata: { followUpId: id, assignedTo: trimmed, previousAssignedTo: row.assignedTo ?? null },
+    },
+    scope,
+  );
+
+  return toFollowUpRow({ ...row, assignedTo: trimmed });
+}
+
+/**
+ * v3.0 Phase 3 — on member removal, unassign their follow-ups.
+ * Returns count of reassigned rows.
+ */
+export async function unassignFollowUpsForUser(
+  conn: SqliteConn | PgConn,
+  userId: string,
+  scope?: WorkspaceScope
+): Promise<number> {
+  const uid = userId.trim();
+  if (!uid) return 0;
+  const resolved = scope ? scope : undefined;
+  // eslint-disable-next-line no-useless-assignment
+  let updated = 0;
+  if (conn.dialect === 'sqlite') {
+    const f = conn.schema.followUps;
+    const toReassign = await conn.db
+      .select({ id: f.id })
+      .from(f)
+      .where(
+        and(
+          eq(f.assignedTo, uid),
+          eq(f.status, 'pending'),
+          workspacePredicate(resolved, f.workspaceId),
+        ),
+      );
+    if (toReassign.length === 0) return 0;
+    await conn.db
+      .update(f)
+      .set({ assignedTo: null })
+      .where(
+        and(
+          eq(f.assignedTo, uid),
+          eq(f.status, 'pending'),
+          workspacePredicate(resolved, f.workspaceId),
+        ),
+      );
+    updated = toReassign.length;
+  } else {
+    const f = conn.schema.followUps;
+    const toReassign = await conn.db
+      .select({ id: f.id })
+      .from(f)
+      .where(
+        and(
+          eq(f.assignedTo, uid),
+          eq(f.status, 'pending'),
+          workspacePredicate(resolved, f.workspaceId),
+        ),
+      );
+    if (toReassign.length === 0) return 0;
+    await conn.db
+      .update(f)
+      .set({ assignedTo: null })
+      .where(
+        and(
+          eq(f.assignedTo, uid),
+          eq(f.status, 'pending'),
+          workspacePredicate(resolved, f.workspaceId),
+        ),
+      );
+    updated = toReassign.length;
+  }
+
+  if (updated > 0) {
+    await writeActivityLog(
+      conn,
+      {
+        action: 'followup.unassigned_on_member_removal',
+        entityType: 'workspace_member',
+        entityId: uid,
+        metadata: { reassignedCount: updated, userId: uid },
+      },
+      scope,
+    );
+  }
+
+  return updated;
 }

@@ -123,7 +123,7 @@ export default function TeamClient({
   }
 
   async function removeMember(userId: string) {
-    if (!confirm(`Remove member ${userId}?`)) return;
+    if (!confirm(`Remove member ${userId}? Their authored interactions stay, assigned follow-ups become unassigned.`)) return;
     setError(null);
     try {
       const res = await fetch(
@@ -135,6 +135,9 @@ export default function TeamClient({
         setError(data.error || "Failed to remove");
       } else {
         setMembers((prev) => prev.filter((m) => m.userId !== userId));
+        if (data.reassigned) {
+          alert(`${data.reassigned} follow-ups were unassigned.`);
+        }
       }
     } catch (e: unknown) {
       setError((e as Error).message);
@@ -191,7 +194,9 @@ export default function TeamClient({
                     <option value="viewer">viewer</option>
                     <option value="member">member</option>
                     <option value="admin">admin</option>
-                    <option value="owner">owner</option>
+                    <option value="owner" disabled={currentRole !== "owner"}>
+                      owner {currentRole !== "owner" ? "(owner only)" : ""}
+                    </option>
                   </select>
                 </td>
                 <td className="p-2">

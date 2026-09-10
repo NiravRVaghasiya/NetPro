@@ -112,6 +112,8 @@ export default async function ContactDetailPage({
                 {f.recurring && f.recurrenceRule
                   ? ` · every ${f.recurrenceRule}`
                   : ""}
+                {f.assignedTo ? ` · assigned to ${f.assignedTo.slice(0, 8)}` : " · unassigned"}
+                {f.createdByUser ? ` · by ${f.createdByUser.slice(0, 8)}` : ""}
                 <div style={{ marginTop: "0.25rem" }}>
                   <FollowUpActions followUpId={f.id} />
                 </div>
@@ -148,6 +150,7 @@ export default async function ContactDetailPage({
                     : " ← inbound"
                   : ""}
                 {i.channel ? ` · ${i.channel}` : ""}
+                {(i as { createdByUser?: string | null }).createdByUser ? ` · by ${((i as { createdByUser?: string | null }).createdByUser as string).slice(0, 8)}` : ""}
                 {i.subject ? ` · “${i.subject}”` : ""}
                 {i.content ? (
                   <div style={{ color: "#475569" }}>{i.content}</div>

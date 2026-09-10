@@ -34,4 +34,5 @@ export {
   acceptInviteByToken,
   assertCanRemoveMember,
   assertCanChangeRole,
+  removeMemberAndReassign,
 } from './service';
