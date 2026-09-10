@@ -64,6 +64,10 @@ describe("executePath", () => {
     const out = await executePath({}, "Zoe Target", conn);
     expect(out).toContain("Warm-intro to Zoe Target from Ada Lovelace (your strongest tie)");
     expect(out).toContain("#1 (2 hops) · score 0.68");
+    // Phase 13 — the first-class path summary names the weakest tie and the
+    // average hop strength beside the score.
+    expect(out).toContain("weakest 0.80");
+    expect(out).toContain("avg 0.50");
     expect(out).toContain("Ada Lovelace (score 0.90 · last 2026-09-02) → Cara (score 0.80 · last 2026-07-29) → Zoe Target (score 0.10)");
     expect(out).toContain("Ask Ada Lovelace");
     expect(out).toContain("--draft composes the ask email");

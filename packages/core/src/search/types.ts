@@ -46,6 +46,11 @@ export function isSearchMode(value: unknown): value is SearchMode {
 export interface SearchContactsOptions {
   /** Free-text query; matches name, email, headline, company, role, location. */
   query?: string;
+  /**
+   * Explicit name filter (Phase 12) — case-insensitive substring on the full
+   * name. Unlike `query`, it never matches company/role/location text.
+   */
+  name?: string;
   company?: string;
   role?: string;
   location?: string;
@@ -60,6 +65,26 @@ export interface SearchContactsOptions {
   lastActiveWithinDays?: number;
   /** Required derived skills (taxonomy names or aliases); all must be present. */
   skills?: string[];
+  /**
+   * Required contact tags (Phase 12) — every listed tag must be present
+   * (AND), matched case-insensitively against the contact's tag list.
+   * Unknown tags match nothing, deliberately — a typo must not silently
+   * widen a filter.
+   */
+  tags?: string[];
+  /**
+   * Louvain community filter (Phase 12) — a community label (e.g. `acme`),
+   * `Community N` (1-based), or a 0-based community id. Communities are
+   * computed over confirmed edges at query time; an unknown selector matches
+   * nothing.
+   */
+  community?: string;
+  /**
+   * Restrict to these contact ids (Phase 12). Used internally to intersect
+   * the community membership; surfaces may also pass a pre-resolved set.
+   * An empty list matches nothing.
+   */
+  contactIds?: string[];
   sort?: SearchSort;
   limit?: number;
   offset?: number;
@@ -82,6 +107,18 @@ export interface ContactSearchResult {
   relationshipScore: number | null;
   lastInteraction: string | null;
   source: string;
+  /**
+   * Free-form contact tags (Phase 12); null when none are recorded. Present
+   * so surfaces can render tag chips and "Tagged …" match reasons without a
+   * second query.
+   */
+  tags: string[] | null;
+  /**
+   * Derived skills verdict — canonical taxonomy names (Phase 12); null when
+   * skills have not been extracted yet. Powers skill chips and "Has skill …"
+   * match reasons.
+   */
+  skills: string[] | null;
 }
 
 export interface FacetBucket {

@@ -425,3 +425,166 @@ describe('Phase 7 Job System', () => {
     expect(reg.get(q.id)!.status).toBe('cancelled');
   });
 });
+type SearchHitJson = {
+  id: string;
+  tags: string[] | null;
+  skills: string[] | null;
+  matchReasons: Array<{ kind: string; text: string }>;
+};
+type SearchResponseJson = { total: number; contacts: SearchHitJson[] };
+type RankedPathJson = {
+  hops: number;
+  score: { score: number; weakestTie: number | null; avgHopStrength: number };
+  intermediaries: unknown[];
+  ask: { suggestion: string };
+};
+type PathPlanJson = { found: boolean; paths: RankedPathJson[] };
+type ApiErrorJson = { error?: string; code?: string };
+
+async function getJson<T>(url: string): Promise<{ status: number; body: T }> {
+  const res = await fetch(url);
+  return { status: res.status, body: (await res.json()) as T };
+}
+
+describe('Phase 12 Search Experience', () => {
+  async function seedSearchDb() {
+    const { conn } = scratchDb();
+    await runMigrations(conn);
+    const now = new Date().toISOString();
+    conn.db.insert(conn.schema.contacts).values([
+      {
+        id: 'c1', fullName: 'Sarah Chen', email: 'sarah@acme.com', company: 'Acme',
+        role: 'Senior Engineer', location: 'Berlin', relationshipScore: 0.85,
+        tags: ['founder', 'ai'], skills: ['python'], source: 'test',
+        createdAt: now, updatedAt: now,
+      },
+      {
+        id: 'c2', fullName: 'Alex Rivera', email: 'alex@globex.com', company: 'Globex',
+        role: 'Designer', location: 'Paris', relationshipScore: 0.4,
+        tags: ['design'], skills: ['kubernetes'], source: 'test',
+        createdAt: now, updatedAt: now,
+      },
+    ]).run();
+    // One confirmed edge so a community exists (both contacts, label "acme" —
+    // dominant company, lowercased; tie broken alphabetically).
+    conn.db.insert(conn.schema.edges).values({
+      id: 'e1', sourceId: 'c1', targetId: 'c2', relation: 'colleague',
+      strength: 0.7, source: 'manual', confidence: 1, status: 'confirmed',
+      discoveredAt: now, updatedAt: now,
+    }).run();
+    const app = await createApp({ conn, skipMigrate: true, auth: LOCAL_POLICY, config: { host: '127.0.0.1', port: 0, autoMigrate: false, auth: { mode: 'local' } } });
+    return startServer(app, { port: 0 });
+  }
+
+  it('GET /api/search explains every hit and carries skills/tags', async () => {
+    const running = await seedSearchDb();
+    try {
+      const { status, body } = await getJson<SearchResponseJson>(`${running.url}/api/search?q=sarah`);
+      expect(status).toBe(200);
+      expect(body.total).toBe(1);
+      expect(body.contacts[0].id).toBe('c1');
+      expect(body.contacts[0].tags).toEqual(['founder', 'ai']);
+      expect(body.contacts[0].skills).toEqual(['python']);
+      const reasons = body.contacts[0].matchReasons;
+      expect(reasons.length).toBeGreaterThan(0);
+      expect(reasons.map((r) => r.text)).toContain('Name matches "sarah"');
+    } finally {
+      await running.close();
+    }
+  });
+
+  it('GET /api/search supports name/tags/community filters', async () => {
+    const running = await seedSearchDb();
+    try {
+      const byName = await getJson<SearchResponseJson>(`${running.url}/api/search?name=alex`);
+      expect(byName.body.contacts.map((c) => c.id)).toEqual(['c2']);
+
+      const byTags = await getJson<SearchResponseJson>(`${running.url}/api/search?tags=founder,ai`);
+      expect(byTags.body.contacts.map((c) => c.id)).toEqual(['c1']);
+
+      // The single community holds both contacts; an unknown one holds none.
+      const byCommunity = await getJson<SearchResponseJson>(`${running.url}/api/search?community=0`);
+      expect(byCommunity.body.total).toBe(2);
+      const unknown = await getJson<SearchResponseJson>(`${running.url}/api/search?community=nope`);
+      expect(unknown.body.total).toBe(0);
+
+      // minScore still composes with the new filters.
+      const strong = await getJson<SearchResponseJson>(`${running.url}/api/search?tags=founder&minScore=0.5`);
+      expect(strong.body.contacts.map((c) => c.id)).toEqual(['c1']);
+      expect(strong.body.contacts[0].matchReasons.map((r) => r.text)).toContain(
+        'Relationship strength 0.85 (minimum 0.5)'
+      );
+    } finally {
+      await running.close();
+    }
+  });
+});
+
+describe('Phase 13 Pathfinder', () => {
+  async function seedChainDb() {
+    const { conn } = scratchDb();
+    await runMigrations(conn);
+    const now = new Date().toISOString();
+    conn.db.insert(conn.schema.contacts).values([
+      { id: 'a', fullName: 'Ada', source: 'test', relationshipScore: 0.9, createdAt: now, updatedAt: now },
+      { id: 'b', fullName: 'Bob', source: 'test', relationshipScore: 0.8, createdAt: now, updatedAt: now },
+      { id: 'c', fullName: 'Cara', source: 'test', relationshipScore: 0.7, createdAt: now, updatedAt: now },
+      { id: 'd', fullName: 'Dan', source: 'test', relationshipScore: 0.1, createdAt: now, updatedAt: now },
+    ]).run();
+    // a—b—c plus a direct a—c edge, so k=2 asks for two ranked alternatives.
+    let n = 0;
+    for (const [s, t, strength] of [['a', 'b', 0.9], ['b', 'c', 0.8], ['a', 'c', 0.2]] as const) {
+      conn.db.insert(conn.schema.edges).values({
+        id: `e${++n}`, sourceId: s, targetId: t, relation: 'colleague',
+        strength, source: 'manual', confidence: 1, status: 'confirmed',
+        discoveredAt: now, updatedAt: now,
+      }).run();
+    }
+    const app = await createApp({ conn, skipMigrate: true, auth: LOCAL_POLICY, config: { host: '127.0.0.1', port: 0, autoMigrate: false, auth: { mode: 'local' } } });
+    return startServer(app, { port: 0 });
+  }
+
+  it('GET /api/graph/path ranks alternatives with strength stats', async () => {
+    const running = await seedChainDb();
+    try {
+      const { status, body: plan } = await getJson<PathPlanJson>(`${running.url}/api/graph/path?target=c&from=a&alt=2`);
+      expect(status).toBe(200);
+      // Shortest chains only: the direct 1-hop edge wins; k=2 asks for two.
+      expect(plan.found).toBe(true);
+      expect(plan.paths.length).toBeGreaterThanOrEqual(1);
+      const top = plan.paths[0];
+      expect(top.hops).toBe(1);
+      expect(top.score.score).toBeGreaterThan(0);
+      expect(top.score.avgHopStrength).toBeGreaterThan(0);
+      expect(top.intermediaries).toEqual([]);
+      expect(top.ask.suggestion).toContain('Ada');
+    } finally {
+      await running.close();
+    }
+  });
+
+  it('keeps depth and alternatives independent', async () => {
+    const running = await seedChainDb();
+    try {
+      // d is disconnected — and k must not widen the hop budget the way the
+      // old `depth ?? k` fallback did.
+      const unreachable = await getJson<PathPlanJson>(`${running.url}/api/graph/path?target=d&from=a&k=5`);
+      expect(unreachable.status).toBe(200);
+      expect(unreachable.body.found).toBe(false);
+
+      // Alternatives clamp to the ranked-list budget instead of failing.
+      const clamped = await getJson<PathPlanJson>(`${running.url}/api/graph/path?target=c&from=a&k=99`);
+      expect(clamped.status).toBe(200);
+      expect(clamped.body.paths.length).toBeLessThanOrEqual(5);
+
+      // Genuine misuse is a 400 with a code surfaces can render.
+      const missing = await getJson<ApiErrorJson>(`${running.url}/api/graph/path`);
+      expect(missing.status).toBe(400);
+      const badDepth = await getJson<ApiErrorJson>(`${running.url}/api/graph/path?target=c&depth=0`);
+      expect(badDepth.status).toBe(400);
+      expect(badDepth.body.code).toBe('invalid_input');
+    } finally {
+      await running.close();
+    }
+  });
+});

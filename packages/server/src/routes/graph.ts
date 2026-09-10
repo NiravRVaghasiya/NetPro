@@ -15,7 +15,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { SqliteConn, PgConn } from '@netpro/db';
-import { getNetworkGraph, planIntroPaths, getNetworkVisualization } from '@netpro/core/src/graph';
+import { getNetworkGraph, planIntroPaths, getNetworkVisualization, PATHFINDER_LIMITS } from '@netpro/core/src/graph';
 import { GraphError } from '@netpro/core/src/graph';
 import { sendJson } from '../middleware/json';
 import type { AuthContext } from '../auth/index';
@@ -91,19 +91,40 @@ export async function handleGraphPaths(
   const p = new URL(req.url ?? '/', 'http://127.0.0.1').searchParams;
   const target = p.get('target')?.trim() || p.get('to')?.trim() || '';
   const from = p.get('from')?.trim() || undefined;
-  const depth = num(p.get('depth')) ?? num(p.get('k')) ?? num(p.get('maxDepth'));
-  const k = num(p.get('k')) ?? num(p.get('limit'));
+  // Phase 13 — `depth` (BFS hop budget) and `k` (ranked alternatives) are
+  // independent knobs; an earlier revision read `k` as the depth fallback,
+  // so `?k=3` silently tripled the hop budget. `limit` sizes list sections,
+  // never alternatives.
+  const depthRaw = num(p.get('depth')) ?? num(p.get('maxDepth')) ?? num(p.get('max-depth'));
+  const kRaw = num(p.get('k')) ?? num(p.get('alt')) ?? num(p.get('alternatives'));
   if (!target) {
     sendJson(res, 400, { error: 'A target contact is required (name, email, or id).', code: 'invalid_input' });
     return;
   }
+  if (depthRaw !== undefined && (!Number.isFinite(depthRaw) || depthRaw < 1)) {
+    sendJson(res, 400, { error: `Invalid depth "${p.get('depth') ?? p.get('maxDepth')}". Expected a positive number of hops.`, code: 'invalid_input' });
+    return;
+  }
+  if (kRaw !== undefined && (!Number.isFinite(kRaw) || kRaw < 1)) {
+    sendJson(res, 400, { error: `Invalid alternatives "${p.get('k') ?? p.get('alt')}". Expected a positive number.`, code: 'invalid_input' });
+    return;
+  }
   try {
     const analysis: Record<string, unknown> = { ...graphAnalysisParams(p) };
-    if (depth !== undefined) analysis.maxDepth = depth;
+    // The web API caps depth tighter than the engine's hard cap (8) — the
+    // documented PATHFINDER_LIMITS.apiMaxDepth — and clamps alternatives to
+    // the ranked-list budget rather than failing hand-typed URLs.
+    if (depthRaw !== undefined) {
+      analysis.maxDepth = Math.min(Math.trunc(depthRaw), PATHFINDER_LIMITS.apiMaxDepth);
+    }
+    const k = Math.min(
+      Math.max(Math.trunc(kRaw ?? PATHFINDER_LIMITS.defaultAlternatives), 1),
+      PATHFINDER_LIMITS.maxAlternatives,
+    );
     // planIntroPaths third arg is GraphAnalysisOptions
     const plan = await planIntroPaths(
       deps.conn,
-      { target, from, k: k ?? 1 },
+      { target, from, k },
       analysis as never
     );
     // Phase 8 — a discovered path is a relationship chain. Surface it as

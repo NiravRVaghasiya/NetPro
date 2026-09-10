@@ -19,8 +19,23 @@ const fixture = await vi.hoisted(async () => {
 });
 const semanticAvailable = vi.hoisted(() => vi.fn(() => false));
 const embedder = vi.hoisted(() => vi.fn(() => null as unknown));
+// Phase 12 — the page prefers the standalone server; tests pin the fallback
+// by refusing the server by default, then opt into the server path per test.
+type ServerFetchJsonMock = (
+  path: string,
+  options?: unknown,
+) => Promise<{ ok: boolean; status: number; serverUrl: string; data: unknown }>;
+const serverFetchJson = vi.hoisted(() =>
+  vi.fn<ServerFetchJsonMock>(async () => {
+    throw new Error("server down");
+  }),
+);
 
 vi.mock("@/lib/db", () => ({ conn: fixture.conn }));
+vi.mock("@/lib/netpro-server", () => ({
+  getServerUrl: () => "http://127.0.0.1:3777",
+  serverFetchJson,
+}));
 vi.mock("@/lib/search-config", () => ({
   semanticSearchAvailable: semanticAvailable,
   searchEmbedder: embedder,
@@ -40,7 +55,11 @@ async function render(params: Record<string, string> = {}): Promise<string> {
 beforeEach(() => {
   semanticAvailable.mockReturnValue(false);
   embedder.mockReturnValue(null);
-  fixture.sqlite.exec("DELETE FROM search_index; DELETE FROM contacts;");
+  serverFetchJson.mockReset();
+  serverFetchJson.mockRejectedValue(new Error("server down"));
+  fixture.sqlite.exec(
+    "DELETE FROM search_index; DELETE FROM edges; DELETE FROM contacts;",
+  );
   for (const row of [
     {
       id: "c1",
@@ -49,6 +68,9 @@ beforeEach(() => {
       role: "Senior Engineer",
       location: "Berlin",
       notes: "Introduced at PyCon",
+      relationshipScore: 0.8,
+      tags: ["founder"],
+      skills: ["python"],
     },
     {
       id: "c2",
@@ -57,6 +79,9 @@ beforeEach(() => {
       role: "Product Manager",
       location: "San Francisco",
       notes: null,
+      relationshipScore: 0.3,
+      tags: ["design"],
+      skills: null,
     },
   ]) {
     fixture.conn.db
@@ -156,5 +181,194 @@ describe("/search page — engine badge", () => {
     await reindexSearchIndex(fixture.conn);
     const html = await render({ q: "stripe", mode: "keyword" });
     expect(html).toContain('name="mode" value="keyword"');
+  });
+});
+
+describe("/search page — Phase 12 match reasons and filters", () => {
+  it("shows why each result matched", async () => {
+    const html = await render({ q: "stripe" });
+    expect(html).toContain("Matched because:");
+    expect(html).toContain("Works at Stripe");
+  });
+
+  it("renders skill and tag chips on every hit", async () => {
+    const html = await render({});
+    expect(html).toContain("#founder");
+    expect(html).toContain("python");
+    expect(html).toContain("strength 0.80");
+  });
+
+  it("filters by explicit name", async () => {
+    const html = await render({ name: "john" });
+    expect(html).toContain("John Smith");
+    expect(html).not.toContain("Jane Doe");
+  });
+
+  it("filters by tags", async () => {
+    const html = await render({ tags: "founder" });
+    expect(html).toContain("Jane Doe");
+    expect(html).not.toContain("John Smith");
+    expect(html).toContain('Tagged &quot;founder&quot;');
+  });
+
+  it("filters by derived skills", async () => {
+    const html = await render({ skills: "python" });
+    expect(html).toContain("Jane Doe");
+    expect(html).not.toContain("John Smith");
+  });
+
+  it("filters by relationship strength and cites it", async () => {
+    const html = await render({ minScore: "0.5" });
+    expect(html).toContain("Jane Doe");
+    expect(html).not.toContain("John Smith");
+    expect(html).toContain("Relationship strength 0.80 (minimum 0.5)");
+  });
+
+  it("ignores an unparseable minScore instead of erroring", async () => {
+    const html = await render({ minScore: "bogus" });
+    expect(html).toContain("Jane Doe");
+    expect(html).toContain("John Smith");
+  });
+
+  it("filters by Louvain community once edges exist", async () => {
+    fixture.conn.db
+      .insert(fixture.conn.schema.edges)
+      .values({
+        id: "e1",
+        sourceId: "c1",
+        targetId: "c2",
+        relation: "colleague",
+        strength: 0.7,
+        confidence: 1,
+        bidirectional: true,
+        source: "manual",
+        status: "confirmed",
+        discoveredAt: NOW,
+        updatedAt: NOW,
+      })
+      .run();
+    const both = await render({ community: "0" });
+    expect(both).toContain("Jane Doe");
+    expect(both).toContain("John Smith");
+    const none = await render({ community: "nope" });
+    expect(none).toContain("No contacts match your search.");
+  });
+
+  it("falls back to local core when the server is unreachable", async () => {
+    const html = await render({ q: "stripe" });
+    expect(html).toContain("Jane Doe");
+    expect(html).toContain("(local fallback)");
+  });
+});
+
+describe("/search page — Phase 12 server path", () => {
+  function serveSearch() {
+    serverFetchJson.mockImplementation(async (path: string) => {
+      if (path.startsWith("/api/search")) {
+        return {
+          ok: true,
+          status: 200,
+          serverUrl: "http://127.0.0.1:3777",
+          data: {
+            contacts: [
+              {
+                id: "s1",
+                fullName: "Server Sam",
+                email: null,
+                headline: null,
+                company: "ServerCo",
+                role: "CEO",
+                seniority: null,
+                industry: null,
+                location: "Remote",
+                linkedinUrl: null,
+                relationshipScore: 0.9,
+                lastInteraction: null,
+                source: "test",
+                tags: ["vip"],
+                skills: ["python"],
+                matchReasons: [
+                  { kind: "company", text: "Works at ServerCo" },
+                ],
+              },
+            ],
+            total: 1,
+            limit: 25,
+            offset: 0,
+            facets: {
+              company: [],
+              role: [],
+              location: [],
+              seniority: [],
+              industry: [],
+            },
+            engine: {
+              mode: "portable",
+              requested: "portable",
+              arms: {
+                portable: { used: true, hits: 1 },
+                keyword: { used: false, hits: 0, reason: "not_requested" },
+                semantic: { used: false, hits: 0, reason: "not_requested" },
+              },
+              truncated: false,
+            },
+          },
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        serverUrl: "http://127.0.0.1:3777",
+        data: { communities: { top: [{ label: "serverco" }] } },
+      };
+    });
+  }
+
+  it("renders server results and reasons without touching local core", async () => {
+    serveSearch();
+    const html = await render({ q: "sam" });
+    expect(html).toContain("Server Sam");
+    expect(html).toContain("Works at ServerCo");
+    expect(html).toContain("#vip");
+    expect(html).not.toContain("Jane Doe");
+    expect(html).not.toContain("(local fallback)");
+    // Community labels feed the datalist.
+    expect(html).toContain('value="serverco"');
+    // The page asked the server for exactly this search.
+    const searchCall = serverFetchJson.mock.calls.find((call) =>
+      String(call[0]).startsWith("/api/search"),
+    );
+    expect(searchCall).toBeDefined();
+    expect(String(searchCall![0])).toContain("q=sam");
+  });
+
+  it("forwards every filter to the server query string", async () => {
+    serveSearch();
+    await render({
+      q: "sam",
+      name: "sam",
+      company: "serverco",
+      skills: "python",
+      tags: "vip",
+      community: "serverco",
+      minScore: "0.5",
+      sort: "score",
+    });
+    const searchCall = serverFetchJson.mock.calls.find((call) =>
+      String(call[0]).startsWith("/api/search"),
+    );
+    const qs = String(searchCall![0]);
+    for (const part of [
+      "q=sam",
+      "name=sam",
+      "company=serverco",
+      "skills=python",
+      "tags=vip",
+      "community=serverco",
+      "minScore=0.5",
+      "sort=score",
+    ]) {
+      expect(qs).toContain(part);
+    }
   });
 });

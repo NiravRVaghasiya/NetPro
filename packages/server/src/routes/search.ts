@@ -1,15 +1,18 @@
 // packages/server/src/routes/search.ts
 //
-// GET /api/search?q=&company=&role=&location=&industry=&seniority=&hasEmail=&minScore=&activeWithin=&skills=&sort=&limit=&offset=&mode=
+// GET /api/search?q=&name=&company=&role=&location=&industry=&seniority=&hasEmail=&minScore=&activeWithin=&skills=&tags=&community=&sort=&limit=&offset=&mode=
 // Orchestrates @netpro/core/search — hybrid/portable keyword selection and RRF
 // fusion stay in core; the route only translates HTTP → SearchContactsOptions.
 // Phase 8: search operations emit `search.started` / `search.completed` /
 // `search.failed` events so the Activity feed and Observatory can show that
 // NetPro is working, even for instant queries.
+// Phase 12: every contact carries `matchReasons` (core's pure explainMatch),
+// so the Web UI can show WHY a result matched without duplicating attribution.
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { SqliteConn, PgConn } from '@netpro/db';
 import {
+  explainMatch,
   isSearchMode,
   searchContacts,
   SEARCH_MODES,
@@ -64,15 +67,18 @@ export async function handleSearch(
 
   const options = {
     query: str(p.get('q')) ?? str(p.get('query')),
+    name: str(p.get('name')),
     company: str(p.get('company')),
     role: str(p.get('role')),
     location: str(p.get('location')),
     industry: str(p.get('industry')),
     seniority: str(p.get('seniority')),
-    hasEmail: p.get('hasEmail') === 'true',
+    hasEmail: p.get('hasEmail') === 'true' ? true : undefined,
     minScore: num(p.get('minScore')),
     lastActiveWithinDays: num(p.get('activeWithin')) ?? num(p.get('active_within')) ?? num(p.get('lastActiveWithinDays')),
     skills: list(p.get('skills')),
+    tags: list(p.get('tags')),
+    community: str(p.get('community')),
     sort: sortParam,
     limit: num(p.get('limit')),
     offset: num(p.get('offset')),
@@ -96,6 +102,13 @@ export async function handleSearch(
     // Keyword mode still works (FTS5 + portable); hybrid degrades gracefully
     // with a semantic arm report of `not_configured`.
     const results = await searchContacts(deps.conn, options, {});
+    // Phase 12 — attribute every hit with core's pure explainer. Cheap (no
+    // I/O), additive (existing clients ignore the key), and identical to
+    // what `netpro search --explain` prints.
+    const contacts = results.contacts.map((c) => ({
+      ...c,
+      matchReasons: explainMatch(c, options),
+    }));
     deps.events?.publish({
       type: 'search.completed',
       jobId: searchId,
@@ -103,7 +116,7 @@ export async function handleSearch(
       total: results.total,
       query: options.query,
     });
-    sendJson(res, 200, results);
+    sendJson(res, 200, { ...results, contacts });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     const status = (error as { code?: string })?.code === 'invalid_input' ? 400 : 500;

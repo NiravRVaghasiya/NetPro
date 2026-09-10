@@ -289,7 +289,7 @@ export default async function ObservatoryPage() {
               — hybrid (keyword + semantic) via <code>/api/search</code>.
             </li>
             <li>
-              <Link href="/graph" style={{ color: "#2563eb" }}>
+              <Link href="/pathfinder" style={{ color: "#2563eb" }}>
                 Pathfinder
               </Link>{" "}
               — who can introduce me to whom (ranked chains).
