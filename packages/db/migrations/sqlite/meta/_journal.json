@@ -1,97 +1,104 @@
 {
-  "version": "7",
-  "dialect": "sqlite",
-  "entries": [
-    {
-      "idx": 0,
-      "version": "6",
-      "when": 1788690614164,
-      "tag": "0000_quick_iron_fist",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1788704951404,
-      "tag": "0001_profile_card",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1788727216285,
-      "tag": "0002_crm_indexes",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1788796800000,
-      "tag": "0003_edge_provenance",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1788883200000,
-      "tag": "0004_hybrid_search",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1788969600000,
-      "tag": "0005_skills",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1789056000000,
-      "tag": "0006_profile_views_privacy",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1789142400000,
-      "tag": "0007_content_tracker",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "6",
-      "when": 1789228800000,
-      "tag": "0008_workspaces",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "6",
-      "when": 1789315200000,
-      "tag": "0009_key_vault",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "6",
-      "when": 1789401600000,
-      "tag": "0010_authorship",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "7",
-      "when": 1789488000000,
-      "tag": "0011_workspace_default",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "7",
-      "when": 1789574400000,
-      "tag": "0012_team_collaboration",
-      "breakpoints": true
-    }
-  ]
+    "version": "7",
+    "dialect": "sqlite",
+    "entries": [
+        {
+            "idx": 0,
+            "version": "6",
+            "when": 1788690614164,
+            "tag": "0000_quick_iron_fist",
+            "breakpoints": true
+        },
+        {
+            "idx": 1,
+            "version": "6",
+            "when": 1788704951404,
+            "tag": "0001_profile_card",
+            "breakpoints": true
+        },
+        {
+            "idx": 2,
+            "version": "6",
+            "when": 1788727216285,
+            "tag": "0002_crm_indexes",
+            "breakpoints": true
+        },
+        {
+            "idx": 3,
+            "version": "6",
+            "when": 1788796800000,
+            "tag": "0003_edge_provenance",
+            "breakpoints": true
+        },
+        {
+            "idx": 4,
+            "version": "6",
+            "when": 1788883200000,
+            "tag": "0004_hybrid_search",
+            "breakpoints": true
+        },
+        {
+            "idx": 5,
+            "version": "6",
+            "when": 1788969600000,
+            "tag": "0005_skills",
+            "breakpoints": true
+        },
+        {
+            "idx": 6,
+            "version": "6",
+            "when": 1789056000000,
+            "tag": "0006_profile_views_privacy",
+            "breakpoints": true
+        },
+        {
+            "idx": 7,
+            "version": "6",
+            "when": 1789142400000,
+            "tag": "0007_content_tracker",
+            "breakpoints": true
+        },
+        {
+            "idx": 8,
+            "version": "6",
+            "when": 1789228800000,
+            "tag": "0008_workspaces",
+            "breakpoints": true
+        },
+        {
+            "idx": 9,
+            "version": "6",
+            "when": 1789315200000,
+            "tag": "0009_key_vault",
+            "breakpoints": true
+        },
+        {
+            "idx": 10,
+            "version": "6",
+            "when": 1789401600000,
+            "tag": "0010_authorship",
+            "breakpoints": true
+        },
+        {
+            "idx": 11,
+            "version": "7",
+            "when": 1789488000000,
+            "tag": "0011_workspace_default",
+            "breakpoints": true
+        },
+        {
+            "idx": 12,
+            "version": "7",
+            "when": 1789574400000,
+            "tag": "0012_team_collaboration",
+            "breakpoints": true
+        },
+        {
+            "idx": 13,
+            "version": "7",
+            "when": 1789660800000,
+            "tag": "0013_plugins",
+            "breakpoints": true
+        }
+    ]
 }

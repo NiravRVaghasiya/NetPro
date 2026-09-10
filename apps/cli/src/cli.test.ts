@@ -8,10 +8,10 @@ describe('CLI root program', () => {
     expect(program.version()).toBe('2.5.0');
   });
 
-  it('registers all nineteen top-level commands (v3.0 Phase 1 adds team)', () => {
+  it('registers all twenty top-level commands (v3.0 Phase 1 adds team, Phase 5 adds plugin)', () => {
     const program = createProgram();
     const names = program.commands.map((c) => c.name());
-    expect(names).toEqual(['init', 'config', 'import', 'enrich', 'search', 'reindex', 'outreach', 'analyze', 'path', 'track', 'edge', 'campaign', 'export', 'card', 'migrate', 'skills', 'events', 'content', 'team']);
+    expect(names).toEqual(['init', 'config', 'import', 'enrich', 'search', 'reindex', 'outreach', 'analyze', 'path', 'track', 'edge', 'campaign', 'export', 'card', 'migrate', 'skills', 'events', 'content', 'team', 'plugin']);
   });
 
   it('registers the content subcommands (v2.5 Phase 5)', () => {

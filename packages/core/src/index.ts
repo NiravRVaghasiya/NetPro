@@ -25,3 +25,6 @@ export * as retention from './retention';
 export * as workspaces from './workspaces';
 
 export * as vault from './crypto';
+
+// v3.0 Phase 5 — plugin runtime & manifest.
+export * as plugins from './plugins';

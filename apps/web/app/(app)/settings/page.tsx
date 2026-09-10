@@ -117,6 +117,18 @@ export default function SettingsPage() {
           View activity →
         </Link>
       </section>
+      <section className="my-5 rounded-xl border border-slate-200 p-5">
+        <h2 className="text-base font-semibold text-[#183c30]">Plugins</h2>
+        <p className="my-2 text-sm leading-6 text-slate-500">
+          Extend NetPro with custom data sources, enrichers, AI providers, content providers, event discovery, and commands. v3.0 Phase 5 — permission manifest, workspace-scoped, no auto-install.
+        </p>
+        <Link
+          href="/settings/plugins"
+          className="text-sm font-medium text-emerald-800 underline underline-offset-4"
+        >
+          Manage plugins →
+        </Link>
+      </section>
       <p style={{ color: "#555" }}>
         Integrations are configured with server-side environment variables (BYO
         API keys — NetPro never stores them). Restart the server after changing

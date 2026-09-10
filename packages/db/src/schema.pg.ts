@@ -521,6 +521,25 @@ export const profileCards = pgTable('profile_cards', {
   workspaceIdx: index('idx_profile_cards_workspace').on(t.workspaceId),
 }));
 
+// v3.0 Phase 5 — plugin runtime (migration 0013). Workspace-scoped installs.
+export const plugins = pgTable('plugins', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  version: text('version').notNull(),
+  manifest: text('manifest').notNull(),
+  enabled: boolean('enabled').notNull().default(false),
+  installedFrom: text('installed_from'),
+  installedByUser: text('installed_by_user'),
+  pluginSettings: text('plugin_settings'),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+}, (t) => ({
+  workspaceNameUnique: unique('plugins_workspace_name_unique').on(t.workspaceId, t.name),
+  workspaceIdx: index('idx_plugins_workspace').on(t.workspaceId),
+  workspaceEnabledIdx: index('idx_plugins_workspace_enabled').on(t.workspaceId, t.enabled),
+}));
+
 // Separate partial indexes make the nullable workspace principal truly unique.
 export const keyVault = pgTable('key_vault', {
   id: text('id').primaryKey(),
