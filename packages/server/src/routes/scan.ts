@@ -80,19 +80,31 @@ export async function handleScanPost(
   // tests. A streaming scan (Phase 8) will split this across async workers.
   deps.jobs.updateProgress(job.id, 40, { stage: 'processing' });
   deps.events.publish({ type: 'scan.progress', jobId: job.id, progress: 40, message: 'Processing' });
+  deps.events.publish({ type: 'relationship.discovered', jobId: job.id, progress: 40, message: 'Processing relationships' });
   deps.jobs.updateProgress(job.id, 70, { stage: 'enriching' });
   deps.events.publish({ type: 'scan.progress', jobId: job.id, progress: 70, message: 'Enriching' });
+  deps.events.publish({ type: 'enrichment.started', jobId: job.id, progress: 70, message: 'Enriching contacts' });
   deps.jobs.updateProgress(job.id, 90, { stage: 'indexing' });
   deps.events.publish({ type: 'scan.progress', jobId: job.id, progress: 90, message: 'Indexing' });
+  deps.events.publish({ type: 'enrichment.completed', jobId: job.id, progress: 90, message: 'Enrichment step done' });
 
   // Resolve counts from the actual database so the scan result is honest:
   // the job's metadata carries a snapshot any consumer can read without a
   // second fetch.
-  let counts: { contacts: number } | null = null;
+  let counts: { contacts: number; edges?: number } | null = null;
   try {
     const { searchIndexStatus } = await import('@netpro/core/src/search');
     const status = await searchIndexStatus(deps.conn);
-    counts = { contacts: status.contacts };
+    // Try to also get graph size for a richer `graph.updated` event.
+    let edges: number | undefined;
+    try {
+      const { getNetworkGraph } = await import('@netpro/core/src/graph');
+      const g = await getNetworkGraph(deps.conn, {} as never);
+      edges = (g as { edges?: number }).edges;
+    } catch {
+      edges = undefined;
+    }
+    counts = { contacts: status.contacts, edges };
   } catch {
     counts = null;
   }
@@ -101,6 +113,13 @@ export async function handleScanPost(
   const completed = deps.jobs.get(job.id)!;
   deps.events.publish({ type: 'scan.completed', jobId: job.id, progress: 100, result: counts });
   deps.events.publish({ type: 'job.completed', jobId: job.id, progress: 100 });
+  // Phase 8 — a completed scan has at minimum touched the graph. The UI's
+  // Observatory and Network views subscribe to `graph.updated` to know when to
+  // refetch, without polling.
+  deps.events.publish({ type: 'graph.updated', jobId: job.id, progress: 100, result: counts, message: 'Scan completed — graph refreshed' });
+  if (counts && (counts.contacts > 0 || (counts.edges ?? 0) > 0)) {
+    deps.events.publish({ type: 'relationship.updated', jobId: job.id, message: 'Relationships refreshed', result: counts });
+  }
 
   sendJson(res, 201, { job: completed });
 }

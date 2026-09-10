@@ -8,6 +8,10 @@
 // GET /api/graph/path         → planIntroPaths (single target+from)
 // GET /api/graph/paths        → same (plural alias)
 // GET /api/graph/position/:id → per-contact position (optional)
+//
+// Phase 8: graph operations emit `graph.updated` (overview) and
+// `relationship.discovered` / `graph.updated` for path results so the
+// Activity feed can answer "what did NetPro discover?".
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { SqliteConn, PgConn } from '@netpro/db';
@@ -15,10 +19,12 @@ import { getNetworkGraph, planIntroPaths } from '@netpro/core/src/graph';
 import { GraphError } from '@netpro/core/src/graph';
 import { sendJson } from '../middleware/json';
 import type { AuthContext } from '../auth/index';
+import type { EventBus } from '../events/index';
 
 export type GraphDeps = {
   conn: SqliteConn | PgConn;
   auth: AuthContext;
+  events?: EventBus;
 };
 
 function num(v: string | null): number | undefined {
@@ -59,6 +65,16 @@ export async function handleGraphOverview(
     const graph = await getNetworkGraph(deps.conn, {
       ...graphAnalysisParams(p),
     } as never);
+    // Phase 8 — the graph is the visual centerpiece (Phase 11). Every overview
+    // fetch is a chance to tell the UI the shape just observed, so the
+    // Observatory can stay fresh without polling.
+    deps.events?.publish({
+      type: 'graph.updated',
+      message: `Graph: ${graph.nodes} nodes, ${graph.edges} edges`,
+      nodes: (graph as { nodes?: number }).nodes,
+      edges: (graph as { edges?: number }).edges,
+      components: (graph as { components?: unknown }).components,
+    });
     sendJson(res, 200, graph);
   } catch (error) {
     const status = errorStatus(error);
@@ -90,6 +106,24 @@ export async function handleGraphPaths(
       { target, from, k: k ?? 1 },
       analysis as never
     );
+    // Phase 8 — a discovered path is a relationship chain. Surface it as
+    // both a graph update and a relationship discovery so the Activity feed
+    // can show "New path found" without parsing the full graph payload.
+    if ((plan as { found?: boolean }).found) {
+      deps.events?.publish({
+        type: 'relationship.discovered',
+        message: `Path to ${target}: ${(plan as { paths?: unknown[] }).paths?.length ?? 0} route(s) found`,
+        target,
+        from,
+        paths: (plan as { paths?: unknown }).paths,
+      });
+      deps.events?.publish({
+        type: 'graph.updated',
+        message: `Pathfinder: path to ${target}`,
+        target,
+        from,
+      });
+    }
     sendJson(res, 200, plan);
   } catch (error) {
     const status = errorStatus(error);

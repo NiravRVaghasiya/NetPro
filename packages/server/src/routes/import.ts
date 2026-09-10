@@ -132,12 +132,48 @@ export async function handleImportPost(
     const completed = deps.jobs.get(job.id)!;
     deps.events.publish({ type: 'import.completed', jobId: job.id, progress: 100, result: summary });
     deps.events.publish({ type: 'job.completed', jobId: job.id, progress: 100 });
-    deps.events.publish({ type: 'contact.imported', jobId: job.id, imported: summary.imported, merged: summary.merged });
+    // Phase 8 — richer domain events so the Observatory can answer
+    // "what did NetPro discover?" without parsing the import summary.
+    if (summary.imported > 0) {
+      deps.events.publish({
+        type: 'contact.imported',
+        jobId: job.id,
+        imported: summary.imported,
+        merged: summary.merged,
+        message: `Imported ${summary.imported} new contacts`,
+      });
+    }
+    if (summary.merged > 0) {
+      deps.events.publish({
+        type: 'contact.updated',
+        jobId: job.id,
+        imported: summary.imported,
+        merged: summary.merged,
+        message: `Updated ${summary.merged} existing contacts`,
+      });
+    }
+    if (summary.edgeCandidates && summary.edgeCandidates.inserted > 0) {
+      deps.events.publish({
+        type: 'relationship.discovered',
+        jobId: job.id,
+        message: `Discovered ${summary.edgeCandidates.inserted} relationship candidates`,
+        candidates: summary.edgeCandidates,
+      });
+    }
+    if (summary.imported > 0 || summary.merged > 0) {
+      deps.events.publish({
+        type: 'graph.updated',
+        jobId: job.id,
+        message: summary.imported > 0 ? `Graph: +${summary.imported} contacts` : 'Graph updated',
+        imported: summary.imported,
+        merged: summary.merged,
+      });
+    }
     sendJson(res, 200, { job: completed, summary });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     deps.jobs.fail(job.id, message);
-    deps.events.publish({ type: 'job.failed', jobId: job.id, error: message });
+    deps.events.publish({ type: 'job.failed', jobId: job.id, error: message, message });
     deps.events.publish({ type: 'import.completed', jobId: job.id, error: message });
     sendJson(res, 500, { error: message, job: deps.jobs.get(job.id) });
   }

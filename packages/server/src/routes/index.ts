@@ -32,6 +32,7 @@ import { handleSearch } from './search';
 import { handleGraphOverview, handleGraphPaths } from './graph';
 import { handleAnalytics } from './analytics';
 import { handleImportPost, handleImportGet } from './import';
+import { handleEnrichPost, handleEnrichGet } from './enrich';
 import { handleListJobs, handleGetJob, handleCreateJob, handleCancelJob } from './jobs';
 import { handleEvents } from './events';
 import { handleGetSettings, handlePutSettings } from './settings';
@@ -221,20 +222,20 @@ export async function dispatch(
     }
   }
 
-  // Search
+  // Search — Phase 8: emits search.started / completed into the SSE bus
   if ((path === '/api/search' || path === '/api/contacts/search') && method === 'GET') {
-    await handleSearch(req, res, { conn: ctx.conn, auth });
+    await handleSearch(req, res, { conn: ctx.conn, auth, events: ctx.events });
     return true;
   }
 
-  // Graph — overview variants
+  // Graph — overview variants — Phase 8: emits graph.updated / relationship.discovered
   if (
     (path === '/api/graph' ||
       path === '/api/graph/overview' ||
       path === '/api/graph/network') &&
     method === 'GET'
   ) {
-    await handleGraphOverview(req, res, { conn: ctx.conn, auth });
+    await handleGraphOverview(req, res, { conn: ctx.conn, auth, events: ctx.events });
     return true;
   }
   // Graph — pathfinder
@@ -242,7 +243,7 @@ export async function dispatch(
     (path === '/api/graph/path' || path === '/api/graph/paths') &&
     method === 'GET'
   ) {
-    await handleGraphPaths(req, res, { conn: ctx.conn, auth });
+    await handleGraphPaths(req, res, { conn: ctx.conn, auth, events: ctx.events });
     return true;
   }
   // Alias: /api/graph/path and /api/graph/paths via query style already
@@ -282,6 +283,26 @@ export async function dispatch(
   // Scan
   if (path === '/api/scan' && method === 'POST') {
     await handleScanPost(req, res, {
+      conn: ctx.conn,
+      auth,
+      jobs: ctx.jobs,
+      events: ctx.events,
+    });
+    return true;
+  }
+
+  // Enrich — Phase 8: observable job with enrichment.* events
+  if (path === '/api/enrich' && method === 'POST') {
+    await handleEnrichPost(req, res, {
+      conn: ctx.conn,
+      auth,
+      jobs: ctx.jobs,
+      events: ctx.events,
+    });
+    return true;
+  }
+  if (path.startsWith('/api/enrich/') && method === 'GET') {
+    await handleEnrichGet(req, res, {
       conn: ctx.conn,
       auth,
       jobs: ctx.jobs,
@@ -373,6 +394,12 @@ export async function dispatch(
   // SSE explicit alias — always a stream regardless of Accept.
   if (path === '/api/events/stream' && method === 'GET') {
     handleEvents(req, res, { events: ctx.events });
+    return true;
+  }
+  // Phase 8 — CLI→server bridge: forward job.* from a terminal `netpro` run into the same SSE stream.
+  if (path === '/api/events/ingest' && method === 'POST') {
+    const { handleEventsIngest } = await import('./events');
+    await handleEventsIngest(req, res, { events: ctx.events });
     return true;
   }
   if (path.startsWith('/api/events/') && method === 'GET') {
