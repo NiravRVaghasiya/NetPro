@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import type { PgConn, SqliteConn } from '@netpro/db';
+import type { InstallationIdentity, PgConn, SqliteConn } from '@netpro/db';
 
 export interface InitResult {
   home: string;
@@ -13,8 +13,23 @@ export interface InitResult {
   databaseDisplay: string;
   applied: number;
   total: number;
+  /** Phase 5 — the local installation identity (minted here if absent). */
+  installation: InstallationIdentity;
+  installationCreated: boolean;
+  /** Where the optional remote-access token lives (mode 0600). */
+  tokenPath: string;
+  /** True when this run minted a token (an existing one is never replaced). */
+  tokenCreated: boolean;
+  /** Display-safe token preview — never the full value. */
+  tokenPreview: string;
   /** Exposed so callers (tests, embedders) can release the handle. */
   conn: SqliteConn | PgConn;
+}
+
+export interface InitOptions {
+  /** Display name to record on first creation (ignored if one exists). */
+  owner?: string;
+  email?: string;
 }
 
 /** Default config.toml written on first init. Every setting is a commented no-op. */
@@ -22,7 +37,7 @@ export function defaultConfigToml(): string {
   return `# NetPro configuration
 # Local docs: docs/local-first.md
 # Environment variables (DB_DIALECT, DB_PATH, DATABASE_URL, NETPRO_HOST,
-# NETPRO_PORT) override anything written here.
+# NETPRO_PORT, NETPRO_AUTH_MODE) override anything written here.
 
 [database]
 # dialect = "sqlite"              # "sqlite" (default) or "postgresql"
@@ -32,26 +47,50 @@ export function defaultConfigToml(): string {
 [server]
 # host = "127.0.0.1"              # Loopback by default — expose deliberately.
 # port = 3777
+
+[auth]
+# mode = "local"                  # local (default) | token | open
+#   local — requests from this machine are trusted; other machines need the
+#           access token in ~/.netpro/keys/access-token (netpro token).
+#   token — every request needs the access token, including this machine.
+#   open  — no authentication at all; only behind your own auth proxy/VPN.
+
+# The installation identity below is written by netpro init and is what
+# identifies this install (it replaces "sign in with GitHub" for local use).
+# Uncomment owner to label it with your name.
+[installation]
+# owner = "Your name"
+# email = "you@example.com"
 `;
 }
 
 /**
- * `netpro init` — create the local install and database.
+ * `netpro init` — create the local install, its identity, and its database.
  *
- * Creates `~/.netpro/` (config.toml, logs/, keys/), opens the configured
- * database (SQLite by default, at <home>/netpro.db), and applies pending
- * migrations. Idempotent: an existing config.toml is never overwritten and
- * re-running against a migrated database is a no-op.
+ * Creates `~/.netpro/` (config.toml, logs/, keys/), mints the installation
+ * identity and the optional remote-access token (Phase 5), opens the
+ * configured database (SQLite by default, at <home>/netpro.db), and applies
+ * pending migrations. Idempotent: an existing config.toml is never
+ * overwritten, an existing identity/token is never replaced, and re-running
+ * against a migrated database is a no-op.
  *
  * Exit criteria (Phase 3): a fresh machine works with `netpro init` +
- * `netpro serve` — no PostgreSQL, no DATABASE_URL, no GitHub OAuth.
+ * `netpro serve` — no PostgreSQL, no DATABASE_URL.
+ * Exit criteria (Phase 5): and no GitHub OAuth either — init is where the
+ * local installation identity comes from.
  */
-export async function executeInit(env: NodeJS.ProcessEnv = process.env): Promise<InitResult> {
+export async function executeInit(
+  env: NodeJS.ProcessEnv = process.env,
+  options: InitOptions = {}
+): Promise<InitResult> {
   const {
     appliedMigrationCount,
     createDb,
     describeConn,
+    ensureAccessToken,
+    ensureInstallationIdentity,
     pendingMigrationTotal,
+    redactAccessToken,
     runMigrations,
   } = await import('@netpro/db');
   const { configTomlPath, ensureNetProHome } = await import('@netpro/db/src/local');
@@ -65,7 +104,16 @@ export async function executeInit(env: NodeJS.ProcessEnv = process.env): Promise
     writeFileSync(configPath, defaultConfigToml(), { mode: 0o644 });
   }
 
-  // 2. Database: default SQLite at <home>/netpro.db. Migrations run
+  // 2. Phase 5 identity: the local install *is* the owner, so init mints the
+  //    installation id (written into [installation]) and a token for the day
+  //    the server is exposed beyond loopback. Neither is regenerated.
+  const { identity: installation, created: installationCreated } = ensureInstallationIdentity(
+    env,
+    { owner: options.owner, email: options.email }
+  );
+  const token = ensureAccessToken(env);
+
+  // 3. Database: default SQLite at <home>/netpro.db. Migrations run
   //    explicitly here — init is the "set up my install" step, mirroring
   //    `netpro migrate` (force bypasses the per-process promise cache).
   const conn = createDb(env);
@@ -89,6 +137,11 @@ export async function executeInit(env: NodeJS.ProcessEnv = process.env): Promise
     databaseDisplay: describeConn(conn, env),
     applied,
     total,
+    installation,
+    installationCreated,
+    tokenPath: token.path,
+    tokenCreated: token.created,
+    tokenPreview: redactAccessToken(token.token),
     conn,
   };
 }
@@ -117,13 +170,15 @@ export function initFailureHint(message: string): string | null {
 export function registerInitCommand(program: Command): void {
   program
     .command('init')
-    .description('Create the local install (~/.netpro) and database')
-    .action(async () => {
+    .description('Create the local install (~/.netpro), identity, and database')
+    .option('--owner <name>', 'Display name to record for this installation')
+    .option('--email <address>', 'Contact email to record for this installation')
+    .action(async (options: { owner?: string; email?: string }) => {
       // Imported lazily so `--help` never loads the native database drivers.
       const { closeConn } = await import('@netpro/db');
       let result: InitResult | undefined;
       try {
-        result = await executeInit();
+        result = await executeInit(process.env, options);
         const pending = Math.max(0, result.total - result.applied);
         const dbState =
           pending === 0
@@ -136,11 +191,24 @@ export function registerInitCommand(program: Command): void {
           `Config:   ${result.configPath} ${result.configCreated ? '(created)' : '(kept existing)'}`
         );
         console.log(`Database: ${result.databaseDisplay} (${dbState})`);
+        console.log(
+          `Identity: ${result.installation.id}${result.installation.owner ? ` (${result.installation.owner})` : ''}` +
+            `${result.installationCreated ? ' — created' : ' — existing'}`
+        );
+        console.log(
+          `Token:    ${result.tokenPreview} at ${result.tokenPath} ` +
+            `${result.tokenCreated ? '(created)' : '(existing)'}`
+        );
         console.log('');
         console.log('Next steps:');
         console.log('  netpro serve                       start the local server + Web UI');
         console.log('  netpro status                      install, database, and server health');
         console.log('  netpro import --linkedin <file>    import a LinkedIn connections export');
+        console.log('');
+        console.log(
+          'The token is only needed if you expose the server beyond this machine;'
+        );
+        console.log('`netpro token` prints it any time.');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error(`✗ netpro init failed: ${message}`);

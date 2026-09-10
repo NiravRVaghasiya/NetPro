@@ -30,7 +30,8 @@ export type ServeDeps = {
  *   4. 127.0.0.1:3777 (the Phase 2 plan defaults)
  *
  * The command blocks until SIGINT/SIGTERM (or the injected stop signal) and
- * then shuts the server down gracefully. No Vercel, no cloud, no GitHub OAuth.
+ * then shuts the server down gracefully. No cloud, no OAuth, no
+ * configuration beyond an optional host/port.
  */
 export async function executeServe(
   options: ServeCommandOptions,

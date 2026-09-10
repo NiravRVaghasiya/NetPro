@@ -1,13 +1,18 @@
 // packages/server/src/serve.ts
 //
 // Phase 2 — `netpro serve`: the one command that makes NetPro runnable
-// entirely on the user's machine, with no Vercel, no cloud infrastructure,
-// and no GitHub OAuth.
+// entirely on the user's machine, with no cloud infrastructure.
+//
+// Phase 5 — the banner also names the local installation identity and the
+// authentication mode, and a remote bind is never accidentally unprotected:
+// a non-loopback `local` bind mints an access token when none exists, and an
+// `open` bind says out loud that it answers anyone.
 //
 // Defaults come from the plan: 127.0.0.1:3777. `~/.netpro/config.toml`
-// ([server]) and NETPRO_HOST/NETPRO_PORT override them; explicit options
-// (the CLI's --host/--port) override everything. The banner mirrors the
-// plan's example so a fresh `netpro serve` reads exactly like the spec:
+// ([server], [auth]) and NETPRO_HOST/NETPRO_PORT/NETPRO_AUTH_MODE override
+// them; explicit options (the CLI's --host/--port) override everything. The
+// banner mirrors the plan's example so a fresh `netpro serve` reads exactly
+// like the spec:
 
 //     NetPro server started
 //
@@ -18,10 +23,13 @@
 
 import {
   describeConn,
+  ensureAccessToken,
   LocalConfigError,
+  redactAccessToken,
   type PgConn,
   type SqliteConn,
 } from '@netpro/db';
+import { authStartupDiagnostics, describeAuthPolicy, loadAuthPolicy, type AuthPolicy } from './auth/index';
 import { createApp, type NetProApp } from './app';
 import { loadConfig } from './config';
 import type { RunningServer } from './server';
@@ -41,6 +49,12 @@ export type RunServeOptions = {
    * Pass [] to disable handlers entirely (tests drive close() themselves).
    */
   signals?: NodeJS.Signals[];
+  /**
+   * Mint an access token automatically when a non-loopback bind would
+   * otherwise be unprotected (default true). Tests and embedders that manage
+   * their own install set this to false.
+   */
+  createTokenOnRemoteBind?: boolean;
 };
 
 export type ServeStopReason =
@@ -82,6 +96,32 @@ export function friendlyListenError(error: unknown, host: string, port: number):
 }
 
 /**
+ * Resolve the auth policy for a bind, creating a token when a non-loopback
+ * `local` bind would otherwise deny every remote caller.
+ *
+ * This is the one place NetPro writes a credential on the user's behalf, and
+ * it only does so when the alternative is a server that cannot be used — never
+ * on a plain loopback start.
+ */
+export function prepareAuthPolicy(
+  env: NodeJS.ProcessEnv,
+  host: string,
+  mode: Parameters<typeof loadAuthPolicy>[1],
+  options: { createTokenOnRemoteBind?: boolean } = {}
+): { policy: AuthPolicy; createdToken: string | null } {
+  const policy = loadAuthPolicy(env, mode);
+  const create = options.createTokenOnRemoteBind ?? true;
+  if (create && policy.mode === 'local' && !isLoopbackHost(host) && !policy.token) {
+    const created = ensureAccessToken(env);
+    return {
+      policy: { ...policy, token: created.token },
+      createdToken: created.token,
+    };
+  }
+  return { policy, createdToken: null };
+}
+
+/**
  * Create the app, bind the port, print the startup banner, and wire
  * graceful shutdown. Resolves once listening; await `handle.stopped` to
  * block until shutdown completes (this is what `netpro serve` does).
@@ -94,7 +134,18 @@ export async function runServe(options: RunServeOptions = {}): Promise<ServeHand
   if (options.host !== undefined) config.host = options.host;
   if (options.port !== undefined) config.port = options.port;
 
-  const app = await createApp({ config });
+  const { policy, createdToken } = prepareAuthPolicy(env, config.host, config.auth.mode, {
+    createTokenOnRemoteBind: options.createTokenOnRemoteBind,
+  });
+
+  const diagnostics = authStartupDiagnostics(policy, {
+    host: config.host,
+    isLoopbackHost: isLoopbackHost(config.host),
+  });
+  const fatal = diagnostics.find((d) => d.level === 'error');
+  if (fatal) throw new LocalConfigError(fatal.message);
+
+  const app = await createApp({ config, auth: policy });
 
   let running: RunningServer;
   try {
@@ -104,7 +155,11 @@ export async function runServe(options: RunServeOptions = {}): Promise<ServeHand
     throw friendlyListenError(error, config.host, config.port);
   }
 
-  printBanner(running, app, env, log);
+  printBanner(running, app, env, policy, createdToken, log);
+  for (const warning of diagnostics.filter((d) => d.level === 'warning')) {
+    log(`⚠ ${warning.message}`);
+    log('');
+  }
 
   let resolveStopped: (reason: ServeStopReason) => void = () => {};
   const stopped = new Promise<ServeStopReason>((resolve) => {
@@ -140,6 +195,8 @@ function printBanner(
   running: RunningServer,
   app: NetProApp,
   env: NodeJS.ProcessEnv,
+  policy: AuthPolicy,
+  createdToken: string | null,
   log: (line: string) => void
 ): void {
   const conn: SqliteConn | PgConn = app.conn;
@@ -156,16 +213,24 @@ function printBanner(
   log('');
   log(`Local:    ${displayUrl}`);
   log(`Database: ${database}`);
+  if (policy.installation) {
+    const owner = policy.installation.owner ? ` (${policy.installation.owner})` : '';
+    log(`Identity: ${policy.installation.id}${owner}`);
+  } else {
+    log('Identity: not initialized — run `netpro init` to create one');
+  }
+  log(`Auth:     ${describeAuthPolicy(policy)}`);
   log('');
   log(`Web UI:   ${displayUrl}`);
   log('');
 
-  if (!isLoopbackHost(running.host)) {
+  if (createdToken) {
+    // Printed once, on the machine's own console. The value lives in
+    // ~/.netpro/keys/access-token (mode 0600); `netpro token` shows it again.
     log(
-      `⚠ Bound to ${running.host} — NetPro is reachable from your network, not just ` +
-        `this machine. The local-first default is 127.0.0.1; remote exposure is opt-in ` +
-        `and full auth hardening lands in Phase 5.`
+      `Created an access token for remote callers: ${redactAccessToken(createdToken)}`
     );
+    log('  Show it any time with `netpro token`; the full value is in ~/.netpro/keys/access-token.');
     log('');
   }
 }
@@ -188,6 +253,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
 
 NetPro local HTTP server (standalone bin).
 Prefer \`netpro serve\` from the CLI. Default bind: 127.0.0.1:3777
+Auth: loopback requests are trusted; remote requests need the access token
+      (~/.netpro/keys/access-token, or NETPRO_AUTH_TOKEN).
 `);
       return;
     }

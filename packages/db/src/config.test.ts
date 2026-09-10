@@ -55,20 +55,27 @@ describe('resolvePgSsl', () => {
 });
 
 describe('resolvePoolConfig', () => {
-  it('keeps one connection per serverless instance', () => {
+  it('keeps one connection per serverless instance when the deployment says so', () => {
     // Instances scale out horizontally; a big per-instance pool multiplies
-    // into connection exhaustion on the managed database.
-    expect(resolvePoolConfig({ VERCEL: '1' } as NodeJS.ProcessEnv).max).toBe(1);
+    // into connection exhaustion on the database. Phase 4: the deployment
+    // states its own shape (NETPRO_SERVERLESS) instead of NetPro guessing it
+    // from a hosting platform's environment variables.
+    expect(resolvePoolConfig({ NETPRO_SERVERLESS: '1' } as NodeJS.ProcessEnv).max).toBe(1);
+    expect(resolvePoolConfig({ FUNCTION_TARGET: 'handler' } as NodeJS.ProcessEnv).max).toBe(1);
   });
 
-  it('uses a roomier pool for long-lived servers', () => {
+  it('uses a roomier pool for long-lived servers, even where a platform is present', () => {
     expect(resolvePoolConfig({} as NodeJS.ProcessEnv).max).toBe(10);
+    expect(resolvePoolConfig({ VERCEL: '1' } as NodeJS.ProcessEnv).max).toBe(10);
   });
 
-  it('lets an operator override the pool size', () => {
+  it('lets an operator override the pool size and opt out of small pools', () => {
     expect(
-      resolvePoolConfig({ VERCEL: '1', NETPRO_DB_POOL_MAX: '5' } as NodeJS.ProcessEnv).max
+      resolvePoolConfig({ NETPRO_SERVERLESS: '1', NETPRO_DB_POOL_MAX: '5' } as NodeJS.ProcessEnv).max
     ).toBe(5);
+    expect(
+      resolvePoolConfig({ NETPRO_SERVERLESS: 'false' } as NodeJS.ProcessEnv).max
+    ).toBe(10);
   });
 
   it('ignores nonsense overrides rather than creating a broken pool', () => {
@@ -99,25 +106,19 @@ describe('autoMigrateEnabled', () => {
 });
 
 describe('createDb guard rails', () => {
-  it('refuses ephemeral SQLite on Vercel', () => {
-    // Vercel's filesystem is per-instance and wiped on redeploy, so a SQLite
-    // database there silently loses the user's imported network. Fail loudly
-    // at startup instead of shipping a deploy that looks fine.
+  it('opens the configured SQLite file wherever the process happens to run', () => {
+    // Phase 4 removed the hosted-platform refusal: whether SQLite is
+    // appropriate is the operator's call (it needs a persistent filesystem),
+    // documented rather than inferred from environment variables NetPro does
+    // not own.
     process.env.VERCEL = '1';
     process.env.DB_DIALECT = 'sqlite';
-    expect(() => createDb()).toThrow(/ephemeral/i);
-    expect(() => createDb()).toThrow(/DB_DIALECT=postgresql/);
-  });
-
-  it('allows an explicit opt-out for throwaway preview deploys', () => {
-    process.env.VERCEL = '1';
-    process.env.DB_DIALECT = 'sqlite';
-    process.env.NETPRO_ALLOW_EPHEMERAL_SQLITE = '1';
     process.env.DB_PATH = ':memory:';
-    expect(() => createDb()).not.toThrow();
+    const conn = createDb();
+    expect(conn.dialect).toBe('sqlite');
   });
 
-  it('still requires DATABASE_URL for the postgres dialect', () => {
+  it('requires DATABASE_URL for the postgres dialect', () => {
     process.env.DB_DIALECT = 'postgresql';
     delete process.env.DATABASE_URL;
     expect(() => createDb()).toThrow(/DATABASE_URL is required/);

@@ -18,9 +18,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 20 is the workspace-wide `engines` floor; 22 is what contributors and
-        # Vercel actually run. A native addon (better-sqlite3) and Next.js 16
-        # make the difference worth covering.
+        # 20 is the workspace-wide `engines` floor; 22 is what contributors
+        # run. A native addon (better-sqlite3) and Next.js 16 make the
+        # difference worth covering.
         node-version: ['20', '22']
     steps:
       - uses: actions/checkout@v4
@@ -66,8 +66,9 @@ jobs:
   postgres:
     # Phases 1–5 shipped Postgres support that compiled but was never executed
     # against a real server. That gap hid a migration race that failed 5 of 6
-    # concurrent cold starts — precisely what a Vercel deploy does. This job
-    # exists so that can never regress unnoticed again.
+    # concurrent cold starts — exactly what a deploy that starts several
+    # instances at once does. This job exists so that can never regress
+    # unnoticed again.
     name: PostgreSQL integration
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -215,15 +216,21 @@ jobs:
           fi
           cat /tmp/migrate.log
 
-      - name: Start the web container
+      - name: Start the web container (phase 5: no credentials at all)
         run: |
+          # The Phase 5 exit criterion, exercised in CI: the production image
+          # starts and serves with DB_DIALECT/DATABASE_URL alone. No
+          # GITHUB_CLIENT_ID, no GITHUB_CLIENT_SECRET, no
+          # NETPRO_OWNER_GITHUB_ID, no NEXTAUTH_SECRET, no NEXTAUTH_URL.
+          # NETPRO_TRUST_LOCAL_UI=1 is the operator's assertion that the
+          # instance is reachable only from this machine: inside the container
+          # the socket peer is the Docker bridge, so the loopback check cannot
+          # pass on its own (docker-compose.yml publishes on 127.0.0.1 and sets
+          # the same flag).
           docker run -d --name web --network netpro-ci -p 3000:3000 \
             -e DB_DIALECT=postgresql \
             -e DATABASE_URL='postgresql://netpro:netpro@db:5432/netpro?sslmode=disable' \
-            -e NEXTAUTH_SECRET=ci-only-secret-not-a-real-credential \
-            -e NEXTAUTH_URL=http://localhost:3000 \
-            -e AUTH_URL=http://localhost:3000 \
-            -e NETPRO_OWNER_GITHUB_ID=1 \
+            -e NETPRO_TRUST_LOCAL_UI=1 \
             netpro:ci
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then break; fi
@@ -245,23 +252,36 @@ jobs:
           grep -q '"dialect":"postgresql"' /tmp/health.json || {
             echo "::error::health dialect not postgresql: $(cat /tmp/health.json)"; exit 1; }
 
+          echo "--- local mode trusts this machine (phase 5) ---"
+          # A request whose Host is loopback comes from the operator, so the
+          # private API answers it without any sign-in at all.
+          local_card="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/card)"
+          [ "$local_card" = "200" ] || { echo "::error::local /api/card expected 200, got $local_card"; exit 1; }
+
           echo "--- auth boundaries ---"
-          # Private API must reject anonymous callers; the unpublished public
-          # card must 404 rather than leak a draft.
-          api_card="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/card)"
-          [ "$api_card" = "401" ] || { echo "::error::/api/card expected 401, got $api_card"; exit 1; }
+          # Private API must reject callers that did not come from this
+          # machine. Phase 5 local mode decides that from the Host header
+          # (plus the absence of proxy headers), so the remote case is
+          # exercised with a non-loopback Host — the same shape an attacker
+          # reaches the container with.
+          REMOTE=(-H 'Host: netpro.example')
+          api_card="$(curl -s -o /dev/null -w '%{http_code}' "${REMOTE[@]}" http://127.0.0.1:3000/api/card)"
+          [ "$api_card" = "401" ] || { echo "::error::remote /api/card expected 401, got $api_card"; exit 1; }
+          # A forwarded request is not local even when the Host says loopback.
+          proxied="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 203.0.113.7' http://127.0.0.1:3000/api/card)"
+          [ "$proxied" = "401" ] || { echo "::error::proxied /api/card expected 401, got $proxied"; exit 1; }
           # v2.0 Phase 6: every owner-only route added since has to answer the
           # same way in a production build, not just in unit tests.
           for path in /api/events /api/events/anything /api/events/anything/match /api/graph/overview /api/skills/gap; do
-            code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3000${path}")"
-            [ "$code" = "401" ] || { echo "::error::${path} expected 401, got $code"; exit 1; }
+            code="$(curl -s -o /dev/null -w '%{http_code}' "${REMOTE[@]}" "http://127.0.0.1:3000${path}")"
+            [ "$code" = "401" ] || { echo "::error::remote ${path} expected 401, got $code"; exit 1; }
           done
           # v2.5 Phase 7: the analytics and content surfaces joined the
           # owner-only boundary; the beacons stay public but must behave like
           # it (no 401, no Set-Cookie, nosniff) in a production build.
           for path in /api/analytics /api/card/views /api/content /api/content/anything /api/content/anything/metrics /api/content/anything/mentions; do
-            code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3000${path}")"
-            [ "$code" = "401" ] || { echo "::error::${path} expected 401, got $code"; exit 1; }
+            code="$(curl -s -o /dev/null -w '%{http_code}' "${REMOTE[@]}" "http://127.0.0.1:3000${path}")"
+            [ "$code" = "401" ] || { echo "::error::remote ${path} expected 401, got $code"; exit 1; }
           done
           pixel="$(curl -s -D - -o /dev/null http://127.0.0.1:3000/api/card/pixel.gif)"
           echo "$pixel" | head -1 | grep -q ' 200 ' || { echo "::error::pixel.gif expected 200, got: $(echo "$pixel" | head -1)"; exit 1; }
@@ -281,6 +301,38 @@ jobs:
           docker logs web 2>&1 | tee /tmp/web.log
           if grep -qi "UntrustedHost" /tmp/web.log; then
             echo "::error::UntrustedHost present in web logs"
+            exit 1
+          fi
+
+      - name: Re-check the boundary in GitHub mode
+        run: |
+          # Phase 5 keeps the v3.0 deployment shape available: with
+          # NETPRO_AUTH_MODE=github nothing is trusted, not even loopback —
+          # every caller must sign in. The credentials are fake on purpose;
+          # only the 401 path is under test.
+          docker rm -f web >/dev/null 2>&1 || true
+          docker run -d --name web --network netpro-ci -p 3000:3000 \
+            -e DB_DIALECT=postgresql \
+            -e DATABASE_URL='postgresql://netpro:netpro@db:5432/netpro?sslmode=disable' \
+            -e NETPRO_AUTH_MODE=github \
+            -e NEXTAUTH_SECRET=ci-only-secret-not-a-real-credential \
+            -e NEXTAUTH_URL=http://localhost:3000 \
+            -e AUTH_URL=http://localhost:3000 \
+            -e GITHUB_CLIENT_ID=ci-fake-client-id \
+            -e GITHUB_CLIENT_SECRET=ci-fake-client-secret \
+            -e NETPRO_OWNER_GITHUB_ID=1 \
+            netpro:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          for path in /api/card /api/events /api/graph/overview; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3000${path}")"
+            [ "$code" = "401" ] || { echo "::error::github-mode ${path} expected 401 even from loopback, got $code"; exit 1; }
+          done
+          docker logs web 2>&1 | tee /tmp/web-github.log
+          if grep -qi "UntrustedHost" /tmp/web-github.log; then
+            echo "::error::UntrustedHost present in GitHub-mode web logs"
             exit 1
           fi
 

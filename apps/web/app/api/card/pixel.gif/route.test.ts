@@ -149,7 +149,7 @@ describe("GET /api/card/pixel.gif (v2.5 phase 2)", () => {
   });
 
   it("honours DNT: still counted, but only page + time + bot flag are stored", async () => {
-    await GET(request("", { dnt: "1", "x-vercel-ip-country": "GB" }));
+    await GET(request("", { dnt: "1", "x-geo-country": "GB" }));
     const row = expectRow(storedRows());
     expect(row.viewer_agent).toBeNull();
     expect(row.referrer).toBeNull();

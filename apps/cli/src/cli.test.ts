@@ -8,10 +8,21 @@ describe('CLI root program', () => {
     expect(program.version()).toBe('3.0.0');
   });
 
-  it('registers all twenty-three top-level commands (v3.0 Phase 1 adds team, Phase 5 adds plugin, Phase 7 adds webhook; local-first adds serve + status)', () => {
+  it('registers all twenty-four top-level commands (v3.0 Phase 1 adds team, Phase 5 adds plugin, Phase 7 adds webhook; local-first adds serve + status + token)', () => {
     const program = createProgram();
     const names = program.commands.map((c) => c.name());
-    expect(names).toEqual(['init', 'serve', 'status', 'config', 'import', 'enrich', 'search', 'reindex', 'outreach', 'analyze', 'path', 'track', 'edge', 'campaign', 'export', 'card', 'migrate', 'skills', 'events', 'content', 'team', 'plugin', 'webhook']);
+    expect(names).toEqual(['init', 'serve', 'status', 'token', 'config', 'import', 'enrich', 'search', 'reindex', 'outreach', 'analyze', 'path', 'track', 'edge', 'campaign', 'export', 'card', 'migrate', 'skills', 'events', 'content', 'team', 'plugin', 'webhook']);
+  });
+
+  it('wires netpro token with rotate/path/json flags (local-first Phase 5)', () => {
+    const program = createProgram();
+    const token = program.commands.find((c) => c.name() === 'token');
+    expect(token).toBeDefined();
+    expect((token as import('commander').Command).options.map((o) => o.long)).toEqual([
+      '--rotate',
+      '--path',
+      '--json',
+    ]);
   });
 
   it('wires netpro serve with host/port options (local-first Phase 2)', () => {

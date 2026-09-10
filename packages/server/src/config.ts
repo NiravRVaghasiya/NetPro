@@ -10,11 +10,20 @@
 //     host = "127.0.0.1"
 //     port = 3777
 //
+//     [auth]
+//     mode = "local"          # local | token | open (Phase 5)
+//
 // Precedence (highest wins): environment → config.toml → defaults.
 // Environment keeps parity with the pre-config-file behaviour and with every
 // process manager (systemd, Docker, Compose) that speaks env vars natively.
+//
+// This module resolves *ordinary* settings only. The access token and
+// installation identity are resolved by `./auth` at app-creation time, so
+// `loadConfig()` stays a pure function of env + config.toml that tests can
+// call with an empty environment.
 
 import { readLocalConfig } from '@netpro/db';
+import { resolveAuthMode, type AuthMode } from './auth/index';
 
 export type ServerConfig = {
   /** Bind address. Default 127.0.0.1 (local-only). */
@@ -26,6 +35,13 @@ export type ServerConfig = {
    * Mirrors NETPRO_AUTO_MIGRATE used by the CLI and web instrumentation.
    */
   autoMigrate: boolean;
+  /**
+   * Phase 5 authentication policy mode. The token and installation identity
+   * live in `./auth` (`loadAuthPolicy`), because they come from disk
+   * (`~/.netpro/keys/access-token`, `[installation]`) rather than from
+   * configuration an operator edits by hand.
+   */
+  auth: { mode: AuthMode };
 };
 
 const DEFAULT_HOST = '127.0.0.1';
@@ -45,9 +61,10 @@ function positivePort(value: string | undefined, fallback: number): number {
  * - `NETPRO_HOST` / `HOST` — bind address (default 127.0.0.1)
  * - `NETPRO_PORT` / `PORT` — TCP port (default 3777)
  * - `NETPRO_AUTO_MIGRATE` — same semantics as @netpro/db
+ * - `NETPRO_AUTH_MODE` — `local` (default) | `token` | `open`
  * - `NETPRO_HOME` — relocate the install directory (see @netpro/db)
  *
- * No Vercel, AUTH_URL, or GitHub OAuth variables are required.
+ * No cloud-platform, AUTH_URL, or GitHub OAuth variables are required.
  *
  * An invalid config.toml is a loud error, not a silently-ignored file: a typo
  * in `[server] port` should stop the server, not strand the user on 3777.
@@ -72,8 +89,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     autoMigrate = !/^(0|false|no|off)$/i.test(raw.trim());
   }
 
-  return { host, port, autoMigrate };
+  return {
+    host,
+    port,
+    autoMigrate,
+    auth: { mode: resolveAuthMode(env) },
+  };
 }
+
+export type { AuthMode };
 
 export const DEFAULT_SERVER_HOST = DEFAULT_HOST;
 export const DEFAULT_SERVER_PORT = DEFAULT_PORT;

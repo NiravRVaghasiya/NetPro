@@ -3,10 +3,12 @@
 // A local NetPro install is a single directory, `~/.netpro` by default:
 //
 //     ~/.netpro/
-//     ├── config.toml   ← user-editable configuration (database, server, …)
+//     ├── config.toml   ← user-editable configuration (database, server, auth,
+//     │                    installation identity)
 //     ├── netpro.db     ← SQLite database (the default dialect)
 //     ├── logs/
 //     └── keys/
+//         └── access-token   ← local API token (Phase 5; remote requests only)
 //
 // `NETPRO_HOME` relocates the whole install (tests, portable installs, and
 // multi-instance setups use this — nothing else needs to change).
@@ -25,6 +27,11 @@
 //
 // so a fresh machine needs no DATABASE_URL and no environment at all — which
 // is the point of this phase.
+//
+// Phase 4 removed the last cloud-specific behaviour from this file: a set
+// `DATABASE_URL` no longer implies PostgreSQL just because the process looks
+// like it is running on a hosted platform. The dialect is what the user (or
+// their config file) says it is, defaulting to SQLite.
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -268,10 +275,71 @@ export type LocalDatabaseConfig = {
   url?: unknown;
 };
 
+/**
+ * `[installation]` — the local installation identity (Phase 5).
+ *
+ * Local NetPro has no user accounts to log into: the install itself is the
+ * owner. `netpro init` mints this once and never regenerates it, so data,
+ * keys, and exports can always be attributed to the same local installation.
+ */
+export type LocalInstallationConfig = {
+  id?: string;
+  /** ISO-8601 timestamp of when the installation was created. */
+  createdAt?: string;
+  /** Display name for the owner (used by the local UI; optional). */
+  owner?: string;
+  /** Contact email for the owner (optional; never sent anywhere). */
+  email?: string;
+};
+
+/** Authentication mode for the local server (Phase 5). */
+export type LocalAuthMode = 'local' | 'token' | 'open';
+
+/** Alias so callers can say `AuthMode` without caring which layer they are in. */
+export type AuthMode = LocalAuthMode;
+
+export const AUTH_MODES: readonly LocalAuthMode[] = ['local', 'token', 'open'];
+export const DEFAULT_AUTH_MODE: LocalAuthMode = 'local';
+
+/**
+ * Validate an auth mode string. Unrecognised values are a loud error (never a
+ * silent fallback): a typo in an auth setting must not decide which security
+ * policy runs.
+ */
+export function parseAuthMode(value: string, origin: string): LocalAuthMode {
+  const normalized = value.trim().toLowerCase();
+  if ((AUTH_MODES as readonly string[]).includes(normalized)) {
+    return normalized as LocalAuthMode;
+  }
+  throw new LocalConfigError(
+    `Unknown auth mode "${value}" in ${origin}. Expected "local", "token", or "open".`
+  );
+}
+
+/**
+ * Authentication mode, highest precedence first:
+ *   1. `NETPRO_AUTH_MODE` environment variable
+ *   2. `[auth] mode` in `~/.netpro/config.toml`
+ *   3. `local`
+ *
+ * Lives here rather than in `@netpro/server` because it is a property of the
+ * *installation*, not of any one process: the CLI reports it, the server obeys
+ * it, and neither has to import the other to find out.
+ */
+export function resolveAuthMode(env: NodeJS.ProcessEnv = process.env): LocalAuthMode {
+  const raw = env.NETPRO_AUTH_MODE?.trim().toLowerCase();
+  if (raw) return parseAuthMode(raw, 'NETPRO_AUTH_MODE');
+  const fromFile = readLocalConfig(env).auth?.mode;
+  if (fromFile) return fromFile; // readLocalConfig already validated it
+  return DEFAULT_AUTH_MODE;
+}
+
 export type LocalConfig = {
   database?: LocalDatabaseConfig;
   /** Validated by readLocalConfig: host is a string, port an integer 1–65535. */
   server?: { host?: string; port?: number };
+  installation?: LocalInstallationConfig;
+  auth?: { mode?: LocalAuthMode };
   raw: TomlTable;
 };
 
@@ -307,9 +375,15 @@ export function readLocalConfig(env: NodeJS.ProcessEnv = process.env): LocalConf
 
   const { table } = parsed;
   for (const section of Object.keys(table)) {
-    if (section !== 'database' && section !== 'server') {
+    if (
+      section !== 'database' &&
+      section !== 'server' &&
+      section !== 'installation' &&
+      section !== 'auth'
+    ) {
       throw new LocalConfigError(
-        `${path}: unknown section [${section}] (NetPro understands [database] and [server])`
+        `${path}: unknown section [${section}] ` +
+          `(NetPro understands [database], [server], [installation], and [auth])`
       );
     }
   }
@@ -322,9 +396,19 @@ export function readLocalConfig(env: NodeJS.ProcessEnv = process.env): LocalConf
   if (server !== undefined && typeof server !== 'object') {
     throw new LocalConfigError(`${path}: [server] must be a table`);
   }
+  const installation = table.installation;
+  if (installation !== undefined && typeof installation !== 'object') {
+    throw new LocalConfigError(`${path}: [installation] must be a table`);
+  }
+  const auth = table.auth;
+  if (auth !== undefined && typeof auth !== 'object') {
+    throw new LocalConfigError(`${path}: [auth] must be a table`);
+  }
 
   const dbTable = (database ?? {}) as TomlTable;
   const serverTable = (server ?? {}) as TomlTable;
+  const installationTable = (installation ?? {}) as TomlTable;
+  const authTable = (auth ?? {}) as TomlTable;
 
   const config: LocalConfig = { raw: table };
   const dialect = expectString('database', 'dialect', dbTable.dialect);
@@ -341,6 +425,58 @@ export function readLocalConfig(env: NodeJS.ProcessEnv = process.env): LocalConf
   if (host !== undefined || port !== undefined) {
     config.server = { host, port: port as number }; // validated above
   }
+
+  // ── [installation] — local identity (Phase 5) ──
+  //
+  // Unknown keys are rejected rather than ignored: silently dropping a typo'd
+  // key in an identity block is exactly how an install ends up believing it is
+  // configured when it is not.
+  for (const key of Object.keys(installationTable)) {
+    if (!['id', 'created_at', 'owner', 'email'].includes(key)) {
+      throw new LocalConfigError(
+        `${path}: unknown key "${key}" in [installation] ` +
+          `(NetPro understands id, created_at, owner, email)`
+      );
+    }
+  }
+  const installationId = expectString('installation', 'id', installationTable.id);
+  if (installationId !== undefined && installationId.length > 200) {
+    throw new LocalConfigError(`${path}: [installation] id is too long (max 200 characters)`);
+  }
+  const createdAt = expectString('installation', 'created_at', installationTable.created_at);
+  const owner = expectString('installation', 'owner', installationTable.owner);
+  const email = expectString('installation', 'email', installationTable.email);
+  if (
+    installationId !== undefined ||
+    createdAt !== undefined ||
+    owner !== undefined ||
+    email !== undefined
+  ) {
+    config.installation = {
+      ...(installationId === undefined ? {} : { id: installationId }),
+      ...(createdAt === undefined ? {} : { createdAt }),
+      ...(owner === undefined ? {} : { owner }),
+      ...(email === undefined ? {} : { email }),
+    };
+  }
+
+  // ── [auth] — authentication mode (Phase 5) ──
+  for (const key of Object.keys(authTable)) {
+    if (key !== 'mode') {
+      throw new LocalConfigError(
+        `${path}: unknown key "${key}" in [auth] (NetPro understands mode)`
+      );
+    }
+  }
+  const authMode = expectString('auth', 'mode', authTable.mode);
+  if (authMode !== undefined) {
+    if (authMode !== 'local' && authMode !== 'token' && authMode !== 'open') {
+      throw new LocalConfigError(
+        `${path}: [auth] mode must be "local", "token", or "open" (got "${authMode}")`
+      );
+    }
+    config.auth = { mode: authMode };
+  }
   return config;
 }
 
@@ -355,7 +491,7 @@ export type DatabaseConfig = {
   /** PostgreSQL connection string. Set only for the postgresql dialect. */
   url?: string;
   /** Where the dialect decision came from — surfaced by `netpro status`. */
-  source: 'env' | 'config' | 'inferred' | 'default';
+  source: 'env' | 'config' | 'default';
 };
 
 const DIALECT_ALIASES: Record<string, DbDialect> = {
@@ -390,11 +526,10 @@ export function resolveDialectStep(
   if (typeof fileDialect === 'string') {
     return { dialect: parseDialect(fileDialect, configTomlPath(env)), source: 'config' };
   }
-  if (env.VERCEL && env.DATABASE_URL?.trim()) {
-    // See resolveDialect(): managed-Postgres integrations attach exactly
-    // DATABASE_URL without a dialect. Phase 4 removes this inference.
-    return { dialect: 'postgresql', source: 'inferred' };
-  }
+  // Phase 4: no hosted-platform inference. A set DATABASE_URL alone never
+  // flips the dialect — SQLite is the local default and PostgreSQL is chosen
+  // explicitly (DB_DIALECT or [database] dialect). Deployments that used to
+  // rely on the inference set DB_DIALECT=postgresql, which is clearer anyway.
   return { dialect: 'sqlite', source: 'default' };
 }
 
@@ -404,9 +539,7 @@ export function resolveDialectStep(
  * Dialect precedence:
  *   1. `DB_DIALECT` environment variable
  *   2. `[database] dialect` in `~/.netpro/config.toml`
- *   3. Vercel inference (pre-Phase 4 behaviour): `VERCEL` + `DATABASE_URL`
- *      means postgresql — SQLite is never usable on an ephemeral filesystem
- *   4. SQLite (the local-first default)
+ *   3. SQLite (the local-first default)
  *
  * SQLite path precedence: `DB_PATH` env → config `[database] path`
  * (resolved against the install directory, `~/` expanded) → `<home>/netpro.db`.

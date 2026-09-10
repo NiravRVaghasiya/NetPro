@@ -2,10 +2,10 @@
 // and the standalone deploy command).
 //
 // WHY THIS EXISTS — the Phase 5 code called drizzle's `migrate()` directly
-// from each entry point. That is safe for a single long-lived process, but
-// NetPro v1.0 targets Vercel, where a deployment routinely cold-starts many
-// serverless instances at once against one managed Postgres database. Each
-// instance then races to apply the same migrations.
+// from each entry point. That is safe for a single long-lived process, but any
+// deployment that starts several instances at once against one shared
+// PostgreSQL database (containers scaled out, function runtimes, a rolling
+// redeploy) has each instance racing to apply the same migrations.
 //
 // Measured against a real PostgreSQL 18 server with an empty database and six
 // concurrent migrators (the shape of a fresh deploy taking traffic):
@@ -15,8 +15,8 @@
 //       -> Failed query: CREATE SCHEMA IF NOT EXISTS "drizzle"
 //
 // Drizzle wraps the statements in a transaction, so the database was left
-// consistent — but five of six requests still threw, which on Vercel is five
-// failed cold starts (500s) on every deploy that carries a migration. The
+// consistent — but five of six requests still threw: five failed instance
+// startups (500s) on every deploy that carries a migration. The
 // `CREATE SCHEMA IF NOT EXISTS` failure is the giveaway that this is a genuine
 // race and not merely duplicate work: IF NOT EXISTS races with itself in
 // Postgres because the existence check and the create are not atomic.
@@ -108,10 +108,10 @@ export function resolveMigrationsFolder(dialect: MigrationDialect): string {
 /**
  * Is automatic migration-on-startup enabled?
  *
- * Defaults to on, preserving CLI and self-hosted behaviour. Operators running
- * migrations as an explicit deploy step (the recommended Vercel setup, where
- * `netpro-migrate` runs once at build time instead of on every cold start)
- * set NETPRO_AUTO_MIGRATE=false so request paths never attempt DDL at all.
+ * Defaults to on, preserving CLI and self-hosted behaviour. Operators who run
+ * migrations as an explicit deploy step (`netpro migrate` in a release job or
+ * a compose `migrate` service, instead of on every instance start) set
+ * NETPRO_AUTO_MIGRATE=false so request paths never attempt DDL at all.
  */
 export function autoMigrateEnabled(
   value = process.env.NETPRO_AUTO_MIGRATE

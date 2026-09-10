@@ -8,6 +8,7 @@ import {
   describeDatabaseConfig,
   ensureSqliteDir,
   redactPostgresUrl,
+  resolveAuthMode,
   resolveDatabaseConfig,
   resolveDialectStep,
   type DatabaseConfig,
@@ -19,7 +20,9 @@ export * as pgSchema from './schema.pg';
 // Phase 3 (local-first): install-directory layout, config.toml, and database
 // resolution shared by the CLI, the local server, and the web app.
 export {
+  AUTH_MODES,
   configTomlPath,
+  DEFAULT_AUTH_MODE,
   defaultSqlitePath,
   describeDatabaseConfig,
   ensureNetProHome,
@@ -27,18 +30,46 @@ export {
   expandHomePath,
   LocalConfigError,
   netproHome,
+  parseAuthMode,
   parseToml,
   readLocalConfig,
   redactPostgresUrl,
+  resolveAuthMode,
   resolveDatabaseConfig,
   resolveDialectStep,
   resolveSqlitePath,
+  type AuthMode,
   type DbDialect,
   type DatabaseConfig,
+  type LocalAuthMode,
   type LocalConfig,
+  type LocalInstallationConfig,
   type TomlTable,
   type TomlValue,
 } from './local';
+
+// Phase 5 (local-first): the installation identity and local API token that
+// replace "GitHub OAuth is the identity system".
+export {
+  ACCESS_TOKEN_PREFIX,
+  INSTALLATION_ID_PREFIX,
+  accessTokenPath,
+  ensureAccessToken,
+  ensureInstallationIdentity,
+  generateAccessToken,
+  generateInstallationId,
+  readAccessToken,
+  readInstallationIdentity,
+  redactAccessToken,
+  resolveAccessToken,
+  upsertInstallationSection,
+  writeAccessToken,
+  writeInstallationIdentity,
+  type EnsureAccessTokenResult,
+  type EnsureIdentityOptions,
+  type EnsureIdentityResult,
+  type InstallationIdentity,
+} from './identity';
 
 export {
   appliedMigrationCount,
@@ -72,18 +103,10 @@ export type PgConn = {
  * Which database dialect should this process use?
  *
  * Delegates to the shared Phase 3 resolver (`./local`), which layers:
- * `DB_DIALECT` env → `~/.netpro/config.toml` `[database] dialect` → Vercel
- * inference → sqlite. The implicit default is sqlite, so the local-first
- * workflow works with zero configuration.
- *
- * The one inference: on Vercel with a `DATABASE_URL` but no `DB_DIALECT`,
- * default to postgresql. Sqlite is never usable there (see the guard in
- * createDb), and the managed-Postgres integrations (Neon, Supabase, Vercel
- * Postgres) attach exactly one variable — `DATABASE_URL` — without a
- * dialect. Without the inference, `next build` evaluates this module during
- * page-data collection, resolves sqlite, and the deploy dies on the guard
- * below *after* the build-time migration already succeeded against the same
- * database. With it, connecting a database and redeploying just works.
+ * `DB_DIALECT` env → `~/.netpro/config.toml` `[database] dialect` → sqlite.
+ * The implicit default is sqlite, so the local-first workflow works with zero
+ * configuration, and PostgreSQL is always an explicit choice
+ * (`DB_DIALECT=postgresql` or `[database] dialect`).
  *
  * Tolerant of a missing Postgres connection string: "which dialect?" can be
  * asked without "is it usable?" — createDb() raises that error with
@@ -103,7 +126,7 @@ function positiveInt(value: string | undefined, fallback: number): number {
  * certificate?
  *
  * Managed Postgres providers differ here, and getting it wrong is the single
- * most common self-hosting/Vercel deploy failure:
+ * most common self-hosting failure:
  *
  *  - Supabase, Neon, and most hosted providers require TLS. Many present
  *    certificates signed by their own CA, which Node does not trust by
@@ -144,19 +167,23 @@ export function resolvePgSsl(
 /**
  * Pool sizing for the runtime.
  *
- * On serverless each instance holds its own pool, and instances scale out
- * horizontally, so a large per-instance pool multiplies into connection
- * exhaustion on the database (Supabase's free tier allows ~60 direct
- * connections). Small pools per instance, plus a pooled connection string
- * where the provider offers one (pgbouncer), is the correct shape. Long-lived
- * servers (Docker, `next start`) keep a roomier default.
+ * A long-lived server (local `netpro serve`, Docker, a VM) keeps one pool and
+ * a roomier default. Where many short-lived instances each hold their own
+ * pool — containers scaled horizontally, function-style runtimes — a large
+ * per-instance pool multiplies into connection exhaustion on the database
+ * (Supabase's free tier allows ~60 direct connections), so those deployments
+ * set `NETPRO_SERVERLESS=1` (a small pool) and/or point DATABASE_URL at a
+ * pooled endpoint where the provider offers one (pgbouncer, 6543).
+ *
+ * Phase 4: this is an explicit switch rather than a guess from a hosting
+ * platform's environment variables — the deployment states its own shape.
  */
 export function resolvePoolConfig(env: NodeJS.ProcessEnv = process.env): {
   max: number;
   idleTimeoutMillis: number;
   connectionTimeoutMillis: number;
 } {
-  const serverless = Boolean(env.VERCEL || env.AWS_LAMBDA_FUNCTION_NAME);
+  const serverless = isServerlessRuntime(env);
   return {
     max: positiveInt(env.NETPRO_DB_POOL_MAX, serverless ? 1 : 10),
     idleTimeoutMillis: positiveInt(env.NETPRO_DB_POOL_IDLE_MS, serverless ? 10_000 : 30_000),
@@ -164,25 +191,29 @@ export function resolvePoolConfig(env: NodeJS.ProcessEnv = process.env): {
   };
 }
 
+/**
+ * Is this process running as one of many short-lived instances?
+ *
+ * Opt in with `NETPRO_SERVERLESS=1` (or the conventional `FUNCTION_TARGET`
+ * family of variables set by function runtimes). Unset — the local-first
+ * default — means a long-lived server with one pool.
+ */
+export function isServerlessRuntime(env: NodeJS.ProcessEnv = process.env): boolean {
+  const explicit = env.NETPRO_SERVERLESS?.trim().toLowerCase();
+  if (explicit) return !/^(0|false|no|off)$/.test(explicit);
+  return Boolean(env.AWS_LAMBDA_FUNCTION_NAME || env.FUNCTION_TARGET);
+}
+
 export function createDb(env: NodeJS.ProcessEnv = process.env): SqliteConn | PgConn {
   const config = resolveDatabaseConfig(env);
 
   if (config.dialect === 'sqlite') {
     const path = config.path!;
-    // Guard rail, not a preference: Vercel's filesystem is ephemeral and
-    // per-instance, so a SQLite database there silently loses every write on
-    // redeploy and disagrees between concurrent instances. Failing at startup
-    // with an actionable message beats shipping a "working" deploy that eats
-    // the user's imported network.
-    if (env.VERCEL && !env.NETPRO_ALLOW_EPHEMERAL_SQLITE) {
-      throw new Error(
-        'DB_DIALECT=sqlite cannot be used on Vercel: its filesystem is ephemeral and ' +
-          'per-instance, so data is lost on every redeploy and is not shared between ' +
-          'concurrent instances. Attach a managed Postgres database (Vercel Postgres, ' +
-          'Neon, Supabase — its DATABASE_URL is detected automatically), or set ' +
-          'DB_DIALECT=postgresql and DATABASE_URL. See docs/deployment.md.'
-      );
-    }
+    // Phase 4: no hosted-platform guard rail. Whether SQLite is appropriate is
+    // the operator's call and is answered in the docs (it needs a persistent
+    // filesystem); guessing from a platform's environment variables made the
+    // database dialect depend on where the process happened to run.
+    //
     // Phase 3: the local-first default lives at ~/.netpro/netpro.db, which
     // does not exist until `netpro init` (or this call) creates it.
     ensureSqliteDir(path);

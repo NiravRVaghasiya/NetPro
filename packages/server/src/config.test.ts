@@ -28,6 +28,7 @@ describe('loadConfig', () => {
       host: DEFAULT_SERVER_HOST,
       port: DEFAULT_SERVER_PORT,
       autoMigrate: true,
+      auth: { mode: 'local' },
     });
     expect(cfg.host).toBe('127.0.0.1');
     expect(cfg.port).toBe(3777);
@@ -64,7 +65,29 @@ describe('loadConfig', () => {
 describe('loadConfig with ~/.netpro/config.toml', () => {
   it('reads [server] host and port from the config file', () => {
     homeWithConfig('[server]\nhost = "127.0.0.1"\nport = 4001\n');
-    expect(loadConfig()).toEqual({ host: '127.0.0.1', port: 4001, autoMigrate: true });
+    expect(loadConfig()).toEqual({
+      host: '127.0.0.1',
+      port: 4001,
+      autoMigrate: true,
+      auth: { mode: 'local' },
+    });
+  });
+
+  it('reads [auth] mode from the config file (phase 5)', () => {
+    homeWithConfig('[auth]\nmode = "token"\n');
+    expect(loadConfig().auth).toEqual({ mode: 'token' });
+  });
+
+  it('lets NETPRO_AUTH_MODE override the config file (phase 5)', () => {
+    homeWithConfig('[auth]\nmode = "token"\n');
+    expect(loadConfig({ NETPRO_AUTH_MODE: 'open' }).auth).toEqual({ mode: 'open' });
+  });
+
+  it('rejects an unknown auth mode instead of silently choosing a policy (phase 5)', () => {
+    expect(() => loadConfig({ NETPRO_AUTH_MODE: 'public' })).toThrow(/Unknown auth mode/);
+    const home = homeWithConfig('[auth]\nmode = "nope"\n');
+    expect(() => loadConfig()).toThrow(/\[auth\] mode must be/);
+    rmSync(home, { recursive: true, force: true });
   });
 
   it('environment variables override the config file', () => {
@@ -73,12 +96,18 @@ describe('loadConfig with ~/.netpro/config.toml', () => {
       host: '127.0.0.1',
       port: 5000,
       autoMigrate: true,
+      auth: { mode: 'local' },
     });
   });
 
   it('missing config file falls back to defaults', () => {
     process.env.NETPRO_HOME = mkdtempSync(join(tmpdir(), 'netpro-server-cfg-'));
-    expect(loadConfig()).toEqual({ host: DEFAULT_SERVER_HOST, port: DEFAULT_SERVER_PORT, autoMigrate: true });
+    expect(loadConfig()).toEqual({
+      host: DEFAULT_SERVER_HOST,
+      port: DEFAULT_SERVER_PORT,
+      autoMigrate: true,
+      auth: { mode: 'local' },
+    });
   });
 
   it('falls back per-key, not per-file', () => {
@@ -88,6 +117,7 @@ describe('loadConfig with ~/.netpro/config.toml', () => {
       host: '127.0.0.1',
       port: 5000,
       autoMigrate: true,
+      auth: { mode: 'local' },
     });
   });
 

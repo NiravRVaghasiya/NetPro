@@ -1,121 +1,136 @@
 # Deploying NetPro
 
-NetPro is a **single-owner** application: one instance holds one person's
-network, and exactly one GitHub account can sign in. It is not multi-tenant.
-Deploy your own instance rather than sharing one.
-
-Three supported targets:
+NetPro runs on your machine by default; deploying it is for when you want it
+reachable from somewhere else. Two supported targets:
 
 | Target | Database | Best for |
 | --- | --- | --- |
-| [Vercel](#vercel-one-click) | Managed Postgres (Neon, Supabase, Vercel Postgres) | The quickest hosted setup |
-| [Docker Compose](#docker-compose-self-hosting) | Postgres in the stack | Full self-hosting on your own box |
-| [Local](getting-started.md) | SQLite file | Trying it out, CLI-only use |
+| [Local / first run](getting-started.md) | SQLite file in `~/.netpro` | Everyday use, CLI + local Web UI — no credentials, no cloud |
+| [Docker Compose](#docker-compose-self-hosting) | Postgres in the stack | A server you own — for remote access, a team, or a VPS |
 
-> **SQLite is for local use only.** It is a file on disk: perfect for the CLI
-> and local development, wrong for any serverless host. NetPro refuses to start
-> with `DB_DIALECT=sqlite` on Vercel rather than silently losing your data on
-> the next redeploy.
+Any Node host works: `npm run build` + `netpro migrate` + start the server.
+NetPro has no platform-specific build step, no serverless requirement, and no
+configuration that only applies to one provider.
+
+> **SQLite needs a filesystem that survives a restart.** It is the local
+> default (and is fine on a VPS or in a container with a volume); a
+> function-style runtime whose disk is per-instance must use Postgres. NetPro
+> will run either where you point it — the choice is yours and is documented
+> rather than inferred.
+
+> **Authentication, in one paragraph.** Local NetPro needs no credentials at
+> all: requests from `127.0.0.1` are the operator, identified by the
+> installation identity in `~/.netpro/config.toml` (see
+> [phase-5-authentication.md](phase-5-authentication.md)). A *deployed* Web UI
+> is reachable from other machines, so pick a mode: `NETPRO_AUTH_MODE=github`
+> (GitHub OAuth — the GitHub variables below become required) or
+> `NETPRO_AUTH_MODE=open` when a reverse proxy, VPN, or private network already
+> authenticates callers. `local` mode must never be published on a public
+> interface for the Web UI.
 
 ---
 
-## Vercel (one-click)
+## Deploying on a Node host (VPS, PaaS, container platform)
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FNiravRVaghasiya%2FNetPro&env=DB_DIALECT,DATABASE_URL,NEXTAUTH_SECRET,GITHUB_CLIENT_ID,GITHUB_CLIENT_SECRET,NETPRO_OWNER_GITHUB_ID&envDescription=NetPro%20needs%20a%20Postgres%20URL%2C%20an%20auth%20secret%2C%20a%20GitHub%20OAuth%20app%2C%20and%20your%20numeric%20GitHub%20user%20ID&envLink=https%3A%2F%2Fgithub.com%2FNiravRVaghasiya%2FNetPro%2Fblob%2Fmaster%2Fdocs%2Fdeployment.md&project-name=netpro&repository-name=netpro)
+The recipe is the same everywhere:
+
+```bash
+# 1. Install and build (Turborepo, standard Node/npm — no platform CLI)
+npm ci
+npm run build
+
+# 2. Point NetPro at a Postgres database
+export DB_DIALECT=postgresql
+export DATABASE_URL='postgresql://user:password@host:5432/netpro?sslmode=require'
+
+# 3. Apply migrations once, as a release step
+npm run db:migrate
+
+# 4. Start the Web UI (Next.js standalone output)
+npm run start -w apps/web            # or: node apps/web/.next/standalone/apps/web/server.js
+```
 
 ### 1. Create a Postgres database
 
-Any Postgres works. Vercel's own integration, Neon, and Supabase all have a
-free tier. Copy the **connection string**.
+Any Postgres works — Neon, Supabase, RDS, or one you run yourself. Copy the
+**connection string**.
 
-Most managed providers require TLS but sign certificates with their own CA,
-so their connection strings end in `?sslmode=require`. Keep that suffix —
-NetPro maps it to "encrypt, don't verify the provider's CA", which is what
-those providers mean. See [Database TLS](#database-tls) if you need strict
+Most managed providers require TLS but sign certificates with their own CA, so
+their connection strings end in `?sslmode=require`. Keep that suffix — NetPro
+maps it to "encrypt, don't verify the provider's CA", which is what those
+providers mean. See [Database TLS](#database-tls) if you need strict
 verification.
 
 If your provider offers both a **direct** and a **pooled** (pgbouncer)
-connection string, use the pooled one for `DATABASE_URL`: serverless scales
-out to many instances, and each one opens its own connections.
+connection string, use the pooled one for `DATABASE_URL` when many instances
+start at once, and set `NETPRO_SERVERLESS=1` so each instance keeps a
+one-connection pool (see [Connection pooling](#connection-pooling)).
 
-### 2. Set environment variables
+### 2. Choose how callers authenticate
+
+| Mode | Set | Who gets in |
+| --- | --- | --- |
+| `local` (default) | nothing | Requests from the machine the server runs on. **Only** valid when the process is reachable on loopback (see the caveat in [phase-5-authentication.md](phase-5-authentication.md)). |
+| `github` | `NETPRO_AUTH_MODE=github` + the GitHub variables below | Every caller signs in with GitHub. One account is the break-glass owner. |
+| `open` | `NETPRO_AUTH_MODE=open` | Nobody is authenticated by NetPro — only correct behind your own auth (reverse proxy with sign-in, VPN, private network). |
+
+`netpro serve` (the CLI server) has a fourth, `token`: every request needs the
+access token from `~/.netpro/keys/access-token` (`netpro token`). The Web UI
+maps `token` to `local` because a browser cannot attach a bearer token to a
+navigation.
+
+### 3. Set environment variables
 
 | Variable | Required | Value |
 | --- | --- | --- |
-| `DB_DIALECT` | Optional | `postgresql` — inferred automatically on Vercel when `DATABASE_URL` is set; set it explicitly for Docker/Compose |
-| `DATABASE_URL` | ✅ | Your Postgres connection string |
-| `NEXTAUTH_SECRET` | ✅ | `openssl rand -base64 32` |
-| `GITHUB_CLIENT_ID` | ✅ | From your GitHub OAuth app |
-| `GITHUB_CLIENT_SECRET` | ✅ | From your GitHub OAuth app |
-| `NETPRO_OWNER_GITHUB_ID` | ✅ | Your **numeric** GitHub ID — `gh api users/YOUR_USERNAME --jq .id` |
-| `NEXTAUTH_URL` | Recommended | Your final HTTPS origin, e.g. `https://netpro.example.com` |
-| `NETPRO_AUTO_MIGRATE` | Recommended | `false` — see [Migrations](#migrations) |
+| `DATABASE_URL` | ✅ (Postgres) | Your Postgres connection string |
+| `DB_DIALECT` | Recommended | `postgresql` — never inferred; set it explicitly |
+| `NETPRO_AUTH_MODE` | Recommended | `github` for a public deployment, `open` behind your own auth |
+| `NEXTAUTH_SECRET` | For `github` | `openssl rand -base64 32` |
+| `APP_URL` | For `github` | Your final HTTPS origin, e.g. `https://netpro.example.com` (sets `AUTH_URL`) |
+| `GITHUB_CLIENT_ID` | For `github` | From your GitHub OAuth app |
+| `GITHUB_CLIENT_SECRET` | For `github` | From your GitHub OAuth app |
+| `NETPRO_OWNER_GITHUB_ID` | For `github` | Your **numeric** GitHub ID — `gh api users/YOUR_USERNAME --jq .id` |
+| `NETPRO_AUTO_MIGRATE` | Recommended | `false` when you migrate as a release step — see [Migrations](#migrations) |
+| `NETPRO_SERVERLESS` | Optional | `1` when many short-lived instances share one database |
 | `HUNTER_API_KEY`, `PDL_API_KEY`, `CLEARBIT_API_KEY` | Optional | Enrichment providers (BYO key) |
 | `AI_PROVIDER`, `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Optional | AI outreach drafting (BYO key) |
 | `EMBEDDINGS_PROVIDER`, `EMBEDDINGS_API_KEY` | Optional | Semantic search arm — see [Search](#search) |
 
 Environment variables always win over `~/.netpro/config.toml` (where the
 local-first `netpro init` / `netpro serve` path stores its settings — see
-[local-first.md](local-first.md)). A container has no meaningful home
-directory config by default, so this table remains the source of truth for
-Docker deployments.
+[local-first.md](local-first.md)). A container has no meaningful home-directory
+config by default, so this table remains the source of truth for deployments.
 
-`NETPRO_OWNER_GITHUB_ID` is the **only** access control. Get it wrong and either
-nobody can sign in (fails closed, safe) or the wrong account can. It is your
-numeric account ID, not your username and not the OAuth client ID.
+In `github` mode, `NETPRO_OWNER_GITHUB_ID` is the break-glass owner: if it is
+unset, membership in the bootstrap workspace decides who gets in. Get it wrong
+and either nobody can sign in (fails closed, safe) or the wrong account can.
+It is your numeric account ID, not your username and not the OAuth client ID.
 
-### 3. Create the GitHub OAuth app
+### 4. Create the GitHub OAuth app (only for `github` mode)
 
 **Settings → Developer settings → OAuth Apps → New OAuth App.**
 
-- Homepage URL: `https://your-app.vercel.app`
-- Authorization callback URL: `https://your-app.vercel.app/api/auth/callback/github`
+- Application name: anything (`NetPro`)
+- Homepage URL: `https://netpro.example.com`
+- Authorization callback URL: `https://netpro.example.com/api/auth/callback/github`
 
-Vercel assigns the domain on the first deploy, so you may need to deploy once,
-then update the callback URL and `NEXTAUTH_URL`, then redeploy.
-
-### 4. Deploy
-
-`vercel.json` points the build at `npm run vercel-build`, which
-[migrates the database and then builds](#migrations). If `DATABASE_URL` is not
-set yet on the very first build, migration is skipped with a warning and the
-app migrates on first boot instead.
-
-Both common Vercel project configurations work:
-
-- **Root Directory empty** (the repository root): `vercel.json` applies, so
-  `installCommand` runs `npm ci --include dev` from the repo root and installs
-  the whole monorepo.
-- **Root Directory `apps/web`** (what Vercel suggests when it detects the
-  Next.js app in a monorepo): the repo-root `vercel.json` is **not** read, and
-  Vercel's default install runs from `apps/web`. npm then installs only that
-  workspace's dependency closure — not the whole repo. That closure must
-  contain everything `vercel-build` needs, which is why `apps/web`
-  dev-depends on `@netpro/cli`: the deploy builds and runs the CLI for
-  migrations, and that dependency edge pulls in `tsup` plus the CLI's
-  correctly hoisted `commander@14`. (Putting those deps on `apps/cli` alone
-  does not help here — `@netpro/cli` is not in the installed closure at all,
-  which is how a deploy can fail with `tsup: command not found` even though
-  `tsup` is listed in `apps/cli`.)
-
-> **Why `vercel-build` is declared twice.** Vercel prefers a `vercel-build`
-> script over the framework's default build command, but it runs that command
-> from whichever directory it decided the app lives in — here `apps/web`,
-> not the repo root. Both `package.json` files therefore declare it (the root
-> one as `node scripts/vercel-build.mjs`, `apps/web` as
-> `node ../../scripts/vercel-build.mjs`) and both land in the same script,
-> which `chdir`s to the repo root before doing anything else. Removing either
-> one breaks the deploy with `Missing script: "vercel-build"`.
+Then set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `NEXTAUTH_SECRET`,
+`NETPRO_OWNER_GITHUB_ID`, and `APP_URL` to your origin. If the host assigns its
+domain on the first deploy, deploy once, then update the callback URL and
+`APP_URL`, then redeploy.
 
 ### 5. Verify
 
 ```bash
-curl https://your-app.vercel.app/api/health
+curl https://netpro.example.com/api/health
 # {"status":"healthy","dialect":"postgresql","latencyMs":42,...}
 ```
 
-`degraded` with HTTP 503 means the database is reachable but not migrated —
-run the migration step. `unhealthy` means it is not reachable at all.
+`/api/health` and `/api/server-info` are public (terse readiness probes); the
+private API answers `401` with `WWW-Authenticate: Bearer realm="netpro"` until
+a caller is authenticated, and `/api/identity` names the installation to an
+authenticated caller.
 
 ---
 
@@ -123,8 +138,9 @@ run the migration step. `unhealthy` means it is not reachable at all.
 
 ```bash
 cp .env.example .env
-# Edit .env: set POSTGRES_PASSWORD, NEXTAUTH_SECRET, the GitHub OAuth
-# credentials, NETPRO_OWNER_GITHUB_ID, and APP_URL.
+# Edit .env: set POSTGRES_PASSWORD and APP_URL. That is enough to run.
+# For a Web UI reachable from other machines, also set NETPRO_AUTH_MODE=github
+# and the GitHub variables (see step 2 above) — local mode is loopback-only.
 docker compose build
 docker compose up -d
 curl http://localhost:3000/api/health
@@ -141,8 +157,14 @@ Notes on the defaults:
   exposes your database to the internet. Uncomment the `ports` block in
   `docker-compose.yml` only if you need local inspection, and bind it to
   `127.0.0.1`.
-- **`APP_URL` must be your real external origin.** It sets both `NEXTAUTH_URL`
-  and `AUTH_URL`; see [Host trust](#host-trust).
+- **The web port is published on `127.0.0.1` only.** Local mode decides who is
+  the operator from the request's Host header, so the default deployment must
+  not be reachable from another machine. To expose it, set
+  `NETPRO_AUTH_MODE=github` (or `open` behind your own auth) *and* publish a
+  public interface deliberately — see
+  [phase-5-authentication.md](phase-5-authentication.md).
+- **`APP_URL` must be your real external origin when using `github` mode.** It
+  sets `AUTH_URL` (and `NEXTAUTH_URL`); see [Host trust](#host-trust).
 - For HTTPS, terminate TLS at a reverse proxy (Caddy, nginx, Traefik) in front
   of port 3000 and set `APP_URL` to the `https://` origin.
 
@@ -186,8 +208,9 @@ execute DDL.
 > because the check and the create are not atomic). The regression test lives
 > in `packages/db/src/postgres.integration.test.ts` and runs in CI.
 
-> **Pooled connection strings.** Neon's Vercel integration attaches a *pooled*
-> URL (host contains `-pooler`, port 6543) — right for serverless traffic, but
+> **Pooled connection strings.** Managed providers attach a *pooled* URL
+> (Neon: host contains `-pooler`, port 6543) — right for many short-lived
+> instances, but
 > a session-level advisory lock can leak across a transaction pooler: the
 > unlock may land on a different backend than the one holding the lock, and
 > the stale holder blocks the next migration for up to 60 s. The build-time
@@ -204,11 +227,12 @@ execute DDL.
 ### Host trust
 
 Auth.js v5 decides whether to trust the incoming `Host` header from
-`AUTH_URL`, `AUTH_TRUST_HOST`, `VERCEL`, `CF_PAGES`, or a non-production
-`NODE_ENV` — **not** from `NEXTAUTH_URL`. Because NetPro documents
-`NEXTAUTH_URL`, it also treats a configured `NEXTAUTH_URL` as an explicit
-statement of trust (`apps/web/lib/trust-host.ts`); naming your own origin is
-the same decision `AUTH_TRUST_HOST` asks for.
+`AUTH_URL`, `AUTH_TRUST_HOST`, or a non-production `NODE_ENV` — **not** from
+`NEXTAUTH_URL`. Because NetPro documents `NEXTAUTH_URL`, it also treats a
+configured `NEXTAUTH_URL` as an explicit statement of trust
+(`apps/web/lib/trust-host.ts`); naming your own origin is the same decision
+`AUTH_TRUST_HOST` asks for. This only matters in `NETPRO_AUTH_MODE=github`;
+local mode never asks Auth.js for a session.
 
 If you see this in your logs, one of those values is missing:
 
@@ -236,9 +260,10 @@ own CA — the strongest option, and it overrides a lax `sslmode`.
 
 ### Connection pooling
 
-Each instance keeps its own pool, sized automatically: **1** connection on
-serverless (`VERCEL`/`AWS_LAMBDA_FUNCTION_NAME`), **10** on a long-lived
-server. Override with `NETPRO_DB_POOL_MAX`, `NETPRO_DB_POOL_IDLE_MS`, and
+Each instance keeps its own pool, sized automatically: **1** connection when
+`NETPRO_SERVERLESS=1` (or a function runtime sets
+`AWS_LAMBDA_FUNCTION_NAME`/`FUNCTION_TARGET`), **10** on a long-lived server.
+Override with `NETPRO_DB_POOL_MAX`, `NETPRO_DB_POOL_IDLE_MS`, and
 `NETPRO_DB_CONNECT_TIMEOUT_MS`.
 
 If you hit connection limits on a free managed tier, use your provider's
@@ -389,13 +414,14 @@ request must never break the visitor's page.
 Operational notes:
 
 - **Rate limiting is in-memory** (60 requests/minute per salted IP hash,
-  per server process). On Vercel/serverless with multiple instances the
-  limit applies per instance — that is the documented, bounded behaviour
+  per server process). Where several instances run behind a load balancer
+  the limit applies per instance — that is the documented, bounded behaviour
   from the plan (no Redis). Overflow still gets the GIF, just not a row.
-- **IP and geo come from your platform.** The beacon reads the first
-  `X-Forwarded-For` entry (or `X-Real-Ip`) and Vercel/Cloudflare geo
-  headers; NetPro never runs a geo lookup and never stores or logs a raw IP
-  — only the 16-hex daily salted HMAC.
+- **IP and geo come from your reverse proxy.** The beacon reads the first
+  `X-Forwarded-For` entry (or `X-Real-Ip`) and the generic `x-geo-country` /
+  `x-geo-city` headers (Cloudflare's `cf-ipcountry` / `cf-ipcity` are also
+  understood); NetPro never runs a geo lookup and never stores or logs a raw
+  IP — only the 16-hex daily salted HMAC.
 - **De-duplication:** the same visitor fingerprint within 5 minutes, or the
   same IP hash + page within 1 hour, is recorded once. Tab-refresh storms
   and double beacons do not inflate counts.
@@ -492,11 +518,12 @@ additionally marked no-store so no shared cache or CDN retains private data.
 ## Production checklist
 
 - [ ] `DB_DIALECT=postgresql` with a managed Postgres `DATABASE_URL` (never SQLite)
-- [ ] `NEXTAUTH_SECRET` generated with `openssl rand -base64 32`, unique to this instance
+- [ ] A deliberate `NETPRO_AUTH_MODE` — `github` (or `open` behind your own auth) for anything reachable beyond loopback
+- [ ] `NEXTAUTH_SECRET` generated with `openssl rand -base64 32`, unique to this instance (github mode)
 - [ ] `netpro reindex` run once after deploying (search falls back to substring matching until it is)
-- [ ] `NETPRO_OWNER_GITHUB_ID` is your numeric GitHub ID, and you can sign in
+- [ ] `NETPRO_OWNER_GITHUB_ID` is your numeric GitHub ID, and you can sign in (github mode)
 - [ ] Anyone else's GitHub account is rejected at sign-in
-- [ ] `NEXTAUTH_URL` (or `AUTH_URL`) matches your real HTTPS origin
+- [ ] `NEXTAUTH_URL` (or `AUTH_URL`) matches your real HTTPS origin (github mode)
 - [ ] OAuth callback URL registered as `<origin>/api/auth/callback/github`
 - [ ] `/api/health` returns `healthy`
 - [ ] `/api/card` returns 401 when signed out
@@ -532,7 +559,8 @@ Confirm it with `gh api users/YOUR_USERNAME --jq .id` — it is a number.
 your provider's pooled connection string.
 
 **Data disappeared after a redeploy.** You were running SQLite on an ephemeral
-filesystem. Move to Postgres; NetPro now refuses this configuration on Vercel.
+filesystem (a container whose writable layer or volume was replaced). Move to
+Postgres, or give the SQLite file a persistent volume and set `DB_PATH` at it.
 
 ## Encrypted web provider keys (v3.0 Phase 4)
 
@@ -660,10 +688,10 @@ URLs may be relative to the index, so the mirror works with no edits. See
 `marketplace/README.md` for the entry format and the tarball rebuild
 commands. Credential-bearing URLs are refused anywhere in the chain.
 
-**Serverless note:** web installs write to `NETPRO_PLUGIN_DIR`, which is
-ephemeral on Vercel/serverless — install via the CLI into a directory baked
-into the image (the Docker image ships `plugins/` + `marketplace/`), or mount
-a persistent volume for self-hosted Docker.
+**Ephemeral filesystem note:** web installs write to `NETPRO_PLUGIN_DIR`,
+which disappears when a container is replaced — install via the CLI into a
+directory baked into the image (the Docker image ships `plugins/` +
+`marketplace/`), or mount a persistent volume for self-hosted Docker.
 
 **Audit events:** `plugin.installed`, `plugin.install_failed` (with `reason`),
 `plugin.updated`, `plugin.update_failed`, `plugin.update_refused`,

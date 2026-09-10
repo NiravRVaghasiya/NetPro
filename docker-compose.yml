@@ -1,24 +1,40 @@
 services:
   web:
     build: .
+    # Published on the loopback interface only. Phase 5's local mode decides
+    # who is the operator from the request's Host header, so the default
+    # deployment must not be reachable from another machine: to expose the Web
+    # UI, set NETPRO_AUTH_MODE=github (or open, behind your own auth) and
+    # publish a public interface deliberately, e.g. "0.0.0.0:3000:3000".
     ports:
-      - "3000:3000"
+      - "127.0.0.1:${NETPRO_WEB_PORT:-3000}:3000"
     environment:
       - DB_DIALECT=postgresql
       # The compose network is private and this Postgres has no TLS, so
       # sslmode=disable is explicit rather than left to driver defaults.
       - DATABASE_URL=postgresql://netpro:${POSTGRES_PASSWORD}@db:5432/netpro?sslmode=disable
-      - NEXTAUTH_URL=${APP_URL:-http://localhost:3000}
+      # local (default) | github | open. GitHub credentials are an optional
+      # integration, needed only when this instance is exposed beyond loopback.
+      - NETPRO_AUTH_MODE=${NETPRO_AUTH_MODE:-local}
+      # Inside the container the socket peer is the Docker bridge, not
+      # loopback, so local mode needs the operator's assertion that the port
+      # above is published on 127.0.0.1 only (which it is). Removing this line
+      # while keeping NETPRO_AUTH_MODE=local would lock the UI out; publishing
+      # the port publicly would make the assertion false — switch to
+      # NETPRO_AUTH_MODE=github first.
+      - NETPRO_TRUST_LOCAL_UI=${NETPRO_TRUST_LOCAL_UI:-1}
       # Auth.js v5 derives host trust from AUTH_URL/AUTH_TRUST_HOST — NOT from
-      # NEXTAUTH_URL. Without one of these, every authenticated request fails
-      # in production with "UntrustedHost". NetPro also infers trust from a
-      # configured NEXTAUTH_URL (apps/web/lib/trust-host.ts); this is belt and
-      # braces, and documents the requirement for anyone reading the compose file.
+      # NEXTAUTH_URL. Without one of these, a github-mode deploy fails every
+      # authenticated request with "UntrustedHost". NetPro also infers trust
+      # from a configured NEXTAUTH_URL (apps/web/lib/trust-host.ts); this is
+      # belt and braces, and documents the requirement for anyone reading the
+      # compose file.
       - AUTH_URL=${APP_URL:-http://localhost:3000}
-      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
-      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
-      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
-      - NETPRO_OWNER_GITHUB_ID=${NETPRO_OWNER_GITHUB_ID}
+      - NEXTAUTH_URL=${APP_URL:-http://localhost:3000}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - NETPRO_OWNER_GITHUB_ID=${NETPRO_OWNER_GITHUB_ID:-}
       # Enrichment / AI are bring-your-own-key and optional; unset means the
       # provider is skipped, not an error.
       - HUNTER_API_KEY=${HUNTER_API_KEY:-}

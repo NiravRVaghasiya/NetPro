@@ -4,6 +4,19 @@ export interface StatusResult {
   home: string;
   configPath: string;
   configExists: boolean;
+  /** Phase 5 — local installation identity (null when init never ran). */
+  installation: {
+    id: string | null;
+    owner: string | null;
+    createdAt: string | null;
+    error: string | null;
+  };
+  /** Phase 5 — authentication mode and whether remote access has a token. */
+  auth: {
+    mode: string;
+    tokenConfigured: boolean;
+    tokenPath: string;
+  };
   database: {
     dialect: string | null;
     display: string | null;
@@ -59,6 +72,8 @@ export async function executeStatus(env: NodeJS.ProcessEnv = process.env): Promi
     home,
     configPath,
     configExists,
+    installation: { id: null, owner: null, createdAt: null, error: null },
+    auth: { mode: 'local', tokenConfigured: false, tokenPath: '' },
     database: { dialect: null, display: null, applied: null, total: null, error: null },
     server: {
       url: '',
@@ -69,6 +84,24 @@ export async function executeStatus(env: NodeJS.ProcessEnv = process.env): Promi
       error: null,
     },
   };
+
+  // ── Identity & auth (Phase 5) ── Read-only, and a broken config.toml is a
+  // status line here too (the same parser error the database section shows).
+  const { accessTokenPath, readAccessToken, readInstallationIdentity, resolveAuthMode } =
+    await import('@netpro/db');
+  result.auth.tokenPath = accessTokenPath(env);
+  try {
+    const identity = readInstallationIdentity(env);
+    if (identity) {
+      result.installation.id = identity.id;
+      result.installation.owner = identity.owner ?? null;
+      result.installation.createdAt = identity.createdAt || null;
+    }
+    result.auth.mode = resolveAuthMode(env);
+  } catch (error) {
+    result.installation.error = error instanceof Error ? error.message : String(error);
+  }
+  result.auth.tokenConfigured = readAccessToken(env) !== null;
 
   // A broken config.toml is a status line (with the file's own error), never
   // a crash — the whole point of `status` is to explain a broken install.
@@ -152,12 +185,26 @@ export function formatStatus(result: StatusResult): string {
     ? `running at ${result.server.url} — ${result.server.status}, ${result.server.dialect}, ${result.server.latencyMs} ms`
     : `not running (expected at ${result.server.url} — start it with \`netpro serve\`)`;
 
+  const identity = result.installation.error
+    ? `unreadable — ${result.installation.error}`
+    : result.installation.id
+      ? `${result.installation.id}${result.installation.owner ? ` (${result.installation.owner})` : ''}`
+      : 'not initialized — run `netpro init`';
+
+  const auth =
+    `${result.auth.mode}` +
+    (result.auth.tokenConfigured
+      ? ' — access token set (remote callers can authenticate)'
+      : ' — no access token yet (loopback only)');
+
   return [
     'NetPro status',
     '',
     `Install:  ${result.home}`,
     `Config:   ${config}`,
     `Database: ${db}`,
+    `Identity: ${identity}`,
+    `Auth:     ${auth}`,
     `Server:   ${server}`,
   ].join('\n');
 }

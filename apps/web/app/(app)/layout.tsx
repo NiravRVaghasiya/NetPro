@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth";
+import { resolveWebAuthMode } from "@/lib/auth-mode";
 
 export default async function AppLayout({
   children,
@@ -8,6 +9,9 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const session = await auth();
+  // Phase 5 — in `local`/`open` mode there is no Auth.js session to end, so
+  // the sign-out control is only meaningful for GitHub sign-in.
+  const mode = resolveWebAuthMode();
 
   // The route-group layout is the real gate — middleware.ts's PROTECTED_ROUTES
   // list is a fast path, not the source of truth. A page added under (app)/
@@ -37,14 +41,20 @@ export default async function AppLayout({
         <Link href="/settings/card">Profile card</Link>
         <Link href="/settings">Settings</Link>
         <Link href="/settings/team">Team</Link>
-        <form
-          action={async () => {
-            "use server";
-            await signOut();
-          }}
-        >
-          <button type="submit">Sign out</button>
-        </form>
+        {mode === "github" ? (
+          <form
+            action={async () => {
+              "use server";
+              await signOut();
+            }}
+          >
+            <button type="submit">Sign out</button>
+          </form>
+        ) : (
+          <span className="text-xs uppercase tracking-widest text-slate-400">
+            {mode === "open" ? "Open mode" : "Local mode"}
+          </span>
+        )}
       </nav>
       <main className="px-5 py-4 sm:px-8">{children}</main>
     </div>

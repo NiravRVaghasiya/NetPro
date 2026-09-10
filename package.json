@@ -26,8 +26,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,md,json}\" --ignore-path .gitignore",
     "format:check": "prettier --check \"**/*.{ts,tsx,md,json}\" --ignore-path .gitignore",
     "db:migrate": "npm run build -w @netpro/cli && node apps/cli/dist/index.js migrate",
-    "db:migrate:status": "node apps/cli/dist/index.js migrate --status",
-    "vercel-build": "node scripts/vercel-build.mjs"
+    "db:migrate:status": "node apps/cli/dist/index.js migrate --status"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1"
