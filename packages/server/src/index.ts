@@ -39,8 +39,21 @@ export {
   type AuthPolicy,
   type AuthRequestInfo,
 } from './auth/index';
-export { createJobRegistry, JobRegistry, type Job, type JobStatus, type JobType } from './jobs/index';
-export { createEventBus, EventBus, type NetProEvent } from './events/index';
+export {
+  createJobRegistry,
+  JobRegistry,
+  JOB_STATUSES,
+  JOB_TYPES,
+  isJobStatus,
+  isJobType,
+  jobToJson,
+  type Job,
+  type JobJson,
+  type JobStatus,
+  type JobType,
+  type CreateJobInput,
+} from './jobs/index';
+export { createEventBus, EventBus, EVENT_TYPES, type NetProEvent } from './events/index';
 export { dispatch, isPublicApiPath, PUBLIC_API_PATHS, type RouteContext } from './routes/index';
 export { handleHealth, type HealthBody, type HealthDeps } from './routes/health';
 export {
@@ -52,3 +65,12 @@ export {
   type HomeInfo,
   type LockedInfo,
 } from './routes/home';
+export { handleListContacts, handleGetContact } from './routes/contacts';
+export { handleSearch } from './routes/search';
+export { handleGraphOverview, handleGraphPaths } from './routes/graph';
+export { handleAnalytics } from './routes/analytics';
+export { handleImportPost, handleImportGet } from './routes/import';
+export { handleListJobs, handleGetJob, handleCreateJob, handleCancelJob } from './routes/jobs';
+export { handleEvents } from './routes/events';
+export { handleGetSettings, handlePutSettings } from './routes/settings';
+export { handleScanPost } from './routes/scan';
