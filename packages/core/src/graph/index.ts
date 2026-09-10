@@ -14,3 +14,5 @@ export * from './network';
 // and the per-contact graph-position view behind `/graph/<id>` (position.ts).
 export * from './pathfinder';
 export * from './position';
+// Phase 11 — interactive Network visualization payload (annotated adjacency).
+export * from './visualization';

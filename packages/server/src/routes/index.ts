@@ -29,7 +29,8 @@ import { handleHealth } from './health';
 import { handleHome, handleLocked } from './home';
 import { handleListContacts, handleGetContact } from './contacts';
 import { handleSearch } from './search';
-import { handleGraphOverview, handleGraphPaths } from './graph';
+import { handleGraphOverview, handleGraphPaths, handleGraphVisualization } from './graph';
+import { handleProviders } from './providers';
 import { handleAnalytics } from './analytics';
 import { handleImportPost, handleImportGet } from './import';
 import { handleEnrichPost, handleEnrichGet } from './enrich';
@@ -246,6 +247,16 @@ export async function dispatch(
     await handleGraphPaths(req, res, { conn: ctx.conn, auth, events: ctx.events });
     return true;
   }
+  // Graph — interactive visualization (Phase 11)
+  if (
+    (path === '/api/graph/visualization' ||
+      path === '/api/graph/data' ||
+      path === '/api/graph/viz') &&
+    method === 'GET'
+  ) {
+    await handleGraphVisualization(req, res, { conn: ctx.conn, auth, events: ctx.events });
+    return true;
+  }
   // Alias: /api/graph/path and /api/graph/paths via query style already
   // covered; also support /api/graph/path?target=&from= as specified in Phase 6.
 
@@ -438,6 +449,15 @@ export async function dispatch(
       config: (ctx.config ?? { host: '127.0.0.1', port: 3777, autoMigrate: true, auth: { mode: ctx.auth.mode } }) as any,
       auth: ctx.auth,
     });
+    return true;
+  }
+
+  // Providers — Phase 10/17 observatory strips
+  if (
+    (path === '/api/providers' || path === '/api/providers/status') &&
+    method === 'GET'
+  ) {
+    await handleProviders(req, res, { conn: ctx.conn, auth });
     return true;
   }
 
