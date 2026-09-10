@@ -22,6 +22,10 @@ import { requireScope } from "@/lib/authz";
 import { getServerUrl, serverFetchJson } from "@/lib/netpro-server";
 import { ScanPanel, type ScanJob, type ScanResult } from "@/components/scan-panel";
 import { ActivityFeed } from "@/components/activity-feed";
+import {
+  ProviderStatus,
+  type ProviderStatusPayload,
+} from "@/components/provider-status";
 
 export const metadata = { title: "Scan — NetPro" };
 
@@ -38,11 +42,14 @@ export default async function ScanPage() {
   let latestJob: ScanJob | null = null;
   let latestResult: ScanResult | null = null;
   let enrichmentConfigured = false;
+  let providers: ProviderStatusPayload | null = null;
 
   try {
     const [jobsRes, providersRes] = await Promise.all([
       serverFetchJson<{ jobs: ScanJobRow[]; total: number }>("/api/jobs?type=scan&limit=5"),
-      serverFetchJson<{ enrichment?: { configured?: boolean } }>("/api/providers"),
+      serverFetchJson<ProviderStatusPayload & { enrichment?: { configured?: boolean } }>(
+        "/api/providers",
+      ),
     ]);
 
     if (jobsRes.ok) {
@@ -77,6 +84,7 @@ export default async function ScanPage() {
 
     if (providersRes.ok) {
       enrichmentConfigured = Boolean(providersRes.data?.enrichment?.configured);
+      providers = providersRes.data ?? null;
     }
   } catch {
     reachable = false;
@@ -112,6 +120,12 @@ export default async function ScanPage() {
           initialResult={latestResult}
           enrichmentConfigured={enrichmentConfigured}
         />
+      </section>
+
+      <section style={{ marginTop: "1.5rem" }}>
+        {/* Phase 17 — providers are optional: a scan enriches when they are
+            configured and skips enrichment when they are not. Same sweep. */}
+        <ProviderStatus status={providers} title="Providers" showDetails={false} />
       </section>
 
       <section style={{ marginTop: "1.5rem", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem", background: "white" }}>

@@ -676,3 +676,222 @@ describe('Phase 13 Pathfinder', () => {
     }
   });
 });
+
+// ── Phase 16 — CLI ↔ Web UI integration ───────────────────────────────────
+//
+// The scan the CLI triggers (`netpro scan` → POST /api/scan with
+// `origin: "cli"`) must be the same job, with the same result snapshot, as the
+// one the Web UI triggers — the plan's "one job system, one event stream".
+
+type ScanResponse = {
+  job: { id: string; type: string; status: string; progress: number; metadata: { origin?: string } };
+  result: {
+    source: string;
+    total: number;
+    processed: number;
+    index: { scanned: number; indexed: number; skipped: number };
+  };
+};
+
+type JobListResponse = {
+  jobs: Array<{ id: string; type: string; metadata: { origin?: string } }>;
+  total: number;
+};
+
+describe('Phase 16 CLI ↔ Web UI integration', () => {
+  it('POST /api/scan records the requesting interface and the same snapshot', async () => {
+    const { conn } = scratchDb();
+    await runMigrations(conn);
+    const now = new Date().toISOString();
+    conn.db.insert(conn.schema.contacts).values({
+      id: 'c1', fullName: 'Jane Doe', company: 'Stripe', source: 'test', createdAt: now, updatedAt: now,
+    }).run();
+    const app = await createApp({ conn, skipMigrate: true, auth: LOCAL_POLICY, config: { host: '127.0.0.1', port: 0, autoMigrate: false, auth: { mode: 'local' } } });
+    const running = await startServer(app, { port: 0 });
+    try {
+      // The Web UI posts no origin; the CLI posts `origin: "cli"`.
+      const webRes = await fetch(`${running.url}/api/scan`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'linkedin_csv' }),
+      });
+      const web = (await webRes.json()) as ScanResponse;
+      const cliRes = await fetch(`${running.url}/api/scan`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'linkedin_csv', origin: 'cli' }),
+      });
+      const cli = (await cliRes.json()) as ScanResponse;
+
+      expect(web.job.metadata.origin).toBe('web');
+      expect(cli.job.metadata.origin).toBe('cli');
+      // Same sweep, same shape — only the job id differs.
+      expect(cli.result.source).toBe(web.result.source);
+      expect(cli.result.total).toBe(web.result.total);
+      expect(cli.result.processed).toBe(1);
+      // The first scan indexed the contact; the second sees it unchanged —
+      // real numbers either way, which is the point.
+      expect(cli.result.index).toMatchObject({ scanned: 1 });
+      expect(web.result.index.indexed).toBe(1);
+      // The job registry is shared: both scans are listable, CLI one included.
+      const list = (await (await fetch(`${running.url}/api/jobs?type=scan`)).json()) as JobListResponse;
+      expect(list.jobs.length).toBe(2);
+      expect(list.jobs.some((j) => j.metadata.origin === 'cli')).toBe(true);
+    } finally {
+      await running.close();
+    }
+  });
+
+  it('streams the scan.progress ladder over SSE for a scan any interface started', async () => {
+    const { conn } = scratchDb();
+    await runMigrations(conn);
+    const app = await createApp({ conn, skipMigrate: true, auth: LOCAL_POLICY, config: { host: '127.0.0.1', port: 0, autoMigrate: false, auth: { mode: 'local' } } });
+    const running = await startServer(app, { port: 0 });
+    try {
+      const res = await fetch(`${running.url}/api/events/stream?history=50`, {
+        headers: { Accept: 'text/event-stream' },
+      });
+      expect(res.status).toBe(200);
+      // Trigger a CLI-originated scan; the buffered history must contain the
+      // ladder (this is the replay the CLI terminal prints).
+      await fetch(`${running.url}/api/scan`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ origin: 'cli' }),
+      });
+      // The stream is live and never closes on its own — read a bounded slice.
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = '';
+      const deadline = Date.now() + 2_000;
+      while (Date.now() < deadline && !text.includes('scan.completed')) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+      }
+      await reader.cancel().catch(() => {});
+      expect(text).toContain('scan.started');
+      expect(text).toContain('scan.progress');
+      expect(text).toContain('scan.completed');
+      expect(text).toContain('"origin":"cli"');
+    } finally {
+      await running.close();
+    }
+  });
+});
+
+// ── Phase 17 — Optional AI and Enrichment ─────────────────────────────────
+
+type ProvidersResponse = {
+  ai: { configured: boolean };
+  enrichment: { configured: boolean; hunter: boolean };
+  embeddings: { configured: boolean };
+  runsWithoutProviders: boolean;
+  capabilities: Record<string, string>;
+  categories: Array<{ id: string }>;
+  degraded: Array<{ capability: string }>;
+};
+
+type EnrichResponse = {
+  job: { status: string };
+  summary: { providerConfigured: boolean; enriched: number; enrichmentError: string | null };
+};
+
+describe('Phase 17 Optional providers', () => {
+  const KEY_ENV = [
+    'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'HUNTER_API_KEY', 'PDL_API_KEY',
+    'CLEARBIT_API_KEY', 'EMBEDDINGS_API_KEY',
+  ] as const;
+
+  it('GET /api/providers says what is configured without leaking a key', async () => {
+    const { conn } = scratchDb();
+    await runMigrations(conn);
+    const saved: Record<string, string | undefined> = {};
+    for (const key of KEY_ENV) {
+      saved[key] = process.env[key];
+      process.env[key] = `SECRET-${key}`;
+    }
+    process.env.EMBEDDINGS_PROVIDER = 'openai';
+    const app = await createApp({ conn, skipMigrate: true, auth: LOCAL_POLICY, config: { host: '127.0.0.1', port: 0, autoMigrate: false, auth: { mode: 'local' } } });
+    const running = await startServer(app, { port: 0 });
+    try {
+      const res = await fetch(`${running.url}/api/providers`);
+      expect(res.status).toBe(200);
+      // Read the raw body once so the no-secret assertion below inspects
+      // exactly the bytes that crossed the wire.
+      const raw = await res.text();
+      const body = JSON.parse(raw) as ProvidersResponse;
+
+      // Legacy strips the Observatory and Scan views read.
+      expect(body.ai.configured).toBe(true);
+      expect(body.enrichment.configured).toBe(true);
+      expect(body.enrichment.hunter).toBe(true);
+      // Phase 17 additions.
+      expect(body.runsWithoutProviders).toBe(true);
+      expect(body.capabilities.keywordSearch).toBe('available');
+      expect(body.capabilities.semanticSearch).toBe('available');
+      expect(body.capabilities.enrichment).toBe('available');
+      expect(body.categories.map((c) => c.id)).toEqual(['ai', 'enrichment', 'embeddings', 'content']);
+
+      // No secret ever crosses the wire.
+      for (const key of KEY_ENV) expect(raw).not.toContain(`SECRET-${key}`);
+    } finally {
+      await running.close();
+      for (const key of KEY_ENV) {
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key];
+      }
+      delete process.env.EMBEDDINGS_PROVIDER;
+    }
+  });
+
+  it('GET /api/providers reports an empty configuration as fully usable offline', async () => {
+    const { conn } = scratchDb();
+    await runMigrations(conn);
+    const saved: Record<string, string | undefined> = {};
+    for (const key of [...KEY_ENV, 'EMBEDDINGS_PROVIDER']) {
+      saved[key] = process.env[key];
+      delete process.env[key];
+    }
+    const app = await createApp({ conn, skipMigrate: true, auth: LOCAL_POLICY, config: { host: '127.0.0.1', port: 0, autoMigrate: false, auth: { mode: 'local' } } });
+    const running = await startServer(app, { port: 0 });
+    try {
+      const body = (await (await fetch(`${running.url}/api/providers`)).json()) as ProvidersResponse;
+      expect(body.ai.configured).toBe(false);
+      expect(body.enrichment.configured).toBe(false);
+      expect(body.embeddings.configured).toBe(false);
+      // Offline work is unaffected — that is the whole point of the phase.
+      expect(body.capabilities.import).toBe('available');
+      expect(body.capabilities.scan).toBe('available');
+      expect(body.capabilities.keywordSearch).toBe('available');
+      expect(body.capabilities.graphAnalytics).toBe('available');
+      // …and every disabled capability explains itself.
+      const off = body.degraded.map((d) => d.capability);
+      expect(off).toContain('semanticSearch');
+      expect(off).toContain('enrichment');
+      expect(off).toContain('aiOutreach');
+    } finally {
+      await running.close();
+      for (const [key, value] of Object.entries(saved)) {
+        if (value !== undefined) process.env[key] = value;
+      }
+    }
+  });
+
+  it('POST /api/enrich succeeds with no provider configured', async () => {
+    const { conn } = scratchDb();
+    await runMigrations(conn);
+    const saved = process.env.HUNTER_API_KEY;
+    delete process.env.HUNTER_API_KEY;
+    const app = await createApp({ conn, skipMigrate: true, auth: LOCAL_POLICY, config: { host: '127.0.0.1', port: 0, autoMigrate: false, auth: { mode: 'local' } } });
+    const running = await startServer(app, { port: 0 });
+    try {
+      const res = await fetch(`${running.url}/api/enrich`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: 5 }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as EnrichResponse;
+      expect(body.job.status).toBe('completed');
+      expect(body.summary.providerConfigured).toBe(false);
+      expect(body.summary.enriched).toBe(0);
+      expect(body.summary.enrichmentError).toBeNull();
+    } finally {
+      await running.close();
+      if (saved !== undefined) process.env.HUNTER_API_KEY = saved;
+    }
+  });
+});

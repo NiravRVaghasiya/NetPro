@@ -100,6 +100,41 @@ describe('netpro status', () => {
     expect(await resolveServerUrl()).toBe('http://127.0.0.1:3777');
   });
 
+  it('reports provider status and says NetPro runs without them (Phase 17)', async () => {
+    scratchHome();
+    for (const key of ['OPENAI_API_KEY', 'HUNTER_API_KEY', 'PDL_API_KEY', 'CLEARBIT_API_KEY']) {
+      delete process.env[key];
+    }
+    delete process.env.EMBEDDINGS_PROVIDER;
+
+    const result = await executeStatus();
+    expect(result.providers.runsWithoutProviders).toBe(true);
+    expect(result.providers.capabilities.keywordSearch).toBe('available');
+    expect(result.providers.capabilities.enrichment).toBe('disabled');
+
+    const text = formatStatus(result);
+    expect(text).toContain('Providers');
+    expect(text).toContain('all optional');
+    expect(text).toContain('AI');
+    expect(text).toContain('Not configured');
+    expect(text).toContain('Embeddings');
+    expect(text).toContain('Disabled');
+  });
+
+  it('shows a configured provider in status without printing the key (Phase 17)', async () => {
+    scratchHome();
+    process.env.HUNTER_API_KEY = 'SECRET-HUNTER-KEY';
+    try {
+      const result = await executeStatus();
+      expect(result.providers.enrichment.configured).toBe(true);
+      const text = formatStatus(result);
+      expect(text).toContain('Hunter configured');
+      expect(text).not.toContain('SECRET-HUNTER-KEY');
+    } finally {
+      delete process.env.HUNTER_API_KEY;
+    }
+  });
+
   it('surfaces an invalid config.toml as status errors instead of crashing', async () => {
     const home = scratchHome();
     writeFileSync(join(home, 'config.toml'), '[server]\nport = "not-a-number"\n');

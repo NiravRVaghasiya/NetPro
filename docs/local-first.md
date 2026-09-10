@@ -92,11 +92,11 @@ access token for remote callers if one does not exist yet.
 
 Three modes, set with `NETPRO_AUTH_MODE` or `[auth] mode` in `config.toml`:
 
-| Mode | Who gets in |
-|------|-------------|
+| Mode              | Who gets in                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `local` (default) | Requests from this machine (real peer address `127.0.0.1`/`::1`, no proxy headers). Everyone else needs the access token. |
-| `token` | Every caller, loopback included, needs the access token. |
-| `open` | Nobody is authenticated — only behind your own auth (reverse proxy, VPN, private network). |
+| `token`           | Every caller, loopback included, needs the access token.                                                                  |
+| `open`            | Nobody is authenticated — only behind your own auth (reverse proxy, VPN, private network).                                |
 
 **GitHub OAuth is never required.** It remains available to the Web UI as an
 optional integration (`NETPRO_AUTH_MODE=github` with `GITHUB_CLIENT_ID`,
@@ -178,6 +178,62 @@ netpro status --json   # machine-readable
 whether one exists); a broken `config.toml` shows up as a status line (with the
 parser's file-and-line error), not a crash.
 
+## One operation, two interfaces
+
+Every long-running NetPro operation is **one** core implementation, **one** job,
+and **one** event stream — the terminal and the Web UI are just two clients of
+it (Phase 16):
+
+```bash
+netpro import linkedin.csv   # visible in the Web UI's Import/Activity while it runs
+netpro scan                  # reindex + (optional) enrichment + graph analysis
+netpro scan --local          # run the sweep in this process, even with a server up
+netpro scan --json           # machine-readable job + result snapshot
+```
+
+When a NetPro server is running, `netpro scan` asks **that server** for the
+scan — the same job the Web UI's Scan view renders, with the same
+`scan.progress` ladder over `GET /api/events` — and prints the progress in the
+terminal:
+
+```text
+Scan started on the NetPro server (http://127.0.0.1:3777) — job d8080425
+   15% Discovering contacts
+   40% Processing contacts
+   70% Indexed 128 contact(s)
+   90% Analyzing graph
+  100% Scan complete
+```
+
+With no server running, the CLI runs the identical sweep in-process
+(`runScan` in `@netpro/core`) and mirrors its events to the server if one
+appears. Either way the job records which interface started it
+(`metadata.origin`: `cli` or `web`).
+
+## Optional providers
+
+NetPro needs no external account. OpenAI, Anthropic, Hunter, People Data Labs,
+Clearbit, and embedding providers are all **enhancements** — with none
+configured, NetPro still imports, scans, searches, and analyses (Phase 17):
+
+```bash
+netpro status            # ends with the provider block
+netpro status --json     # …and the same snapshot, machine-readable
+```
+
+```text
+Providers (all optional — NetPro runs without them)
+  AI           ● Not configured
+  Enrichment   ● Hunter configured
+  Embeddings   ● Disabled
+```
+
+The Web UI shows the same strips in **Settings** (from `GET /api/providers`)
+and, compactly, on **/scan**, including what is switched off and the exact
+command or environment variable that turns it on. Keys live in the environment
+or in the CLI's encrypted keychain (`netpro config set enrichment.hunter …`);
+no surface — CLI, API, or UI — ever prints one.
+
 ## Related docs
 
 - [docs/getting-started.md](getting-started.md) — install and first import
@@ -187,3 +243,7 @@ parser's file-and-line error), not a crash.
   [docs/phase-4-vercel-removal.md](phase-4-vercel-removal.md), and
   [docs/phase-5-authentication.md](phase-5-authentication.md) — the
   implementation reports for the phases that introduced this behaviour
+- [docs/phase-16-cli-web-integration.md](phase-16-cli-web-integration.md) —
+  one operation, one job system, one event stream, two clients
+- [docs/phase-17-optional-ai-enrichment.md](phase-17-optional-ai-enrichment.md) —
+  providers are optional, and the UI says which are on

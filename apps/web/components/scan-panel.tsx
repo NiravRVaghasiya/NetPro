@@ -144,7 +144,7 @@ export function ScanPanel({
       const res = await serverFetchJson<{ job?: ScanJob; result?: ScanResult; error?: string }>("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: "linkedin_csv" }),
+        body: JSON.stringify({ source: "linkedin_csv", origin: "web" }),
       });
       if (!res.ok || !res.data.job) {
         setError((res.data.error as string) ?? "Scan failed to start.");
@@ -158,6 +158,12 @@ export function ScanPanel({
       setStarting(false);
     }
   }
+
+  // Phase 16 — the interface that started the job rides along in its
+  // metadata, so the Web UI can say where a scan came from and prove both
+  // clients produce the same job.
+  const origin =
+    typeof job?.metadata?.origin === "string" ? (job.metadata.origin as string) : null;
 
   const isRunning = job?.status === "running" || job?.status === "queued";
   const color = isRunning ? "#2563eb" : job?.status === "failed" ? "#dc2626" : "#16a34a";
@@ -218,6 +224,24 @@ export function ScanPanel({
               <span style={{ fontSize: "0.8rem", color: "#6b7280", fontFamily: "ui-monospace, monospace" }}>
                 {job ? `${job.status} · job ${job.id.slice(0, 8)}` : "completed"}
               </span>
+              {job ? (
+                <span
+                  style={{
+                    fontSize: "0.72rem",
+                    color: origin === "cli" ? "#1d4ed8" : "#6b7280",
+                    background: origin === "cli" ? "#eff6ff" : "#f9fafb",
+                    border: `1px solid ${origin === "cli" ? "#bfdbfe" : "#e5e7eb"}`,
+                    borderRadius: 999,
+                    padding: "0.1rem 0.5rem",
+                  }}
+                >
+                  {origin === "cli"
+                    ? "started in a terminal — netpro scan"
+                    : origin === "web"
+                      ? "started here"
+                      : "job"}
+                </span>
+              ) : null}
             </div>
             <div style={{ marginTop: "0.7rem" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: "0.6rem", flexWrap: "wrap", fontSize: "0.8rem", color: "#6b7280" }}>

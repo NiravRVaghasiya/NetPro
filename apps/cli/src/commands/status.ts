@@ -1,4 +1,9 @@
 import type { Command } from 'commander';
+import {
+  formatProviderStatus,
+  resolveProviderStatus,
+  type ProviderStatusSnapshot,
+} from '@netpro/core/src/providers';
 
 export interface StatusResult {
   home: string;
@@ -32,6 +37,11 @@ export interface StatusResult {
     latencyMs: number | null;
     error: string | null;
   };
+  /**
+   * Phase 17 — provider status. NetPro runs with none of them configured, so
+   * this section is always populated and never an error state.
+   */
+  providers: ProviderStatusSnapshot;
 }
 
 /** Health probe timeout — a local server answers instantly or it's down. */
@@ -83,6 +93,8 @@ export async function executeStatus(env: NodeJS.ProcessEnv = process.env): Promi
       latencyMs: null,
       error: null,
     },
+    // Filled in below from the environment plus the encrypted keychain.
+    providers: resolveProviderStatus(env),
   };
 
   // ── Identity & auth (Phase 5) ── Read-only, and a broken config.toml is a
@@ -157,6 +169,33 @@ export async function executeStatus(env: NodeJS.ProcessEnv = process.env): Promi
     }
   }
 
+  // ── Providers (Phase 17) ──────────────────────────────────────────────
+  // Environment plus the encrypted CLI keychain (`netpro config set …`).
+  // Only presence is inspected — no value is stored in the snapshot.
+  try {
+    const { Keychain } = await import('../config/keychain');
+    const slots = [
+      'ai.openai.key',
+      'ai.anthropic.key',
+      'enrichment.hunter',
+      'enrichment.pdl',
+      'enrichment.clearbit',
+      'embeddings.key',
+      'content.devto',
+      'content.twitter',
+      'content.github',
+    ];
+    const keychain: Record<string, string | null> = {};
+    for (const slot of slots) {
+      keychain[slot] = await Keychain.get(slot).catch(() => null);
+    }
+    result.providers = resolveProviderStatus(env, { keychain });
+  } catch {
+    // An unreadable keychain is not a status failure — env-only is still an
+    // accurate answer for the common case.
+    result.providers = resolveProviderStatus(env);
+  }
+
   return result;
 }
 
@@ -206,6 +245,8 @@ export function formatStatus(result: StatusResult): string {
     `Identity: ${identity}`,
     `Auth:     ${auth}`,
     `Server:   ${server}`,
+    '',
+    formatProviderStatus(result.providers),
   ].join('\n');
 }
 
