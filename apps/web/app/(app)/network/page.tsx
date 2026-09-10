@@ -1,26 +1,27 @@
 // @ts-nocheck
 // apps/web/app/(app)/network/page.tsx
 //
-// Phase 9/11 — Network visualization: the graph as the visual centerpiece.
+// Phase 11 — Network visualization: the graph as the visual centerpiece.
 //
-// The plan (Phase 11) makes the graph the centerpiece — people, relationships,
+// The plan makes the graph the centerpiece — people, relationships,
 // relationship strength, communities, clusters, bridges, high-degree nodes,
 // important intermediaries — and requires the UI consume graph results from
 // `packages/core` without reimplementing graph algorithms. This page does that
-// through the local NetPro server: GET /api/graph and GET /api/graph/path
-// orchestrate Louvain community detection, degree centrality, Brandes
-// betweenness, and warm-introduction pathfinding on the server, and the UI
-// visualizes the result.
+// through the local NetPro server: GET /api/graph, GET /api/graph/visualization,
+// and GET /api/graph/path orchestrate Louvain community detection, degree
+// centrality, Brandes betweenness, and warm-introduction pathfinding on the
+// server, and the UI visualizes the result.
 //
-// Two modes, mirroring the existing /graph page:
-//   * no `target` → network overview (communities, hubs, warm-intro candidates)
+// Two modes:
+//   * no `target` → interactive network overview (force graph + communities + hubs)
 //   * `target`    → ranked k-shortest warm-intro chains (who can introduce me?)
 
 import Link from "next/link";
 import { requireScope } from "@/lib/authz";
 import { getServerUrl, serverFetchJson } from "@/lib/netpro-server";
 import { conn } from "@/lib/db";
-import { getNetworkGraph, planIntroPaths } from "@netpro/core/src/graph";
+import { getNetworkGraph, planIntroPaths, getNetworkVisualization } from "@netpro/core/src/graph";
+import { NetworkGraphView } from "@/components/network-graph";
 
 export const metadata = { title: "Network — NetPro" };
 
@@ -41,10 +42,8 @@ export default async function NetworkPage({
   const from = one(sp.from);
   const serverUrl = getServerUrl();
 
-  // Try server first; fall back to direct core so the page renders during
-  // `next dev` without `netpro serve`.
+  // ── Pathfinder mode ───────────────────────────────────────────────
   if (target) {
-    // Pathfinder — ranked chains
     let plan: {
       found?: boolean;
       targetContact?: { id: string; fullName: string };
@@ -158,7 +157,7 @@ export default async function NetworkPage({
     );
   }
 
-  // Overview — communities, hubs, warm-intro candidates
+  // ── Overview ─────────────────────────────────────────────────────
   let graph: {
     nodes?: number;
     edges?: number;
@@ -170,17 +169,34 @@ export default async function NetworkPage({
     pendingCandidates?: number;
     degraded?: { reason: string };
   } | null = null;
+  // Visualization payload (interactive)
+  let viz: {
+    nodes: Array<{ id: string; fullName: string; company: string | null; role: string | null; relationshipScore: number | null; communityId: number; communityLabel: string; degree: number; betweenness: number | null }>;
+    edges: Array<{ id: string; source: string; target: string; relation: string; strength: number; confidence: number; bidirectional: boolean }>;
+    meta: { totalNodes: number; totalEdges: number; shownNodes: number; shownEdges: number; truncated: boolean; truncatedReason: string | null; communities: number; modularity: number; pendingCandidates?: number; degraded?: { reason: string } | null; coverage?: number };
+  } | null = null;
   let serverError: string | null = null;
+
   try {
-    const res = await serverFetchJson<typeof graph>("/api/graph");
-    if (res.ok) graph = res.data;
-    else serverError = (res.data as { error?: string })?.error ?? `Server ${res.status}`;
+    const [gRes, vRes] = await Promise.all([
+      serverFetchJson<typeof graph>("/api/graph"),
+      serverFetchJson<typeof viz>("/api/graph/visualization"),
+    ]);
+    if (gRes.ok) graph = gRes.data;
+    else serverError = (gRes.data as { error?: string })?.error ?? `Server ${gRes.status}`;
+    if (vRes.ok) viz = vRes.data;
+    else if (!graph) serverError = (vRes.data as { error?: string })?.error ?? `Server ${vRes.status}`;
   } catch (e) {
     serverError = e instanceof Error ? e.message : String(e);
   }
   if (!graph || serverError) {
     try {
-      graph = (await getNetworkGraph(conn, {} as never)) as unknown as typeof graph;
+      const [g, v] = await Promise.all([
+        getNetworkGraph(conn, {} as never) as unknown as typeof graph,
+        getNetworkVisualization(conn, {} as never) as unknown as typeof viz,
+      ]);
+      graph = g;
+      viz = v;
       serverError = null;
     } catch (e) {
       return (
@@ -192,11 +208,20 @@ export default async function NetworkPage({
     }
   }
 
-  if (!graph || graph.degraded) {
+  if (!graph) {
     return (
       <div>
         <h1>Network</h1>
-        {graph?.degraded ? <p style={{ color: "#b45309" }}>{graph.degraded.reason}</p> : <p>Loading…</p>}
+        <p>Loading…</p>
+      </div>
+    );
+  }
+  if (graph.degraded) {
+    return (
+      <div>
+        <h1>Network</h1>
+        <p style={{ color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "0.75rem 1rem" }}>{graph.degraded.reason}</p>
+        {viz ? <div style={{ marginTop: "1rem" }}><NetworkGraphView data={viz as never} serverUrl={serverUrl} /></div> : null}
       </div>
     );
   }
@@ -223,10 +248,12 @@ export default async function NetworkPage({
           Server: <code>{serverUrl}</code>
           {serverError ? <span style={{ color: "#92400e" }}> — {serverError} (local fallback)</span> : null}
         </p>
+        {viz ? <div style={{ marginTop: "1rem" }}><NetworkGraphView data={viz as never} serverUrl={serverUrl} /></div> : null}
       </div>
     );
   }
 
+  // Normal overview with interactive visualization on top
   return (
     <div>
       <h1>Network</h1>
@@ -242,9 +269,10 @@ export default async function NetworkPage({
           </>
         ) : null}
         <span style={{ fontSize: "0.8rem" }}> — via {serverUrl}</span>
+        {serverError ? <span style={{ color: "#92400e", fontSize: "0.8rem" }}> — {serverError} (local fallback)</span> : null}
       </p>
 
-      <form method="GET" action="/network" style={{ marginTop: "0.75rem", display: "flex", gap: "0.5rem" }}>
+      <form method="GET" action="/network" style={{ marginTop: "0.75rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
         <input
           name="target"
           placeholder="Find a path to… (name, email, or id)"
@@ -256,9 +284,27 @@ export default async function NetworkPage({
         >
           Find path
         </button>
+        <Link href="/graph" style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: "0.4rem 0.8rem", textDecoration: "none", color: "#374151", fontSize: "0.9rem" }}>
+          Pathfinder full →
+        </Link>
       </form>
 
-      <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", marginTop: "1rem" }}>
+      {/* Interactive visualization — the centerpiece */}
+      {viz ? (
+        <div style={{ marginTop: "1.15rem" }}>
+          <h2 style={{ margin: "0 0 0.6rem", fontSize: "1.05rem" }}>Interactive graph</h2>
+          <p style={{ color: "#6b7280", fontSize: "0.86rem", margin: "0 0 0.6rem" }}>
+            People are nodes (colored by community — Louvain; size by degree), relationships are edges (thickness = strength). Drag nodes, pan
+            and zoom, filter by community/relation/strength, search to highlight — all physics is browser-only, the communities, bridges
+            and hubs are server-computed in <code>packages/core</code>.
+          </p>
+          <NetworkGraphView data={viz as never} serverUrl={serverUrl} />
+        </div>
+      ) : (
+        <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginTop: "1rem" }}>Visualization data unavailable — <Link href="/graph" style={{ color: "#2563eb" }}>open the pathfinder</Link> instead.</p>
+      )}
+
+      <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", marginTop: "1.15rem" }}>
         <div style={{ flex: "1 1 260px", border: "1px solid #e5e7eb", borderRadius: 10, padding: "0.9rem" }}>
           <h2 style={{ margin: "0 0 0.5rem", fontSize: "1rem" }}>
             Communities ({graph.communities?.count}, modularity {graph.communities?.modularity})
@@ -332,7 +378,7 @@ export default async function NetworkPage({
         See <Link href="/graph" style={{ color: "#2563eb" }}>
           legacy graph view
         </Link>{" "}
-        for the full interactive explorer.
+        for the full interactive explorer. Server: <code>{serverUrl}</code>
       </p>
     </div>
   );

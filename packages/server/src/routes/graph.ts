@@ -15,7 +15,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { SqliteConn, PgConn } from '@netpro/db';
-import { getNetworkGraph, planIntroPaths } from '@netpro/core/src/graph';
+import { getNetworkGraph, planIntroPaths, getNetworkVisualization } from '@netpro/core/src/graph';
 import { GraphError } from '@netpro/core/src/graph';
 import { sendJson } from '../middleware/json';
 import type { AuthContext } from '../auth/index';
@@ -125,6 +125,32 @@ export async function handleGraphPaths(
       });
     }
     sendJson(res, 200, plan);
+  } catch (error) {
+    const status = errorStatus(error);
+    const message = error instanceof Error ? error.message : String(error);
+    sendJson(res, status, { error: message, code: (error as { code?: string })?.code });
+  }
+}
+
+export async function handleGraphVisualization(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: GraphDeps
+): Promise<void> {
+  const p = new URL(req.url ?? '/', 'http://127.0.0.1').searchParams;
+  try {
+    const viz = await getNetworkVisualization(deps.conn, {
+      ...graphAnalysisParams(p),
+      visualizationLimit: num(p.get('visualizationLimit')) ?? num(p.get('limitNodes')) ?? num(p.get('maxNodes')),
+    } as never);
+    deps.events?.publish({
+      type: 'graph.updated',
+      message: `Graph visualization: ${viz.meta.shownNodes} nodes, ${viz.meta.shownEdges} edges`,
+      shownNodes: viz.meta.shownNodes,
+      shownEdges: viz.meta.shownEdges,
+      communities: viz.meta.communities,
+    });
+    sendJson(res, 200, viz);
   } catch (error) {
     const status = errorStatus(error);
     const message = error instanceof Error ? error.message : String(error);
