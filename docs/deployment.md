@@ -42,7 +42,7 @@ out to many instances, and each one opens its own connections.
 
 | Variable | Required | Value |
 | --- | --- | --- |
-| `DB_DIALECT` | ✅ | `postgresql` |
+| `DB_DIALECT` | Optional | `postgresql` — inferred automatically on Vercel when `DATABASE_URL` is set; set it explicitly for Docker/Compose |
 | `DATABASE_URL` | ✅ | Your Postgres connection string |
 | `NEXTAUTH_SECRET` | ✅ | `openssl rand -base64 32` |
 | `GITHUB_CLIENT_ID` | ✅ | From your GitHub OAuth app |
@@ -179,6 +179,17 @@ execute DDL.
 > `CREATE SCHEMA IF NOT EXISTS "drizzle"` — `IF NOT EXISTS` races with itself,
 > because the check and the create are not atomic). The regression test lives
 > in `packages/db/src/postgres.integration.test.ts` and runs in CI.
+
+> **Pooled connection strings.** Neon's Vercel integration attaches a *pooled*
+> URL (host contains `-pooler`, port 6543) — right for serverless traffic, but
+> a session-level advisory lock can leak across a transaction pooler: the
+> unlock may land on a different backend than the one holding the lock, and
+> the stale holder blocks the next migration for up to 60 s. The build-time
+> migration step detects this and automatically uses the direct endpoint
+> (stripping `-pooler`, port 5432), falling back to the pooled URL if the
+> direct one is unreachable. Runtime auto-migration has no such escape hatch —
+> with a pooled `DATABASE_URL`, set `NETPRO_AUTO_MIGRATE=false` and let the
+> build step own migrations.
 
 ---
 
