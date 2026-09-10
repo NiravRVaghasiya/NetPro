@@ -11,6 +11,31 @@
 npm install
 ```
 
+## Local-first quickstart (recommended)
+
+No cloud account, no Vercel, no GitHub OAuth, no `DATABASE_URL`:
+
+```bash
+npm run build -w apps/cli
+node apps/cli/dist/index.js init     # creates ~/.netpro (config.toml, SQLite db, logs, keys)
+node apps/cli/dist/index.js serve    # NetPro at http://127.0.0.1:3777
+```
+
+`serve` prints the local server URL, applies pending migrations, and stays
+in the foreground (`Ctrl+C` stops it). Check on everything with
+`node apps/cli/dist/index.js status`. Import and search from another
+terminal while it runs:
+
+```bash
+node apps/cli/dist/index.js import --linkedin ~/Downloads/Connections.csv
+node apps/cli/dist/index.js search "product manager"
+```
+
+SQLite at `~/.netpro/netpro.db` is the default database. To use PostgreSQL
+instead (Docker/teams/remote), set `[database] dialect/url` in
+`~/.netpro/config.toml` — see [local-first.md](local-first.md) for the full
+configuration reference.
+
 ## Run the web app (SQLite, local)
 
 ```bash
@@ -66,8 +91,9 @@ node apps/cli/dist/index.js --help
 node apps/cli/dist/index.js import --linkedin ~/Downloads/Connections.csv
 ```
 
-The first run creates and migrates the local database (`./netpro.db`)
-automatically. Re-importing the same file merges instead of duplicating.
+The first run creates and migrates the local database
+(`~/.netpro/netpro.db` — see [local-first.md](local-first.md)) automatically.
+Re-importing the same file merges instead of duplicating.
 
 ## Enrich contacts (optional — requires your own API keys)
 

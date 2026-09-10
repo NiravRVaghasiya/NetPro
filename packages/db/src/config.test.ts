@@ -125,6 +125,7 @@ describe('createDb guard rails', () => {
 
   it('rejects an unknown dialect instead of silently defaulting', () => {
     process.env.DB_DIALECT = 'mysql';
-    expect(() => createDb()).toThrow(/Unknown DB_DIALECT/);
+    expect(() => createDb()).toThrow(/Unknown database dialect "mysql"/);
+    expect(() => createDb()).toThrow(/DB_DIALECT/);
   });
 });

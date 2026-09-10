@@ -4,9 +4,41 @@ import { drizzle as drizzlePg, type NodePgDatabase } from 'drizzle-orm/node-post
 import { Pool, type PoolConfig } from 'pg';
 import * as sqliteSchema from './schema.sqlite';
 import * as pgSchema from './schema.pg';
+import {
+  describeDatabaseConfig,
+  ensureSqliteDir,
+  redactPostgresUrl,
+  resolveDatabaseConfig,
+  resolveDialectStep,
+  type DatabaseConfig,
+} from './local';
 
 export * as sqliteSchema from './schema.sqlite';
 export * as pgSchema from './schema.pg';
+
+// Phase 3 (local-first): install-directory layout, config.toml, and database
+// resolution shared by the CLI, the local server, and the web app.
+export {
+  configTomlPath,
+  defaultSqlitePath,
+  describeDatabaseConfig,
+  ensureNetProHome,
+  ensureSqliteDir,
+  expandHomePath,
+  LocalConfigError,
+  netproHome,
+  parseToml,
+  readLocalConfig,
+  redactPostgresUrl,
+  resolveDatabaseConfig,
+  resolveDialectStep,
+  resolveSqlitePath,
+  type DbDialect,
+  type DatabaseConfig,
+  type LocalConfig,
+  type TomlTable,
+  type TomlValue,
+} from './local';
 
 export {
   appliedMigrationCount,
@@ -39,8 +71,10 @@ export type PgConn = {
 /**
  * Which database dialect should this process use?
  *
- * An explicit `DB_DIALECT` always wins. The implicit default is sqlite, so
- * the CLI's local file workflow works with zero configuration.
+ * Delegates to the shared Phase 3 resolver (`./local`), which layers:
+ * `DB_DIALECT` env → `~/.netpro/config.toml` `[database] dialect` → Vercel
+ * inference → sqlite. The implicit default is sqlite, so the local-first
+ * workflow works with zero configuration.
  *
  * The one inference: on Vercel with a `DATABASE_URL` but no `DB_DIALECT`,
  * default to postgresql. Sqlite is never usable there (see the guard in
@@ -50,17 +84,13 @@ export type PgConn = {
  * page-data collection, resolves sqlite, and the deploy dies on the guard
  * below *after* the build-time migration already succeeded against the same
  * database. With it, connecting a database and redeploying just works.
+ *
+ * Tolerant of a missing Postgres connection string: "which dialect?" can be
+ * asked without "is it usable?" — createDb() raises that error with
+ * actionable text.
  */
-export function resolveDialect(
-  env: NodeJS.ProcessEnv = process.env
-): 'sqlite' | 'postgresql' {
-  const dialect =
-    env.DB_DIALECT ??
-    (env.VERCEL && env.DATABASE_URL?.trim() ? 'postgresql' : 'sqlite');
-  if (dialect !== 'sqlite' && dialect !== 'postgresql') {
-    throw new Error(`Unknown DB_DIALECT "${dialect}". Expected "sqlite" or "postgresql".`);
-  }
-  return dialect;
+export function resolveDialect(env: NodeJS.ProcessEnv = process.env): 'sqlite' | 'postgresql' {
+  return resolveDialectStep(env).dialect;
 }
 
 function positiveInt(value: string | undefined, fallback: number): number {
@@ -134,17 +164,17 @@ export function resolvePoolConfig(env: NodeJS.ProcessEnv = process.env): {
   };
 }
 
-export function createDb(): SqliteConn | PgConn {
-  const dialect = resolveDialect();
+export function createDb(env: NodeJS.ProcessEnv = process.env): SqliteConn | PgConn {
+  const config = resolveDatabaseConfig(env);
 
-  if (dialect === 'sqlite') {
-    const path = process.env.DB_PATH ?? './netpro.db';
+  if (config.dialect === 'sqlite') {
+    const path = config.path!;
     // Guard rail, not a preference: Vercel's filesystem is ephemeral and
     // per-instance, so a SQLite database there silently loses every write on
     // redeploy and disagrees between concurrent instances. Failing at startup
     // with an actionable message beats shipping a "working" deploy that eats
     // the user's imported network.
-    if (process.env.VERCEL && !process.env.NETPRO_ALLOW_EPHEMERAL_SQLITE) {
+    if (env.VERCEL && !env.NETPRO_ALLOW_EPHEMERAL_SQLITE) {
       throw new Error(
         'DB_DIALECT=sqlite cannot be used on Vercel: its filesystem is ephemeral and ' +
           'per-instance, so data is lost on every redeploy and is not shared between ' +
@@ -153,23 +183,26 @@ export function createDb(): SqliteConn | PgConn {
           'DB_DIALECT=postgresql and DATABASE_URL. See docs/deployment.md.'
       );
     }
+    // Phase 3: the local-first default lives at ~/.netpro/netpro.db, which
+    // does not exist until `netpro init` (or this call) creates it.
+    ensureSqliteDir(path);
     const sqlite = new Database(path);
     // WAL lets readers proceed during a write, and busy_timeout makes
     // concurrent CLI/web access wait briefly rather than throwing SQLITE_BUSY.
     sqlite.pragma('journal_mode = WAL');
     sqlite.pragma('busy_timeout = 5000');
     sqlite.pragma('foreign_keys = ON');
-    return { dialect, db: drizzleSqlite(sqlite, { schema: sqliteSchema }), schema: sqliteSchema };
+    return { dialect: config.dialect, db: drizzleSqlite(sqlite, { schema: sqliteSchema }), schema: sqliteSchema };
   }
 
-  const connectionString = process.env.DATABASE_URL;
+  const connectionString = config.url;
   if (!connectionString) {
     throw new Error('DATABASE_URL is required when DB_DIALECT=postgresql');
   }
   const pool = new Pool({
     connectionString,
-    ssl: resolvePgSsl(connectionString),
-    ...resolvePoolConfig(),
+    ssl: resolvePgSsl(connectionString, env),
+    ...resolvePoolConfig(env),
   });
   // An idle client erroring (a provider dropping the connection, a failover)
   // emits 'error' on the pool. Without a listener Node treats it as an
@@ -177,5 +210,40 @@ export function createDb(): SqliteConn | PgConn {
   pool.on('error', (error) => {
     console.error('[netpro/db] idle Postgres client error:', error.message);
   });
-  return { dialect, db: drizzlePg(pool, { schema: pgSchema }), schema: pgSchema, pool };
+  return { dialect: config.dialect, db: drizzlePg(pool, { schema: pgSchema }), schema: pgSchema, pool };
+}
+
+/**
+ * Human-readable description of where a connection's data lives, safe to
+ * print: SQLite shows a `~`-abbreviated path, PostgreSQL has its credentials
+ * redacted. Used by `netpro serve`, `netpro init`, and `netpro status`.
+ */
+export function describeConn(
+  conn: SqliteConn | PgConn,
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  if (conn.dialect === 'sqlite') {
+    // drizzle stores the underlying better-sqlite3 handle as $client, whose
+    // `.name` is the file path handed to `new Database(path)`.
+    const client = (conn.db as unknown as { $client?: { name?: unknown } }).$client;
+    const name = typeof client?.name === 'string' ? client.name : undefined;
+    if (!name || name === ':memory:') return ':memory:';
+    return describeDatabaseConfig({ dialect: 'sqlite', path: name, source: 'env' }, env);
+  }
+  const connectionString = conn.pool.options?.connectionString ?? '';
+  return redactPostgresUrl(connectionString);
+}
+
+/**
+ * Release a connection's underlying resources (SQLite file handle, Postgres
+ * pool). One-shot commands (`netpro init`, `netpro status`) use this so tests
+ * and long-lived wrappers do not leak handles.
+ */
+export async function closeConn(conn: SqliteConn | PgConn): Promise<void> {
+  if (conn.dialect === 'sqlite') {
+    const client = (conn.db as unknown as { $client?: { close?: () => void } }).$client;
+    client?.close?.();
+    return;
+  }
+  await conn.pool.end().catch(() => {});
 }

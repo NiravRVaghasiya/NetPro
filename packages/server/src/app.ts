@@ -36,6 +36,12 @@ export type CreateAppOptions = {
   conn?: SqliteConn | PgConn;
   /** Skip migration on create (tests that manage schema themselves). */
   skipMigrate?: boolean;
+  /**
+   * Environment used for DB resolution and migration policy. Defaults to
+   * process.env; runServe passes its overlay so `netpro serve` and the
+   * process see one identical environment.
+   */
+  env?: NodeJS.ProcessEnv;
 };
 
 /**
@@ -45,8 +51,9 @@ export type CreateAppOptions = {
  * Does not import or depend on `apps/web` or any Vercel API.
  */
 export async function createApp(options: CreateAppOptions = {}): Promise<NetProApp> {
-  const config = options.config ?? loadConfig();
-  const conn = options.conn ?? createDb();
+  const env = options.env ?? process.env;
+  const config = options.config ?? loadConfig(env);
+  const conn = options.conn ?? createDb(env);
   const jobs = createJobRegistry();
   const events = createEventBus();
 
@@ -55,7 +62,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<NetProA
     // server stays consistent with CLI / web instrumentation.
     const shouldMigrate = options.config
       ? config.autoMigrate
-      : autoMigrateEnabled();
+      : autoMigrateEnabled(env.NETPRO_AUTO_MIGRATE);
     if (shouldMigrate) await runMigrations(conn);
   }
 

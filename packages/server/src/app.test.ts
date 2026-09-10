@@ -59,10 +59,19 @@ describe('@netpro/server app', () => {
       expect(body.dialect).toBe('sqlite');
       expect(res.headers.get('x-request-id')).toBeTruthy();
 
+      // `/` is the built-in local console page (Phase 2 banner promises a UI).
       const root = await fetch(running.url);
       expect(root.status).toBe(200);
-      const rootBody = (await root.json()) as { service: string };
-      expect(rootBody.service).toBe('@netpro/server');
+      expect(root.headers.get('content-type')).toContain('text/html');
+      const rootHtml = await root.text();
+      expect(rootHtml).toContain('NetPro');
+      expect(rootHtml).toContain('/api/health');
+
+      // Machine-readable service info stays available as JSON.
+      const info = await fetch(`${running.url}/api/server-info`);
+      expect(info.status).toBe(200);
+      const infoBody = (await info.json()) as { service: string };
+      expect(infoBody.service).toBe('@netpro/server');
 
       const missing = await fetch(`${running.url}/api/nope`);
       expect(missing.status).toBe(404);

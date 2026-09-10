@@ -1,17 +1,19 @@
 // packages/server/src/routes/index.ts
 //
-// Route table for the standalone server. Phase 1 ships health only;
-// Phase 6 expands this to the full Web API contract by orchestrating
-// @netpro/core (never reimplementing business logic here).
+// Route table for the standalone server. Phase 1 shipped health only;
+// Phase 2 adds the local console page at `/`. Phase 6 expands this to the
+// full Web API contract by orchestrating @netpro/core (never reimplementing
+// business logic here).
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { PgConn, SqliteConn } from '@netpro/db';
+import { describeConn, type PgConn, type SqliteConn } from '@netpro/db';
 import { resolveAuthContext } from '../auth/index';
 import type { EventBus } from '../events/index';
 import type { JobRegistry } from '../jobs/index';
 import { assignRequestId } from '../middleware/request-id';
 import { sendJson } from '../middleware/json';
 import { handleHealth } from './health';
+import { handleHome } from './home';
 
 export type RouteContext = {
   conn: SqliteConn | PgConn;
@@ -62,6 +64,12 @@ export async function dispatch(
   }
 
   if (method === 'GET' && path === '/') {
+    // The local console: identity + live health, linked to /api/health.
+    handleHome(res, { dialect: ctx.conn.dialect, database: describeConn(ctx.conn) });
+    return true;
+  }
+
+  if (method === 'GET' && path === '/api/server-info') {
     sendJson(res, 200, {
       name: 'NetPro',
       service: '@netpro/server',

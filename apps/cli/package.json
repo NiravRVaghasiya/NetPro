@@ -26,6 +26,7 @@
     "@netpro/config": "^3.0.0",
     "@netpro/core": "^3.0.0",
     "@netpro/db": "^3.0.0",
+    "@netpro/server": "^3.0.0",
     "commander": "^14.0.3",
     "tsup": "^8.5.1"
   }
