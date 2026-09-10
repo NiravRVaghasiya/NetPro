@@ -18,6 +18,7 @@ import { registerSkillsCommand } from "./commands/skills";
 import { registerEventsCommand } from "./commands/events";
 import { registerContentCommand } from "./commands/content";
 import { registerTeamCommand } from "./commands/team";
+import { registerPluginCommand } from "./commands/plugin";
 
 export function createProgram(): Command {
   const program = new Command();
@@ -52,6 +53,7 @@ export function createProgram(): Command {
   registerEventsCommand(program);
   registerContentCommand(program);
   registerTeamCommand(program);
+  registerPluginCommand(program);
 
   return program;
 }

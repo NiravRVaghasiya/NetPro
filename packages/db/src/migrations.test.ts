@@ -1014,3 +1014,73 @@ describe("team collaboration migration (v3.0 phase 3)", () => {
     }
   });
 });
+
+describe("plugins migration (v3.0 phase 5)", () => {
+  it("creates plugins table with workspace scoping and is idempotent", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      const db = drizzle(sqlite, { schema });
+      migrate(db, { migrationsFolder: folder });
+
+      const tables = sqlite
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'plugins'")
+        .all();
+      expect(tables).toHaveLength(1);
+
+      const cols = sqlite
+        .prepare("PRAGMA table_info(plugins)")
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(cols).toEqual(
+        expect.arrayContaining([
+          "id",
+          "workspace_id",
+          "name",
+          "version",
+          "manifest",
+          "enabled",
+          "installed_from",
+          "installed_by_user",
+          "plugin_settings",
+          "created_at",
+          "updated_at",
+        ]),
+      );
+
+      const idxNames = sqlite
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE '%plugins%'")
+        .all()
+        .map((r) => (r as { name: string }).name);
+      expect(idxNames).toEqual(
+        expect.arrayContaining([
+          "plugins_workspace_name_unique",
+          "idx_plugins_workspace",
+          "idx_plugins_workspace_enabled",
+        ]),
+      );
+
+      // Insert via drizzle
+      db.insert(schema.plugins)
+        .values({
+          id: "p1",
+          workspaceId: "default",
+          name: "example-event-discovery",
+          version: "1.0.0",
+          manifest: JSON.stringify({ name: "example-event-discovery", version: "1.0.0", engine: "^3.0.0", permissions: { capabilities: ["event-discovery"] } }),
+          enabled: false,
+          createdAt: "2026-09-10T00:00:00.000Z",
+          updatedAt: "2026-09-10T00:00:00.000Z",
+        })
+        .run();
+      expect(sqlite.prepare("SELECT name FROM plugins WHERE id = 'p1'").get()).toEqual({
+        name: "example-event-discovery",
+      });
+
+      // Idempotent re-run
+      migrate(db, { migrationsFolder: folder });
+      expect(sqlite.prepare("SELECT count(*) AS n FROM plugins WHERE id = 'p1'").get()).toEqual({ n: 1 });
+    } finally {
+      sqlite.close();
+    }
+  });
+});

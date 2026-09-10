@@ -1,0 +1,27 @@
+{
+  "name": "example-event-discovery",
+  "version": "1.0.0",
+  "engine": "^3.0.0",
+  "description": "Example event discovery plugin — offline, minimal, exercises every capability of the plugin contract. Uses one network host (api.example.com) as a placeholder, a setting, and registers a command.",
+  "homepage": "https://github.com/NiravRVaghasiya/NetPro",
+  "entry": "index.js",
+  "permissions": {
+    "network": ["api.example.com"],
+    "capabilities": ["event-discovery", "command"]
+  },
+  "settings": [
+    {
+      "key": "api_key",
+      "label": "API Key (stored in vault)",
+      "type": "secret",
+      "description": "Example secret, stored as plugin.example-event-discovery.api_key in vault"
+    },
+    {
+      "key": "default_location",
+      "label": "Default location",
+      "type": "string",
+      "default": "San Francisco",
+      "description": "Default location for event discovery"
+    }
+  ]
+}
