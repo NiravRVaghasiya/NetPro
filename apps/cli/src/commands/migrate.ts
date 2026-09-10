@@ -16,12 +16,13 @@ export interface MigrateResult {
 /**
  * `netpro migrate` — apply pending migrations as an explicit, observable step.
  *
- * Phase 6 exists partly because migration-on-startup is the wrong model for
- * serverless: on Vercel a deploy cold-starts many instances at once and each
- * one races to run the same DDL. The recommended production setup is to run
- * this command once from the build step and set NETPRO_AUTO_MIGRATE=false so
- * request paths never attempt DDL at all. It is also the right tool for a
- * Docker init container or `docker compose run --rm web netpro migrate`.
+ * Phase 6 exists partly because migration-on-startup is the wrong model where
+ * several instances start at once: each one races to run the same DDL.
+ * (Multi-instance PostgreSQL is safe — the runner takes an advisory lock — but
+ * it is wasted work and it hides failures in request paths.) The recommended
+ * production setup is to run this command once as a release/build step and set
+ * NETPRO_AUTO_MIGRATE=false so instances never attempt DDL at all. It is also
+ * the right tool for a Docker init container or the compose `migrate` service.
  *
  * Unlike the implicit startup migration, this reports what it did and fails
  * loudly, so a deploy pipeline stops rather than shipping an application

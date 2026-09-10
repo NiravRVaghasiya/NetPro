@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { isOwnerGitHubId } from "@/lib/owner";
+import { isGitHubConfigured, resolveWebAuthMode } from "@/lib/auth-mode";
+import { resolveInstallationIdentity } from "@/lib/local-owner";
 
 export const metadata = {
   title: "Settings — NetPro",
@@ -17,23 +18,30 @@ function configured(...values: Array<string | undefined>): boolean {
 }
 
 function integrationsFromEnv(env: NodeJS.ProcessEnv): Integration[] {
+  const authMode = resolveWebAuthMode(env);
   return [
     {
-      name: "Instance owner",
-      configured: isOwnerGitHubId(
-        env.NETPRO_OWNER_GITHUB_ID?.trim(),
-        env.NETPRO_OWNER_GITHUB_ID,
-      ),
-      envVars: ["NETPRO_OWNER_GITHUB_ID"],
-      hint: "Required numeric GitHub account ID. All other accounts are denied access (break-glass owner in v3.0).",
+      name: "Sign-in",
+      configured: true,
+      envVars: ["NETPRO_AUTH_MODE"],
+      hint:
+        authMode === "github"
+          ? "GitHub OAuth — every caller signs in with GitHub."
+          : authMode === "open"
+            ? "Open — NetPro authenticates nobody; a reverse proxy or private network must."
+            : "Local — the operator on this machine is trusted; every other caller needs GitHub sign-in or their own front door.",
     },
     {
-      name: "GitHub OAuth (sign-in)",
-      configured:
-        configured(env.GITHUB_CLIENT_ID) &&
-        configured(env.GITHUB_CLIENT_SECRET),
+      name: "Installation identity",
+      configured: true,
+      envVars: ["~/.netpro/config.toml (or NETPRO_HOME)"],
+      hint: "Created by `netpro init` on first run; identifies this installation to the local server and the CLI.",
+    },
+    {
+      name: "GitHub OAuth (optional integration)",
+      configured: isGitHubConfigured(env),
       envVars: ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"],
-      hint: "OAuth app credentials from github.com/settings/developers.",
+      hint: "Optional. Needed only for remote sign-in; local NetPro never asks for it. OAuth app credentials from github.com/settings/developers.",
     },
     {
       name: "AI outreach — OpenAI",
@@ -70,10 +78,25 @@ function integrationsFromEnv(env: NodeJS.ProcessEnv): Integration[] {
 
 export default function SettingsPage() {
   const integrations = integrationsFromEnv(process.env);
+  const installation = resolveInstallationIdentity().identity;
 
   return (
     <div style={{ maxWidth: 720 }}>
       <h1>Settings</h1>
+      <section className="my-5 rounded-xl border border-slate-200 p-5">
+        <h2 className="text-base font-semibold text-[#183c30]">
+          This installation
+        </h2>
+        <p className="my-2 text-sm leading-6 text-slate-500">
+          Identity <code>{installation.id}</code>
+          {installation.owner ? ` · ${installation.owner}` : ""}
+          {installation.createdAt
+            ? ` · created ${installation.createdAt.slice(0, 10)}`
+            : ""}
+          . Stored in <code>~/.netpro/config.toml</code> (or{" "}
+          <code>NETPRO_HOME</code>) and never sent off this machine.
+        </p>
+      </section>
       <p className="my-5"><Link href="/settings/keys" className="text-emerald-800 underline">Manage encrypted provider keys →</Link></p>
       <section className="my-5 rounded-xl border border-slate-200 p-5">
         <h2 className="text-base font-semibold text-[#183c30]">

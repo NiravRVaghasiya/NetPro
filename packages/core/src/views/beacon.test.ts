@@ -86,12 +86,12 @@ describe("header extraction (v2.5 phase 2)", () => {
     expect(extractViewerIp(headers({}))).toBeNull();
   });
 
-  it("reads geo from Vercel or Cloudflare headers, capped and trimmed", () => {
+  it("reads geo from generic or Cloudflare proxy headers, capped and trimmed", () => {
     expect(
       extractViewerGeo(
         headers({
-          "x-vercel-ip-country": "GB",
-          "x-vercel-ip-city": "London",
+          "x-geo-country": "GB",
+          "x-geo-city": "London",
         }),
       ),
     ).toEqual({ country: "GB", city: "London" });
@@ -100,15 +100,33 @@ describe("header extraction (v2.5 phase 2)", () => {
       city: null,
     });
     expect(
-      extractViewerGeo(headers({ "x-vercel-ip-country": "x".repeat(100) })),
+      extractViewerGeo(headers({ "x-geo-country": "x".repeat(100) })),
     ).toEqual({
       country: "x".repeat(64),
       city: null,
     });
-    expect(extractViewerGeo(headers({ "x-vercel-ip-country": "  " }))).toEqual({
+    expect(extractViewerGeo(headers({ "x-geo-country": "  " }))).toEqual({
       country: null,
       city: null,
     });
+  });
+
+  it("records no geo at all when the proxy sends nothing (phase 4)", () => {
+    // A self-hosted deployment that has not configured its proxy records no
+    // location — NetPro never infers one from platform-specific headers.
+    expect(extractViewerGeo(headers({}))).toEqual({ country: null, city: null });
+    expect(
+      extractViewerGeo(headers({ "x-vercel-ip-country": "GB" })),
+    ).toEqual({ country: null, city: null });
+  });
+
+  it("accepts custom header names for other proxies", () => {
+    expect(
+      extractViewerGeo(
+        headers({ "x-country-code": "DE", "x-city-name": "Berlin" }),
+        { countryHeaders: ["x-country-code"], cityHeaders: ["x-city-name"] },
+      ),
+    ).toEqual({ country: "DE", city: "Berlin" });
   });
 
   it("flags DNT and Sec-GPC requests for minimal storage mode", () => {

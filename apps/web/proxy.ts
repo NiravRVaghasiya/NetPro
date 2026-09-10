@@ -26,6 +26,12 @@ import {
 } from "next/server";
 import NextAuth from "next-auth";
 import { authConfig } from "@/lib/auth.config";
+import {
+  isGitHubConfigured,
+  isTrustedLocalRequest,
+  resolveWebAuthMode,
+  trustLocalUi,
+} from "@/lib/auth-mode";
 
 const { auth } = NextAuth(authConfig);
 const PROTECTED_ROUTES = [
@@ -60,12 +66,19 @@ function within(path: string, route: string): boolean {
   return path === route || path.startsWith(`${route}/`);
 }
 
-// Type the event to select Auth.js's middleware overload, not its route-handler overload.
-const authenticate = auth((req, _event: NextFetchEvent) => {
-  const { pathname } = req.nextUrl;
+/**
+ * Refuse a request that is not the local operator.
+ *
+ * `authenticated` is whether Auth.js found a session — so a call site that
+ * already knows there is no provider passes `false` and skips the session
+ * lookup entirely (and the UntrustedHost error Auth.js logs on every remote
+ * request to a deployment with no configured origin).
+ */
+function deny(request: NextRequest, authenticated: boolean): NextResponse {
+  const { pathname } = request.nextUrl;
   // All other APIs are private by default, including future data routes.
   if (within(pathname, "/api")) {
-    if (!req.auth?.user) {
+    if (!authenticated) {
       return NextResponse.json(
         { error: "Unauthorized" },
         {
@@ -78,20 +91,63 @@ const authenticate = auth((req, _event: NextFetchEvent) => {
   }
   if (
     PROTECTED_ROUTES.some((route) => within(pathname, route)) &&
-    !req.auth?.user
+    !authenticated
   ) {
-    return NextResponse.redirect(new URL("/login", req.url));
+    return NextResponse.redirect(new URL("/login", request.url));
   }
   return NextResponse.next();
-});
+}
+
+// Type the event to select Auth.js's middleware overload, not its route-handler overload.
+const authenticate = auth((req, _event: NextFetchEvent) =>
+  deny(req as NextRequest, Boolean(req.auth?.user)),
+);
 
 export default function proxy(request: NextRequest, event: NextFetchEvent) {
+  let mode;
+  try {
+    mode = resolveWebAuthMode();
+  } catch (error) {
+    // A typo in NETPRO_AUTH_MODE must not silently pick a policy — say what is
+    // wrong, loudly, instead of 404-ing or, worse, trusting the caller.
+    return new NextResponse(
+      `NetPro is misconfigured: ${error instanceof Error ? error.message : String(error)}\n`,
+      { status: 500, headers: { "content-type": "text/plain; charset=utf-8" } },
+    );
+  }
+
   // Public-card visitors need no session processing or Auth.js cookies.
   // In particular, don't wrap this early return in auth(), which sets cookies
   // even for anonymous visitors. Auth route handlers manage their own cookies.
   if (PUBLIC_ROUTES.some((route) => within(request.nextUrl.pathname, route))) {
     return NextResponse.next();
   }
+
+  // Phase 5 — local mode: a request straight from this machine is the
+  // operator, and it is trusted without a session round-trip (or cookies).
+  // Anything arriving through a proxy, or from another host, falls through to
+  // the session check below, which denies it unless GitHub sign-in is
+  // configured. `open` mode trusts everyone because something else
+  // authenticates callers (reverse proxy, VPN, private network).
+  if (mode === "open") return NextResponse.next();
+  if (
+    mode === "local" &&
+    isTrustedLocalRequest(request.headers, {
+      // Next derives nextUrl from the Host header; falling back to it keeps
+      // the check honest when the header itself is absent.
+      host: request.headers.get("host") ?? request.nextUrl.host,
+      trustLocalUi: trustLocalUi(),
+    })
+  ) {
+    return NextResponse.next();
+  }
+
+  if (mode === "local" && !isGitHubConfigured()) {
+    // No session can exist: GitHub sign-in has no credentials. Deny directly
+    // rather than asking Auth.js for a session it cannot produce.
+    return deny(request, false);
+  }
+
   return authenticate(request, event);
 }
 

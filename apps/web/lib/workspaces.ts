@@ -43,6 +43,34 @@ export async function getUserByGitHubId(
   return { id: rows[0].userId };
 }
 
+/**
+ * Phase 5 — the local operator's `users` row.
+ *
+ * Local mode has no OAuth sign-in to create this row, but every membership /
+ * activity-log / retention path is keyed by user id, so the installation
+ * identity is projected here. Insert-only (`onConflictDoNothing`) so a name or
+ * email edited in the database is never clobbered, and concurrent cold starts
+ * cannot race.
+ */
+export async function ensureLocalOwnerUser(
+  userId: string,
+  name: string,
+  email: string,
+): Promise<void> {
+  const values = { id: userId, name, email, emailVerified: null };
+  if (conn.dialect === "sqlite") {
+    await conn.db
+      .insert(conn.schema.users)
+      .values(values)
+      .onConflictDoNothing({ target: conn.schema.users.id });
+  } else {
+    await conn.db
+      .insert(conn.schema.users)
+      .values(values)
+      .onConflictDoNothing({ target: conn.schema.users.id });
+  }
+}
+
 export async function getMembershipsForUser(
   userId: string,
 ): Promise<Membership[]> {
@@ -134,25 +162,34 @@ export async function ensureOwnerMembership(userId: string): Promise<void> {
     }
     return;
   }
-  // Create owner membership
+  // Create owner membership. `onConflictDoNothing` matters in local mode,
+  // where the local operator's session (and therefore this call) is resolved
+  // on every request: two concurrent requests must not fail the unique
+  // (workspace_id, user_id) constraint against each other.
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   if (conn.dialect === "sqlite") {
-    await conn.db.insert(conn.schema.workspaceMembers).values({
-      id,
-      workspaceId: "default",
-      userId,
-      role: "owner",
-      createdAt: now,
-    });
+    await conn.db
+      .insert(conn.schema.workspaceMembers)
+      .values({
+        id,
+        workspaceId: "default",
+        userId,
+        role: "owner",
+        createdAt: now,
+      })
+      .onConflictDoNothing();
   } else {
-    await conn.db.insert(conn.schema.workspaceMembers).values({
-      id,
-      workspaceId: "default",
-      userId,
-      role: "owner",
-      createdAt: now,
-    });
+    await conn.db
+      .insert(conn.schema.workspaceMembers)
+      .values({
+        id,
+        workspaceId: "default",
+        userId,
+        role: "owner",
+        createdAt: now,
+      })
+      .onConflictDoNothing();
   }
 }
 

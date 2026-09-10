@@ -4,16 +4,16 @@
 // module-scope `lib/db.ts` (a deliberate scaffold design kept as-is).
 //
 // PHASE 6 — the migration logic itself moved to @netpro/db's runMigrations(),
-// shared with the CLI and the `netpro-migrate` deploy command. That runner
-// takes a Postgres advisory lock, which is what makes a Vercel deploy safe:
-// many instances cold-start at once and would otherwise race to run the same
-// DDL (measured: 5 of 6 concurrent migrators failed). See
-// packages/db/src/migrate.ts.
+// shared with the CLI and the `netpro migrate` command. That runner takes a
+// Postgres advisory lock, so several instances starting at once cannot race to
+// run the same DDL (measured before the lock: 5 of 6 concurrent migrators
+// failed). See packages/db/src/migrate.ts.
 //
-// On Vercel the recommended setup is to run migrations once at build time
-// (`npm run db:migrate`) and set NETPRO_AUTO_MIGRATE=false, so request paths
-// never attempt DDL at all. This hook stays the default for Docker and local
-// development, where there is no separate deploy step.
+// Where several instances start together, the recommended setup is to run
+// migrations once as a release step (`npm run db:migrate`) and set
+// NETPRO_AUTO_MIGRATE=false, so request paths never attempt DDL at all. This
+// hook stays the default for local `netpro serve` / `next dev` and for Docker,
+// where there is no separate deploy step.
 //
 // v2.5 Phase 6 also schedules the daily retention purge here (see
 // `lib/retention.ts`): in-memory, self-guarded to one run per 24 h, and

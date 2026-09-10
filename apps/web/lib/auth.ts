@@ -1,15 +1,32 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // apps/web/lib/auth.ts
 // v3.0 Phase 1 — multi-user auth with workspaces.
-// The edge-safe auth.config.ts allows any GitHub account to get a JWT;
-// this Node-runtime layer enforces membership and break-glass owner logic
-// against the database.
+// Phase 5 (local-first) — GitHub OAuth is one mode among three, not a
+// prerequisite. `auth()` is now a thin dispatcher:
+//
+//   • github  → the Auth.js session (unchanged v3.0 behaviour)
+//   • local   → the installation owner when the request comes straight from
+//               this machine; otherwise the Auth.js session (which is null
+//               unless GitHub is configured as a fallback)
+//   • open    → the installation owner, for callers behind their own auth
+//
+// The edge-safe auth.config.ts still describes the JWT; this Node-runtime
+// layer enforces membership / break-glass owner logic against the database.
 
+import { headers } from 'next/headers';
 import NextAuth from 'next-auth';
+import type { Session } from 'next-auth';
 import GitHub from 'next-auth/providers/github';
 import { DrizzleAdapter } from '@auth/drizzle-adapter';
 import { authConfig } from './auth.config';
+import {
+  isGitHubConfigured,
+  isTrustedLocalRequest,
+  resolveWebAuthMode,
+  trustLocalUi,
+} from './auth-mode';
 import { conn } from './db';
+import { ensureLocalOwnerSession } from './local-owner';
 import { isOwnerGitHubId } from './owner';
 import {
   ensureBootstrapWorkspaceExists,
@@ -44,15 +61,30 @@ const adapter =
         verificationTokensTable: conn.schema.verificationTokens,
       });
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+/**
+ * Session cookies are only ever minted by Auth.js, and Auth.js only runs in
+ * `github` mode. In the other modes a deterministic placeholder keeps
+ * `MissingSecret` from turning a credential-free local start into a crash.
+ * (There is nothing to protect: no OAuth session exists in those modes.)
+ */
+const LOCAL_SESSION_SECRET =
+  'netpro-local-mode-has-no-oauth-sessions-and-needs-no-secret';
+
+const nextAuth = NextAuth({
   ...authConfig,
   adapter,
-  providers: [
-    GitHub({
-      clientId: process.env.GITHUB_CLIENT_ID!,
-      clientSecret: process.env.GITHUB_CLIENT_SECRET!,
-    }),
-  ],
+  secret:
+    process.env.NEXTAUTH_SECRET ??
+    process.env.AUTH_SECRET ??
+    LOCAL_SESSION_SECRET,
+  providers: isGitHubConfigured()
+    ? [
+        GitHub({
+          clientId: process.env.GITHUB_CLIENT_ID!,
+          clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+        }),
+      ]
+    : [],
   callbacks: {
     ...authConfig.callbacks,
     async signIn({ user, account }) {
@@ -135,3 +167,40 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
 });
+
+export const { handlers, signIn, signOut } = nextAuth;
+
+/**
+ * Who is calling?
+ *
+ * Phase 5: every caller in the web app goes through here (directly or via
+ * `requireScope()`), so the local-first decision lives in exactly one place.
+ */
+export async function auth(): Promise<Session | null> {
+  const mode = resolveWebAuthMode();
+
+  // Read the request context on every call, in every mode. Auth.js used to do
+  // this internally, and Next uses the DynamicServerError it raises during
+  // `next build` to keep pages that ask "who is calling?" out of the static
+  // export. Swallowing it (as a `try/catch` here would) bakes the private
+  // workspace into the build output — so it is deliberately not caught.
+  const requestHeaders = await headers();
+
+  if (mode !== 'github') {
+    if (
+      mode === 'open' ||
+      isTrustedLocalRequest(requestHeaders, { trustLocalUi: trustLocalUi() })
+    ) {
+      return (await ensureLocalOwnerSession()) as unknown as Session;
+    }
+    // local mode, remote caller: fall through to an OAuth session if one
+    // exists, otherwise deny. Without GitHub credentials there is nothing that
+    // could authenticate anyone — and asking Auth.js anyway would log a
+    // spurious UntrustedHost error on every remote request.
+    if (!isGitHubConfigured()) return null;
+  }
+
+  if (!isGitHubConfigured()) return null;
+
+  return await nextAuth.auth();
+}

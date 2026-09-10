@@ -12,6 +12,7 @@ import {
   type PgConn,
   type SqliteConn,
 } from '@netpro/db';
+import { loadAuthPolicy, type AuthPolicy } from './auth/index';
 import type { ServerConfig } from './config';
 import { loadConfig } from './config';
 import { createEventBus, type EventBus } from './events/index';
@@ -24,6 +25,8 @@ export type NetProApp = {
   conn: SqliteConn | PgConn;
   jobs: JobRegistry;
   events: EventBus;
+  /** Phase 5 authentication policy (mode, access token, installation). */
+  auth: AuthPolicy;
   /** Node `http.createServer` request listener. */
   handler: (req: IncomingMessage, res: ServerResponse) => void;
   /** Release DB resources (Postgres pool). */
@@ -42,13 +45,15 @@ export type CreateAppOptions = {
    * process see one identical environment.
    */
   env?: NodeJS.ProcessEnv;
+  /** Inject an auth policy (tests). Defaults to loadAuthPolicy(env, mode). */
+  auth?: AuthPolicy;
 };
 
 /**
  * Build a NetPro application instance.
  *
  * Does not listen on a port — call `startServer(app)` for that.
- * Does not import or depend on `apps/web` or any Vercel API.
+ * Does not import or depend on `apps/web` or any cloud platform API.
  */
 export async function createApp(options: CreateAppOptions = {}): Promise<NetProApp> {
   const env = options.env ?? process.env;
@@ -56,6 +61,9 @@ export async function createApp(options: CreateAppOptions = {}): Promise<NetProA
   const conn = options.conn ?? createDb(env);
   const jobs = createJobRegistry();
   const events = createEventBus();
+  // Mode comes from config (env → config.toml → local); the token and the
+  // installation identity come from disk/env — see ./auth.
+  const auth = options.auth ?? loadAuthPolicy(env, config.auth.mode);
 
   if (!options.skipMigrate) {
     // Prefer explicit app config; fall back to the shared env helper so the
@@ -67,7 +75,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<NetProA
   }
 
   const handler = (req: IncomingMessage, res: ServerResponse): void => {
-    void dispatch(req, res, { conn, jobs, events }).then((handled) => {
+    void dispatch(req, res, { conn, jobs, events, auth }).then((handled) => {
       if (!handled && !res.headersSent) {
         sendJson(res, 404, { error: 'Not found' });
       }
@@ -87,5 +95,5 @@ export async function createApp(options: CreateAppOptions = {}): Promise<NetProA
     }
   };
 
-  return { config, conn, jobs, events, handler, close };
+  return { config, conn, jobs, events, auth, handler, close };
 }

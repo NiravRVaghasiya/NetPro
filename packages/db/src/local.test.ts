@@ -216,6 +216,48 @@ port = 4000
     expect(() => readLocalConfig()).toThrow(/must be a non-empty string/);
   });
 
+  it('reads [installation] and [auth] sections (phase 5)', () => {
+    const home = scratchHome();
+    writeConfig(
+      home,
+      `[installation]
+id = "ins_9f2c"
+created_at = "2026-09-10T12:00:00.000Z"
+owner = "Alex"
+email = "alex@example.com"
+
+[auth]
+mode = "token"
+`
+    );
+    const config = readLocalConfig();
+    expect(config.installation).toEqual({
+      id: 'ins_9f2c',
+      createdAt: '2026-09-10T12:00:00.000Z',
+      owner: 'Alex',
+      email: 'alex@example.com',
+    });
+    expect(config.auth).toEqual({ mode: 'token' });
+  });
+
+  it('rejects unknown keys and bad values in the new sections (phase 5)', () => {
+    const home = scratchHome();
+    writeConfig(home, '[auth]\nmode = "public"\n');
+    expect(() => readLocalConfig()).toThrow(/\[auth\] mode must be/);
+
+    writeConfig(home, '[auth]\ntoken = "np_sneaky"\n');
+    expect(() => readLocalConfig()).toThrow(/unknown key "token" in \[auth\]/);
+
+    writeConfig(home, '[installation]\nident = "ins_typo"\n');
+    expect(() => readLocalConfig()).toThrow(/unknown key "ident" in \[installation\]/);
+
+    writeConfig(home, '[installation]\nid = ""\n');
+    expect(() => readLocalConfig()).toThrow(/must be a non-empty string/);
+
+    writeConfig(home, '[installation]\nid = 5\n');
+    expect(() => readLocalConfig()).toThrow(/must be a non-empty string/);
+  });
+
   it('surfaces TOML syntax errors with the file path and line number', () => {
     const home = scratchHome();
     const path = writeConfig(home, 'broken syntax here\n');
@@ -303,15 +345,17 @@ describe('resolveDatabaseConfig', () => {
     expect(() => resolveDatabaseConfig()).toThrow(/DATABASE_URL/);
   });
 
-  it('infers postgresql on Vercel from DATABASE_URL alone (pre-Phase 4 behaviour)', () => {
+  it('never infers postgresql from DATABASE_URL alone (phase 4)', () => {
+    // A set DATABASE_URL used to flip the dialect on a hosted platform. Now
+    // the dialect is what the user configured, and nothing else: local use
+    // stays on SQLite even when an unrelated DATABASE_URL is exported.
     scratchHome();
     process.env.VERCEL = '1';
-    process.env.DATABASE_URL = 'postgresql://v@vercel/x';
-    expect(resolveDatabaseConfig()).toEqual({
-      dialect: 'postgresql',
-      url: 'postgresql://v@vercel/x',
-      source: 'inferred',
-    });
+    process.env.DATABASE_URL = 'postgresql://v@example/x';
+    const config = resolveDatabaseConfig();
+    expect(config.dialect).toBe('sqlite');
+    expect(config.source).toBe('default');
+    expect(config.path).toBe(join(process.env.NETPRO_HOME!, 'netpro.db'));
   });
 
   it('rejects unknown dialects from env and config', () => {

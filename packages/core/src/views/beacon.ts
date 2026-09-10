@@ -96,17 +96,52 @@ export function extractViewerIp(headers: BeaconHeaders): string | null {
 const GEO_FIELD_MAX_LENGTH = 64;
 
 /**
- * Geo from platform headers only (Vercel `x-vercel-ip-country/city`,
- * Cloudflare `cf-ipcountry`). NetPro never runs a geo lookup itself —
- * headers are the only source, per the plan.
+ * Headers a reverse proxy or CDN may set to describe the viewer's location.
+ *
+ * NetPro never runs a geo lookup itself — an edge platform that already
+ * resolved the IP is the only source, per the plan. `x-geo-country` /
+ * `x-geo-city` are the generic spellings; `cf-ipcountry` / `cf-ipcity` are
+ * Cloudflare's. Phase 4 dropped the platform-specific `x-vercel-ip-*`
+ * spelling: a self-hosted deployment configures its proxy to send the generic
+ * pair, and callers can pass their own names (see below).
  */
-export function extractViewerGeo(headers: BeaconHeaders): {
+export const DEFAULT_GEO_COUNTRY_HEADERS = ["x-geo-country", "cf-ipcountry"] as const;
+export const DEFAULT_GEO_CITY_HEADERS = ["x-geo-city", "cf-ipcity"] as const;
+
+export type ViewerGeoOptions = {
+  /** Header names to try, in order. Defaults to DEFAULT_GEO_COUNTRY_HEADERS. */
+  countryHeaders?: readonly string[];
+  /** Header names to try, in order. Defaults to DEFAULT_GEO_CITY_HEADERS. */
+  cityHeaders?: readonly string[];
+};
+
+function firstHeader(headers: BeaconHeaders, names: readonly string[]): string | null {
+  for (const name of names) {
+    const value = headers.get(name);
+    if (value !== null && value !== undefined) return value;
+  }
+  return null;
+}
+
+/**
+ * Geo from proxy/CDN headers only, capped and trimmed.
+ *
+ * Returns `{ country: null, city: null }` when no configured header is
+ * present, so an unconfigured self-hosted proxy records no location at all
+ * rather than guessing one.
+ */
+export function extractViewerGeo(
+  headers: BeaconHeaders,
+  options: ViewerGeoOptions = {},
+): {
   country: string | null;
   city: string | null;
 } {
-  const country =
-    headers.get("x-vercel-ip-country") ?? headers.get("cf-ipcountry") ?? null;
-  const city = headers.get("x-vercel-ip-city") ?? null;
+  const country = firstHeader(
+    headers,
+    options.countryHeaders ?? DEFAULT_GEO_COUNTRY_HEADERS,
+  );
+  const city = firstHeader(headers, options.cityHeaders ?? DEFAULT_GEO_CITY_HEADERS);
   const cap = (value: string | null): string | null => {
     if (!value) return null;
     const trimmed = value.trim();

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 // Test the actual routing callback without Auth.js signing/encryption or database IO.
@@ -23,7 +23,29 @@ const run = (path: string, signedIn = false): Response => {
   return (proxy as unknown as (req: typeof request) => Response)(request);
 };
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Most of this file covers the private/public route matrix as it behaves in
+  // a GitHub-authenticated deployment, so configure the OAuth pair. Local-mode
+  // behaviour (phase 5) is covered explicitly in the block below and in
+  // lib/auth-mode.test.ts.
+  vi.stubEnv("GITHUB_CLIENT_ID", "test-client-id");
+  vi.stubEnv("GITHUB_CLIENT_SECRET", "test-client-secret");
+});
+afterEach(() => vi.unstubAllEnvs());
+
+const runAt = (
+  path: string,
+  origin: string,
+  signedIn = false,
+  extraHeaders: Record<string, string> = {},
+): Response => {
+  const request = Object.assign(
+    new NextRequest(`${origin}${path}`, { headers: extraHeaders }),
+    { auth: signedIn ? { user: { id: "owner" } } : null },
+  );
+  return (proxy as unknown as (req: typeof request) => Response)(request);
+};
 describe("proxy route boundaries", () => {
   it("does not read sessions or create auth cookies for public visitors", () => {
     run("/card");
@@ -130,5 +152,82 @@ describe("proxy route boundaries", () => {
     );
     expect(run("/settings/card", true).status).toBe(200);
     expect(run("/api/card", true).status).toBe(200);
+  });
+});
+
+describe("proxy auth modes (phase 5)", () => {
+  it("trusts a direct loopback request in the default local mode, with no cookies", () => {
+    vi.stubEnv("NETPRO_AUTH_MODE", "local");
+    expect(runAt("/graph", "http://127.0.0.1:3777").status).toBe(200);
+    expect(runAt("/api/card", "http://localhost:3000").status).toBe(200);
+    expect(sessionRead).not.toHaveBeenCalled();
+  });
+
+  it("still denies a remote caller in local mode (fail closed)", () => {
+    vi.stubEnv("NETPRO_AUTH_MODE", "local");
+    expect(runAt("/graph", "https://netpro.example").status).toBe(307);
+    expect(runAt("/api/card", "https://netpro.example").status).toBe(401);
+    // Public pages stay public for everyone.
+    expect(runAt("/card", "https://netpro.example").status).toBe(200);
+  });
+
+  it("does not trust a loopback Host when a proxy forwarded the request", () => {
+    vi.stubEnv("NETPRO_AUTH_MODE", "local");
+    expect(
+      runAt("/graph", "http://localhost:3000", false, { "x-forwarded-for": "203.0.113.7" }).status,
+    ).toBe(307);
+  });
+
+  it("open mode trusts everyone, because something else authenticates callers", () => {
+    vi.stubEnv("NETPRO_AUTH_MODE", "open");
+    expect(runAt("/api/card", "https://netpro.example").status).toBe(200);
+    expect(runAt("/graph", "https://netpro.example").status).toBe(200);
+    expect(sessionRead).not.toHaveBeenCalled();
+  });
+
+  it("treats the server's token mode as local-only for browsers", () => {
+    vi.stubEnv("NETPRO_AUTH_MODE", "token");
+    expect(runAt("/graph", "http://localhost:3000").status).toBe(200);
+    expect(runAt("/graph", "https://netpro.example").status).toBe(307);
+  });
+
+  it("answers a misconfigured mode with an explicit 500 instead of guessing", () => {
+    vi.stubEnv("NETPRO_AUTH_MODE", "public");
+    const response = runAt("/graph", "http://localhost:3000");
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-type")).toContain("text/plain");
+  });
+});
+
+describe("proxy without any auth provider (phase 5)", () => {
+  it("denies remote callers without consulting Auth.js when GitHub is unconfigured", () => {
+    vi.stubEnv("GITHUB_CLIENT_ID", "");
+    vi.stubEnv("GITHUB_CLIENT_SECRET", "");
+    vi.stubEnv("NETPRO_AUTH_MODE", "");
+    expect(runAt("/api/card", "https://netpro.example").status).toBe(401);
+    expect(runAt("/graph", "https://netpro.example").status).toBe(307);
+    expect(sessionRead).not.toHaveBeenCalled();
+  });
+
+  it("still serves the local operator and the public card", () => {
+    vi.stubEnv("GITHUB_CLIENT_ID", "");
+    vi.stubEnv("GITHUB_CLIENT_SECRET", "");
+    vi.stubEnv("NETPRO_AUTH_MODE", "");
+    expect(runAt("/graph", "http://localhost:3000").status).toBe(200);
+    expect(runAt("/card", "https://netpro.example").status).toBe(200);
+    expect(sessionRead).not.toHaveBeenCalled();
+  });
+
+  it("accepts the explicit loopback-only assertion for port-published containers", () => {
+    vi.stubEnv("GITHUB_CLIENT_ID", "");
+    vi.stubEnv("GITHUB_CLIENT_SECRET", "");
+    vi.stubEnv("NETPRO_TRUST_LOCAL_UI", "1");
+    // In a container the peer is the Docker bridge, which Next puts in
+    // x-forwarded-for; the operator's loopback-only publish is the assertion.
+    expect(
+      runAt("/graph", "http://localhost:3000", false, { "x-forwarded-for": "::ffff:172.17.0.1" })
+        .status,
+    ).toBe(200);
+    expect(runAt("/graph", "https://netpro.example").status).toBe(307);
   });
 });

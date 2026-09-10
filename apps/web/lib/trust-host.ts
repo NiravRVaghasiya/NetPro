@@ -8,10 +8,9 @@
 // ...and every authenticated request 401s while /api/auth/providers returns
 // "There was a problem with the server configuration."
 //
-// Auth.js v5 derives `trustHost` from the environment like this
-// (@auth/core/lib/utils/env.js):
+// Auth.js v5 derives `trustHost` like this (@auth/core/lib/utils/env.js):
 //
-//   config.trustHost ??= !!(AUTH_URL ?? AUTH_TRUST_HOST ?? VERCEL ?? CF_PAGES
+//   config.trustHost ??= !!(AUTH_URL ?? AUTH_TRUST_HOST ?? CF_PAGES
 //                           ?? NODE_ENV !== "production")
 //
 // Note what is absent: **NEXTAUTH_URL**. next-auth reads NEXTAUTH_URL for the
@@ -21,9 +20,7 @@
 //
 // NetPro's own docs, .env.example, and docker-compose.yml all told operators
 // to set NEXTAUTH_URL, which means a self-hosted deploy following the
-// documentation would have had authentication fail outright. Vercel is
-// unaffected (the VERCEL clause), which is exactly why a Vercel-only test
-// would have missed it.
+// documentation would have had authentication fail outright.
 //
 // Rather than push another environment variable onto operators, treat an
 // explicitly configured application URL as an explicit statement of trust:

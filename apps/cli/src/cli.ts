@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { registerInitCommand } from "./commands/init";
 import { registerServeCommand } from "./commands/serve";
 import { registerStatusCommand } from "./commands/status";
+import { registerTokenCommand } from "./commands/token";
 import { registerConfigCommand } from "./commands/config";
 import { registerImportCommand } from "./commands/import";
 import { registerEnrichCommand } from "./commands/enrich";
@@ -40,6 +41,7 @@ export function createProgram(): Command {
   registerInitCommand(program);
   registerServeCommand(program);
   registerStatusCommand(program);
+  registerTokenCommand(program);
   registerConfigCommand(program);
   registerImportCommand(program);
   registerEnrichCommand(program);

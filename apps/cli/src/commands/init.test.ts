@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultConfigToml, executeInit, initFailureHint } from './init';
@@ -54,11 +54,71 @@ describe('netpro init (local-first Phase 3 exit criteria)', () => {
 
     const first = await executeInit();
     expect(first.configCreated).toBe(false);
-    expect(readFileSync(join(home, 'config.toml'), 'utf8')).toBe(custom);
+    const written = readFileSync(join(home, 'config.toml'), 'utf8');
+    // Every hand-written line survives, in order; init only fills in the
+    // identity keys it must (Phase 5) — it never rewrites the user's file.
+    const withoutInsertedKeys = written
+      .split('\n')
+      .filter((line) => !/^id = |^created_at = /.test(line))
+      .join('\n');
+    expect(withoutInsertedKeys).toBe(custom);
     expect(first.applied).toBe(first.total);
+
+    // Second run: identity and token are reused, not regenerated.
+    const second = await executeInit();
+    expect(second.installationCreated).toBe(false);
+    expect(second.tokenCreated).toBe(false);
+    expect(second.installation.id).toBe(first.installation.id);
+    expect(readFileSync(join(home, 'config.toml'), 'utf8')).toBe(written);
 
     const { closeConn } = await import('@netpro/db');
     await closeConn(first.conn);
+    await closeConn(second.conn);
+  });
+
+  it('mints the installation identity and a 0600 access token (Phase 5)', async () => {
+    const home = scratchHome();
+    const first = await executeInit(process.env, { owner: 'Alex' });
+
+    expect(first.installationCreated).toBe(true);
+    expect(first.installation.id).toMatch(/^ins_[0-9a-f]{24}$/);
+    expect(first.installation.owner).toBe('Alex');
+    expect(first.tokenCreated).toBe(true);
+    expect(first.tokenPath).toBe(join(home, 'keys', 'access-token'));
+    // The printed value is a redacted preview, never the token itself.
+    expect(first.tokenPreview).toMatch(/^np_.*…/);
+
+    const { readAccessToken, readInstallationIdentity } = await import('@netpro/db');
+    const onDisk = readAccessToken(process.env);
+    expect(onDisk).toMatch(/^np_/);
+    expect(first.tokenPreview).not.toBe(onDisk);
+    expect((await import('node:fs')).statSync(first.tokenPath).mode & 0o777).toBe(0o600);
+
+    const identity = readInstallationIdentity(process.env);
+    expect(identity?.id).toBe(first.installation.id);
+    expect(identity?.owner).toBe('Alex');
+    expect(identity?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+    const { closeConn } = await import('@netpro/db');
+    await closeConn(first.conn);
+  });
+
+  it('keeps a hand-written identity instead of overwriting it (Phase 5)', async () => {
+    const home = scratchHome();
+    mkdirSync(home, { recursive: true });
+    writeFileSync(
+      join(home, 'config.toml'),
+      '[installation]\nid = "ins_manual"\ncreated_at = "2020-01-01T00:00:00.000Z"\nowner = "Me"\n'
+    );
+
+    const result = await executeInit();
+    expect(result.installationCreated).toBe(false);
+    expect(result.installation.id).toBe('ins_manual');
+    expect(result.installation.owner).toBe('Me');
+    expect(readFileSync(join(home, 'config.toml'), 'utf8')).toContain('ins_manual');
+
+    const { closeConn } = await import('@netpro/db');
+    await closeConn(result.conn);
   });
 
   it('a failed init against a broken config does not leave the error cryptic', async () => {

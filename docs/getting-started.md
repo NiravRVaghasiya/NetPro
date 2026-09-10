@@ -13,13 +13,18 @@ npm install
 
 ## Local-first quickstart (recommended)
 
-No cloud account, no Vercel, no GitHub OAuth, no `DATABASE_URL`:
+No cloud account, no GitHub OAuth, no `DATABASE_URL`:
 
 ```bash
 npm run build -w apps/cli
-node apps/cli/dist/index.js init     # creates ~/.netpro (config.toml, SQLite db, logs, keys)
+node apps/cli/dist/index.js init     # ~/.netpro: config.toml, identity, SQLite db, logs, keys
 node apps/cli/dist/index.js serve    # NetPro at http://127.0.0.1:3777
 ```
+
+`init` also writes this installation's identity (`[installation] id/created_at`)
+and a `0600` access token at `~/.netpro/keys/access-token`. The identity is what
+"you" are locally — no sign-in — and the token is only ever needed by callers
+that are *not* on this machine (`netpro token` prints it).
 
 `serve` prints the local server URL, applies pending migrations, and stays
 in the foreground (`Ctrl+C` stops it). Check on everything with
@@ -44,14 +49,31 @@ npm run dev -w apps/web
 ```
 
 Visit http://localhost:3000. The public card is unavailable until you explicitly
-publish one. Private pages redirect to owner sign-in.
+publish one. Private pages open straight into the workspace: requests from this
+machine are the operator (see [Authentication modes](#authentication-modes)).
 
-## Configure owner sign-in
+## Authentication modes
 
-NetPro v1 is a **single-owner** instance, not a multi-tenant service. Imported
-contacts and integration keys are shared within that instance. Before signing
-in, configure these values in `apps/web/.env.local` (or the production server
-and Docker `.env`):
+Local NetPro requires **no credentials at all**. `NETPRO_AUTH_MODE` decides who
+is trusted:
+
+| Mode | Who gets in |
+| --- | --- |
+| `local` (default) | Requests whose Host is loopback (`127.0.0.1`, `localhost`, `::1`) and that did not arrive through a proxy are the operator, identified by `~/.netpro/config.toml`. Everyone else needs GitHub sign-in (if configured) or their own front door. |
+| `github` | Every caller signs in with GitHub. Selected automatically when `GITHUB_CLIENT_ID` + `GITHUB_CLIENT_SECRET` are present, so existing deployments are unchanged. |
+| `open` | NetPro authenticates nobody: only behind a reverse proxy, VPN, or private network that does. |
+
+In `local` mode, bind/publish the Web UI to **127.0.0.1** — the trust decision
+uses the Host header, so a public interface would let a caller claim to be
+local. To expose it, use `github` or `open`. The full model is in
+[phase-5-authentication.md](phase-5-authentication.md).
+
+## Configure GitHub sign-in (optional)
+
+GitHub OAuth is an optional integration rather than the application's identity
+system: skip this entirely for local use. It is a **single-owner** instance when
+you do configure it, not a multi-tenant service. Set these in
+`apps/web/.env.local` (or the production server and Docker `.env`):
 
 - `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`: credentials for your GitHub
   OAuth app, created in GitHub **Settings → Developer settings → OAuth Apps**.
@@ -66,10 +88,12 @@ and Docker `.env`):
   `http://localhost:3000/api/auth/callback/github` as the OAuth app callback;
   replace the origin with your HTTPS domain for a hosted instance.
 
-Auth.js v5's `AUTH_SECRET` / `AUTH_URL` names are also supported. Behind a trusted
-reverse proxy, configure its forwarded host/protocol correctly; set
-`AUTH_TRUST_HOST=true` only when that proxy/host is trusted. Card writes enforce
-same-origin requests using those headers.
+Set `NETPRO_AUTH_MODE=github` as well when you want GitHub sign-in to be the
+only way in (for example on a public server). Auth.js v5's `AUTH_SECRET` /
+`AUTH_URL` names are also supported. Behind a trusted reverse proxy, configure
+its forwarded host/protocol correctly; set `AUTH_TRUST_HOST=true` only when that
+proxy/host is trusted. Card writes enforce same-origin requests using those
+headers.
 
 Restart after environment changes. Missing or invalid owner configuration
 **disables sign-in**, rather than allowing open registration. When upgrading
@@ -670,19 +694,24 @@ schema changes on a request path.
 
 ## Deploy
 
-For Vercel, Docker Compose, managed Postgres, TLS modes, security headers, and
-a production checklist, see **[deployment.md](deployment.md)**.
+For any Node host, Docker Compose, managed Postgres, TLS modes, authentication
+modes, security headers, and a production checklist, see
+**[deployment.md](deployment.md)**.
 
 ```bash
+npm run build && npm run db:migrate    # build once, migrate once, then start
+
+# …or the containerised self-hosted path:
 cp .env.example .env
-# Edit .env — at minimum POSTGRES_PASSWORD, NEXTAUTH_SECRET, the GitHub OAuth
-# credentials, NETPRO_OWNER_GITHUB_ID, and APP_URL.
+# Edit .env — POSTGRES_PASSWORD and APP_URL are enough to run.
+# Add NETPRO_AUTH_MODE=github + the GitHub variables for remote sign-in.
 docker compose build
 docker compose up -d
 curl http://localhost:3000/api/health
 ```
 
-> SQLite is for local development and the CLI only. Any hosted deployment
-> should use Postgres — on a serverless host the filesystem is ephemeral, so a
-> SQLite database is lost on redeploy (NetPro refuses that configuration on
-> Vercel rather than losing your data silently).
+> SQLite is the local default (and fine on a VPS or a container with a
+> persistent volume), but it needs a filesystem that survives a restart: a
+> deploy whose disk is per-instance should use Postgres. Set
+> `NETPRO_SERVERLESS=1` when many short-lived instances share one database so
+> each keeps a one-connection pool.

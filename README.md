@@ -2,7 +2,6 @@
 
 > Your professional network, owned by you. Open source LinkedIn Premium alternative.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FNiravRVaghasiya%2FNetPro&env=DB_DIALECT,DATABASE_URL,NEXTAUTH_SECRET,GITHUB_CLIENT_ID,GITHUB_CLIENT_SECRET,NETPRO_OWNER_GITHUB_ID&envDescription=NetPro%20needs%20a%20Postgres%20URL%2C%20an%20auth%20secret%2C%20a%20GitHub%20OAuth%20app%2C%20and%20your%20numeric%20GitHub%20user%20ID&envLink=https%3A%2F%2Fgithub.com%2FNiravRVaghasiya%2FNetPro%2Fblob%2Fmaster%2Fdocs%2Fdeployment.md&project-name=netpro&repository-name=netpro)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Release: v3.0.0](https://img.shields.io/badge/Release-v3.0.0-2ea44f)](https://github.com/NiravRVaghasiya/NetPro/releases)
 [![Changelog](https://img.shields.io/badge/Changelog-CHANGELOG.md-8A2BE2)](CHANGELOG.md)
@@ -46,28 +45,42 @@
   later as v2.5's privacy-preserving beacon (see below).
 
 - **Phase 6 — Deployment & Release Readiness:** NetPro is now actually
-  deployable. One-click **Vercel** deploy with managed Postgres, an explicit
-  `netpro migrate` deploy step, production security headers, a readiness-aware
-  `/api/health`, and a hardened Docker Compose stack. See
-  **[docs/deployment.md](docs/deployment.md)**.
+  deployable. An explicit `netpro migrate` deploy step, production security
+  headers, a readiness-aware `/api/health`, and a hardened Docker Compose
+  stack. See **[docs/deployment.md](docs/deployment.md)** — the recipe is the
+  same on any Node host.
 
   Verifying against a _real_ PostgreSQL server for the first time surfaced two
   release-blocking bugs that a passing local build could never have shown:
 
   1. **Concurrent migrations failed 5 of 6 cold starts.** Each instance ran
-     migrations at startup, so a Vercel deploy — which cold-starts many
-     instances at once — raced against itself (`CREATE TABLE "account"`, and
-     even `CREATE SCHEMA IF NOT EXISTS`, which races with itself in Postgres).
-     Now serialized with a Postgres advisory lock, with a mutation-verified
+     migrations at startup, so a deploy that starts many instances at once
+     raced against itself (`CREATE TABLE "account"`, and even
+     `CREATE SCHEMA IF NOT EXISTS`, which races with itself in Postgres). Now
+     serialized with a Postgres advisory lock, with a mutation-verified
      regression test.
   2. **Production authentication was completely broken.** Auth.js v5 derives
-     host trust from `AUTH_URL`/`AUTH_TRUST_HOST`/`VERCEL` — _not_ from
+     host trust from `AUTH_URL`/`AUTH_TRUST_HOST` — _not_ from
      `NEXTAUTH_URL`, which is what NetPro's docs told operators to set. Every
      self-hosted production request failed with `UntrustedHost`. Development
-     and Vercel both masked it.
+     masked it.
 
   Also: `middleware.ts` → `proxy.ts` for Next.js 16, and the build now emits
   **zero warnings** (was six).
+
+- **Phase 4 (local-first) — No platform assumptions:** the hosted-platform
+  build path is gone (`vercel.json`, `scripts/vercel-build.mjs`, and both
+  `vercel-build` scripts removed), the database dialect is configured rather
+  than inferred, pooling is an explicit `NETPRO_SERVERLESS` switch, and the
+  viewer beacon reads generic proxy geo headers. See
+  [docs/phase-4-vercel-removal.md](docs/phase-4-vercel-removal.md).
+
+- **Phase 5 (local-first) — Authentication without OAuth:** local NetPro needs
+  no credentials. `netpro init` writes an installation identity to
+  `~/.netpro/config.toml` and a `0600` access token; requests from
+  `127.0.0.1` are the operator; `NETPRO_AUTH_MODE` selects `local` (default),
+  `token`, `github`, or `open`. GitHub OAuth is now an optional integration.
+  See [docs/phase-5-authentication.md](docs/phase-5-authentication.md).
 
 - **Phase 7 — CRM Tracking & Follow-up Reminders:** per-contact interaction
   history (email, meeting, call, note, LinkedIn message, intro) with a
@@ -91,14 +104,16 @@
   and the web app (`/outreach/campaigns`, `/outreach/campaigns/[id]`,
   `/api/campaigns`). No SMTP, no stored secrets, nothing sent automatically.
 
-> **Upgrade / owner setup:** set `NETPRO_OWNER_GITHUB_ID` to your numeric GitHub
-> account ID before signing in. Only that account can access the private
-> workspace; missing configuration denies sign-in. Existing sessions must sign
-> in again. The previously missing Auth.js callback route is now mounted.
-> See [owner authentication setup](docs/getting-started.md#configure-owner-sign-in).
+> **Local use needs no setup at all:** `netpro init` + `netpro serve` create an
+> installation identity and trust this machine. GitHub sign-in is an optional
+> integration for instances reachable from elsewhere —
+> `NETPRO_AUTH_MODE=github` plus `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`,
+> and (for the break-glass owner) `NETPRO_OWNER_GITHUB_ID`. See
+> [docs/phase-5-authentication.md](docs/phase-5-authentication.md).
 
-The full monorepo (CLI + web, dual-dialect Drizzle database, GitHub OAuth via
-Auth.js) builds, lints, typechecks, and tests successfully — **1698 tests**,
+The full monorepo (CLI + web, dual-dialect Drizzle database, a local
+installation identity with optional GitHub OAuth via Auth.js) builds, lints,
+typechecks, and tests successfully — **1698 tests**,
 plus 57 more in live PostgreSQL suites that run in CI against a real database
 (including a performance pass at 5k contacts / 20k edges / 10k views / 1k
 content items, and the view-beacon ingest suite). **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
@@ -398,8 +413,8 @@ for Docker/team deployments via `~/.netpro/config.toml` or environment. See
 
 ## Structure
 
-- `apps/web` — Next.js app (App Router), Auth.js v5 with GitHub OAuth
-- `apps/cli` — commander CLI (`netpro init|serve|status|config|import|enrich|search|reindex|outreach|analyze|path|track|edge|campaign|export|card|migrate|skills|events|content`)
+- `apps/web` — Next.js app (App Router), local-first auth with optional GitHub OAuth via Auth.js
+- `apps/cli` — commander CLI (`netpro init|serve|status|token|config|import|enrich|search|reindex|outreach|analyze|path|track|edge|campaign|export|card|migrate|skills|events|content`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
 - `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths), the Phase 3 pathfinder surface (ranking, first-ask, per-contact graph position), the v2.0 skills taxonomy/gap analyzer, the Phase 6 event matcher (CSV import, attendee matching, recommendations), the v2.5 profile-view beacon + viewer analytics (privacy-hardened ingestion, windowed stats, timelines, known-visitor matches), the v2.5 content tracker data model (URL identity, CSV/feed import, metrics snapshots, mentions, provider interface), the v2.5 daily retention purge (90-day views / 365-day snapshots with latest-per-piece survival, at-most-once-per-24 h, audit-logged), and v3.0 Phase 2's workspace-scoped CRM engine (explicit `workspace_id` predicates threading an optional `WorkspaceScope`, authorship on interactions/follow-ups, and a cross-tenant scope-guard suite)
 - `packages/config` — shared ESLint and Tailwind configs
@@ -407,12 +422,14 @@ for Docker/team deployments via `~/.netpro/config.toml` or environment. See
 ## Deploy
 
 ```bash
-docker compose up -d          # self-host with Postgres
+npm run build                 # any Node host: build once…
+npm run db:migrate            # …apply migrations, then start the server
+docker compose up -d          # or: self-host with Postgres
 ```
 
-Or use the Vercel button above. Either way, read
-[`docs/deployment.md`](docs/deployment.md) first — it covers the managed-Postgres
-setup, migrations, owner sign-in, TLS modes, and a production checklist.
+Read [`docs/deployment.md`](docs/deployment.md) first — it covers the
+Postgres setup, migrations, authentication modes, TLS, and a production
+checklist.
 
 See [`docs/getting-started.md`](docs/getting-started.md) to run it locally,
 and the [CHANGELOG](CHANGELOG.md) for what each release shipped and why.

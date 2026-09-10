@@ -54,6 +54,11 @@ describe('runServe (netpro serve core)', () => {
     expect(text).not.toContain('⚠');
     // Isolated install: SQLite file under the scratch home, not ~/.netpro.
     expect(text).toMatch(/Database: .*netpro-serve-/);
+    // Phase 5: the banner names the auth mode, and a loopback start must NOT
+    // mint a credential the user did not ask for.
+    expect(text).toContain('Auth:     local — loopback trusted');
+    expect(text).toContain('Identity: not initialized');
+    expect(text).not.toContain('Created an access token');
 
     const health = await fetch(`${handle.url}/api/health`);
     expect(health.status).toBe(200);
@@ -75,9 +80,10 @@ describe('runServe (netpro serve core)', () => {
   });
 
   it('warns when bound to a non-loopback address', async () => {
+    const env = scratchEnv();
     const lines: string[] = [];
     const handle = await runServe({
-      env: scratchEnv(),
+      env,
       host: '0.0.0.0',
       port: 0,
       log: (line) => lines.push(line),
@@ -85,10 +91,55 @@ describe('runServe (netpro serve core)', () => {
     });
     handles.push(handle);
     const text = lines.join('\n');
-    expect(text).toMatch(/⚠ Bound to 0\.0\.0\.0/);
-    expect(text).toMatch(/local-first default is 127\.0\.0\.1/i);
+    expect(text).toMatch(/⚠ Binding 0\.0\.0\.0/);
+    expect(text).toMatch(/reachable from your network/i);
     // Wildcard binds advertise the browsable loopback URL, not 0.0.0.0 itself.
     expect(text).toContain(`Local:    http://127.0.0.1:${handle.port}`);
+
+    // Phase 5: a remote bind is never accidentally unprotected — NetPro mints
+    // a token rather than denying every remote caller, and never prints it in
+    // full.
+    expect(text).toMatch(/Created an access token for remote callers: np_[^\s]*…/);
+    const { readAccessToken } = await import('@netpro/db');
+    const token = readAccessToken(env);
+    expect(token).toMatch(/^np_/);
+    expect(text).not.toContain(token!);
+
+    // The minted token works for a caller arriving "remotely".
+    const identity = await fetch(`${handle.url}/api/identity`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(identity.status).toBe(200);
+  });
+
+  it('refuses to start in token mode with no token to require (phase 5)', async () => {
+    await expect(
+      runServe({
+        env: { ...scratchEnv(), NETPRO_AUTH_MODE: 'token' },
+        host: '127.0.0.1',
+        port: 0,
+        signals: [],
+      })
+    ).rejects.toThrow(/requires an access token/);
+  });
+
+  it('rejects an unknown auth mode loudly (phase 5)', async () => {
+    await expect(
+      runServe({ env: { ...scratchEnv(), NETPRO_AUTH_MODE: 'whatever' }, port: 0, signals: [] })
+    ).rejects.toThrow(/Unknown auth mode/);
+  });
+
+  it('warns that open mode answers anyone (phase 5)', async () => {
+    const lines: string[] = [];
+    const handle = await runServe({
+      env: { ...scratchEnv(), NETPRO_AUTH_MODE: 'open' },
+      host: '0.0.0.0',
+      port: 0,
+      log: (line) => lines.push(line),
+      signals: [],
+    });
+    handles.push(handle);
+    expect(lines.join('\n')).toMatch(/answers anyone who can reach it/);
   });
 
   it('turns EADDRINUSE into an actionable error', async () => {
