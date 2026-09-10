@@ -2,7 +2,7 @@
 
 All notable changes to NetPro are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
-the product milestones in the [project blueprint](NetPro%20%E2%80%94%20Blueprint.md)
+the product milestones in the [README](README.md)
 (`vX.Y` milestones, published as `X.Y.0` npm/GitHub versions).
 
 ## [3.0.0] - 2026-09-10 — v3.0 "The Platform" (Phases 0–8)
@@ -487,9 +487,7 @@ recent, matches }`) that every surface shares so the CLI, the API, and the
   live-Postgres suite at Phase 6's end. Phase 7 then added one for the
   _ingest_ side too, after the Docker smoke caught the bug described under
   **Fixed**. Measured on PostgreSQL 18.4, medians of 3 runs;
-  recorded in the
-  [Phase 7 progress doc](docs/superpowers/plans/2026-09-09-v2.5-phase7-release-progress.md)
-  and `docs/deployment.md`. The Phase 6 hermetic SQLite budget test is
+  recorded in `docs/deployment.md`. The Phase 6 hermetic SQLite budget test is
   unchanged and still runs in every `npm test`.
 - **CI's Docker smoke covers the new boundary — and caught a real bug.** The
   owner-only routes added since v2.0 (`/api/analytics`, `/api/card/views`,
@@ -792,8 +790,7 @@ recommend|rm`, each with `--json`; event selectors take an id or an exact
 - **Real SMTP delivery for campaigns** (unchanged from v1.5): NetPro drafts, a
   human sends. No stored mail credentials, no open/click/bounce tracking.
 - **Per-user encrypted web key storage and the `$EDITOR` draft-review loop** —
-  still deferred per the
-  [Phase 4 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase4-ai-outreach-design.md).
+  still deferred.
 
 ## [1.5.0] - 2026-09-07
 

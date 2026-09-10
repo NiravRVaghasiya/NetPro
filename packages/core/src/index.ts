@@ -12,7 +12,7 @@ export * as skills from './skills';
 // v2.0 Phase 6 — event matcher (attendee import, matching, recommendations).
 export * as events from './events';
 // v2.5 Phase 1 — profile-view privacy foundations: hashing, bot detection,
-// owner-view labeling, retention (see docs/superpowers/plans/2026-09-08-v2.5-implementation-plan.md).
+// owner-view labeling, retention.
 export * as views from './views';
 // v2.5 Phase 4 — content cross-posting tracker: data model, URL identity,
 // CSV/feed import, metrics snapshots, mentions, provider interface.

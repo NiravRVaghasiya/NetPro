@@ -104,11 +104,8 @@ plus 56 more in live PostgreSQL suites that run in CI against a real database
 content items, and the view-beacon ingest suite). **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
 reminders, and batch campaigns are implemented, and per-contact relationship
 scoring now has a producer (interaction logging). **v2.0 — "The Strategist" is
-complete** — shipped as `v2.0.0` on 2026-09-08 (see the [v2.0 implementation
-plan](docs/superpowers/plans/2026-09-07-v2.0-implementation-plan.md)) — **and
-v2.5 — "The Observer" is complete**, shipped as `v2.5.0` on 2026-09-09
-(see the [v2.5 implementation
-plan](docs/superpowers/plans/2026-09-08-v2.5-implementation-plan.md)):
+complete** — shipped as `v2.0.0` on 2026-09-08 — **and
+v2.5 — "The Observer" is complete**, shipped as `v2.5.0` on 2026-09-09:
 
 - **Phase 1 — Edge provenance (shipped):** `edges` gained `source`,
   `confidence`, `status` + indexes, plus `netpro edge`, CSV mutuals as
@@ -183,8 +180,7 @@ plan](docs/superpowers/plans/2026-09-08-v2.5-implementation-plan.md)):
   operating notes; and the release gate now includes a **performance pass
   against a real PostgreSQL server** — 5k contacts / 20k edges, timing the
   dashboard, hybrid search and the graph endpoints (327 ms / 32 ms / 209 ms
-  median on the measured machine, recorded in the [Phase 7 progress
-  doc](docs/superpowers/plans/2026-09-08-v2.0-phase7-release-progress.md)).
+  median on the measured machine).
   CI also pins the promise that **no `pgvector` extension is required** —
   embeddings are portable JSON, so a managed Postgres works as-is.
 
@@ -233,8 +229,7 @@ plan](docs/superpowers/plans/2026-09-08-v2.5-implementation-plan.md)):
   / `NETPRO_CONTENT_METRIC_RETENTION_DAYS` operator knobs; the plan's
   performance budgets were measured at 10k views / 1k content / 5k
   metrics (~53 ms dashboard / ~10 ms views / ~2 ms content on SQLite) and
-  ship as hermetic budget tests — see the
-  [v2.5 implementation plan](docs/superpowers/plans/2026-09-08-v2.5-implementation-plan.md).
+  ship as hermetic budget tests.
 - **Phase 7 — Release readiness & the `v2.5.0` cut (shipped):** workspace
   versions moved to `2.5.0`; the CHANGELOG closed out with explicit privacy
   notes and a **Deferred** list (what The Observer deliberately is not:
@@ -244,8 +239,7 @@ plan](docs/superpowers/plans/2026-09-08-v2.5-implementation-plan.md)):
   5k contacts / 20k edges plus 10k views / 1k content items / 5k metric
   snapshots — recording **~485 ms** for the full dashboard payload,
   **~16 ms** for the views overview and **~5 ms** for the content list
-  (medians, PostgreSQL 18.4, recorded in the
-  [Phase 7 progress doc](docs/superpowers/plans/2026-09-09-v2.5-phase7-release-progress.md)).
+  (medians, PostgreSQL 18.4).
   CI's Docker smoke now also proves the new boundary in a production build:
   the analytics/content routes answer 401, the beacons stay public,
   cookieless, and `no-store`/`nosniff`.
@@ -255,8 +249,7 @@ providers (the `EventDiscoveryProvider` interface ships, disabled); a native
 pgvector column + ANN index (a later optimization); AI skills extraction as a
 default (opt-in per run); real SMTP delivery for campaigns (NetPro drafts
 today, a human sends); per-user encrypted web key storage and the `$EDITOR`
-draft-review loop — the last two documented in the
-[Phase 4 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase4-ai-outreach-design.md).
+draft-review loop.
 
 **Deferred from v2.5 (privacy by omission, on purpose):** no cross-day viewer
 tracking (daily-salted hashes, 90-day raw-row purge), no contact resolution
@@ -287,17 +280,8 @@ features — see the CHANGELOG's v2.5 Deferred section.
 > are present. A native pgvector column for the semantic arm remains a
 > documented later optimization.
 
-See the [Phase 1 plan](docs/superpowers/plans/2026-08-31-v1.0-phase1-import-enrichment-export.md)
-and its [design spec](docs/superpowers/specs/2026-08-31-v1.0-phase1-import-enrichment-export-design.md)
-for what Phase 1 covers and why, the
-[Phase 3 design spec](docs/superpowers/specs/2026-09-06-v1.0-phase3-network-analytics-design.md)
-for the analytics decisions, and the
-[Phase 5 design and repository assessment](docs/superpowers/specs/2026-09-06-v1.0-phase5-profile-card-design.md)
-for publication/privacy decisions and the remaining release work, the
-[Phase 7 design spec](docs/superpowers/specs/2026-09-06-v1.5-phase7-crm-tracking-followups-design.md)
-for the CRM/relationship-scoring decisions, and the
-[Phase 8 design spec](docs/superpowers/specs/2026-09-06-v1.5-phase8-batch-campaigns-design.md)
-for the draft-only campaign decisions.
+The [CHANGELOG](CHANGELOG.md) records what each phase shipped and the
+reasoning behind its design decisions.
 
 ## Structure
 
@@ -305,7 +289,6 @@ for the draft-only campaign decisions.
 - `apps/cli` — commander CLI (`netpro init|config|import|enrich|search|reindex|outreach|analyze|path|track|edge|campaign|export|card|migrate|skills|events|content`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
 - `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths), the Phase 3 pathfinder surface (ranking, first-ask, per-contact graph position), the v2.0 skills taxonomy/gap analyzer, the Phase 6 event matcher (CSV import, attendee matching, recommendations), the v2.5 profile-view beacon + viewer analytics (privacy-hardened ingestion, windowed stats, timelines, known-visitor matches), the v2.5 content tracker data model (URL identity, CSV/feed import, metrics snapshots, mentions, provider interface), the v2.5 daily retention purge (90-day views / 365-day snapshots with latest-per-piece survival, at-most-once-per-24 h, audit-logged), and v3.0 Phase 2's workspace-scoped CRM engine (explicit `workspace_id` predicates threading an optional `WorkspaceScope`, authorship on interactions/follow-ups, and a cross-tenant scope-guard suite)
-- `packages/ui` — shared React components
 - `packages/config` — shared ESLint and Tailwind configs
 
 ## Deploy
@@ -319,8 +302,7 @@ Or use the Vercel button above. Either way, read
 setup, migrations, owner sign-in, TLS modes, and a production checklist.
 
 See [`docs/getting-started.md`](docs/getting-started.md) to run it locally,
-and [`docs/superpowers/specs/2026-08-30-v0.1-alpha-scaffold-design.md`](docs/superpowers/specs/2026-08-30-v0.1-alpha-scaffold-design.md)
-for the design this scaffold implements.
+and the [CHANGELOG](CHANGELOG.md) for what each release shipped and why.
 
 ## License
 

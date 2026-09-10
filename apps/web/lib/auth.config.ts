@@ -5,8 +5,7 @@
 // @auth/drizzle-adapter here (or anything that transitively imports them) —
 // any of those pull in better-sqlite3, a native addon the Edge Runtime can't
 // bundle, and the build will fail with a "Module not found" error tracing
-// through "Edge Middleware". See docs/superpowers/plans/2026-08-30-v0.1-alpha-scaffold.md,
-// Task 10 Step 6.
+// through "Edge Middleware".
 //
 // v3.0 Phase 1: auth is now multi-user via workspaces. The edge-safe config
 // allows any GitHub account to get a JWT; the Node-runtime `auth.ts` layer

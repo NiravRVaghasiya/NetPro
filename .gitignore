@@ -9,6 +9,9 @@ node_modules/
 
 # Build outputs
 dist/
+# node-gyp drops `build/` next to any native addon it compiles
+# (better-sqlite3), which is easy to commit by accident.
+build/
 .next/
 .turbo/
 out/
