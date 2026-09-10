@@ -75,10 +75,22 @@ then update the callback URL and `NEXTAUTH_URL`, then redeploy.
 set yet on the very first build, migration is skipped with a warning and the
 app migrates on first boot instead.
 
-Leave the Vercel project's **Root Directory** empty (the repository root):
-`installCommand` runs `npm ci --include dev`, which only works where
-`package-lock.json` lives. Vercel still finds the Next.js app in `apps/web` on
-its own.
+Both common Vercel project configurations work:
+
+- **Root Directory empty** (the repository root): `vercel.json` applies, so
+  `installCommand` runs `npm ci --include dev` from the repo root and installs
+  the whole monorepo.
+- **Root Directory `apps/web`** (what Vercel suggests when it detects the
+  Next.js app in a monorepo): the repo-root `vercel.json` is **not** read, and
+  Vercel's default install runs from `apps/web`. npm then installs only that
+  workspace's dependency closure — not the whole repo. That closure must
+  contain everything `vercel-build` needs, which is why `apps/web`
+  dev-depends on `@netpro/cli`: the deploy builds and runs the CLI for
+  migrations, and that dependency edge pulls in `tsup` plus the CLI's
+  correctly hoisted `commander@14`. (Putting those deps on `apps/cli` alone
+  does not help here — `@netpro/cli` is not in the installed closure at all,
+  which is how a deploy can fail with `tsup: command not found` even though
+  `tsup` is listed in `apps/cli`.)
 
 > **Why `vercel-build` is declared twice.** Vercel prefers a `vercel-build`
 > script over the framework's default build command, but it runs that command

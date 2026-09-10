@@ -80,8 +80,13 @@ if (existsSync(localTurbo)) {
   );
 }
 
-// No turbo (turbo is a root devDependency, so this means the install step
-// changed). Build the dependency chain by hand instead of failing: the
+// No turbo — expected on Vercel, not a sign that the install step changed.
+// When the Vercel project's root directory is `apps/web`, npm runs the
+// install from there and builds only *that workspace's* dependency closure
+// (`apps/web` dev-depends on `@netpro/cli` for exactly this reason — the
+// deploy builds and runs the CLI for migrations). `turbo` is a
+// devDependency of the *root* package, outside that closure, so it is
+// simply not installed. Build the dependency chain by hand instead: the
 // packages are consumed as source via next.config `transpilePackages`, so
 // their `build` is a typecheck that must pass before the web build runs.
 console.warn(
