@@ -15,6 +15,15 @@
 // thanks to the advisory lock. Any other migration failure fails the build.
 
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+// Vercel may invoke the build command from the framework-detected app
+// directory (e.g. apps/web) rather than the repository root. All paths in
+// this script (workspace flags, migration binaries, turbo filters) assume
+// the repo root, so chdir there up front.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+process.chdir(repoRoot);
 
 function run(command, args, extraEnv = {}) {
   const result = spawnSync(command, args, {
