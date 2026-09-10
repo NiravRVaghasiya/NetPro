@@ -32,7 +32,7 @@ import { handleSearch } from './search';
 import { handleGraphOverview, handleGraphPaths, handleGraphVisualization } from './graph';
 import { handleProviders } from './providers';
 import { handleAnalytics } from './analytics';
-import { handleImportPost, handleImportGet } from './import';
+import { handleImportPost, handleImportPreviewPost, handleImportGet } from './import';
 import { handleEnrichPost, handleEnrichGet } from './enrich';
 import { handleListJobs, handleGetJob, handleCreateJob, handleCancelJob } from './jobs';
 import { handleEvents } from './events';
@@ -281,6 +281,17 @@ export async function dispatch(
     });
     return true;
   }
+  // Import preview/validate (Phase 15) — must be matched before the
+  // `/api/import/:id` GET below.
+  if (path === '/api/import/preview' && method === 'POST') {
+    await handleImportPreviewPost(req, res, {
+      conn: ctx.conn,
+      auth,
+      jobs: ctx.jobs,
+      events: ctx.events,
+    });
+    return true;
+  }
   if (path.startsWith('/api/import/') && method === 'GET') {
     await handleImportGet(req, res, {
       conn: ctx.conn,
@@ -327,7 +338,7 @@ export async function dispatch(
     if (id) {
       const job = ctx.jobs.get(id);
       if (!job || job.type !== 'scan') {
-        sendJson(res, 404, { error: `No scan job with id \"${id}\".`, code: 'not_found' });
+        sendJson(res, 404, { error: `No scan job with id "${id}".`, code: 'not_found' });
         return true;
       }
       sendJson(res, 200, { job });

@@ -204,9 +204,37 @@ describe('Phase 6 Web API', () => {
     }
   });
 
-  it('POST /api/scan creates a scan job', async () => {
+  it('POST /api/scan creates a scan job with the Phase 14 result snapshot', async () => {
     const { conn } = scratchDb();
     await runMigrations(conn);
+    // Seed a contact and a confirmed edge so the scan result is non-trivial.
+    conn.db.insert(conn.schema.contacts).values({
+      id: 's1',
+      fullName: 'Jane Doe',
+      company: 'Stripe',
+      source: 'test',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }).run();
+    conn.db.insert(conn.schema.contacts).values({
+      id: 's2',
+      fullName: 'John Smith',
+      company: 'Acme',
+      source: 'test',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }).run();
+    conn.db.insert(conn.schema.edges).values({
+      id: 'e1',
+      sourceId: 's1',
+      targetId: 's2',
+      relation: 'colleague',
+      source: 'test',
+      status: 'confirmed',
+      confidence: 1,
+      discoveredAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }).run();
     const app = await createApp({ conn, skipMigrate: true, auth: LOCAL_POLICY, config: { host: '127.0.0.1', port: 0, autoMigrate: false, auth: { mode: 'local' } } });
     const running = await startServer(app, { port: 0 });
     try {
@@ -216,6 +244,19 @@ describe('Phase 6 Web API', () => {
       expect(body.job.type).toBe('scan');
       expect(body.job.status).toBe('completed');
       expect(body.job.progress).toBe(100);
+      const result = body.result;
+      expect(result).toBeDefined();
+      expect(result.source).toBe('linkedin_csv');
+      expect(result.total).toBe(2);
+      expect(result.processed).toBe(2);
+      expect(result.relationships).toBe(1);
+      expect(result.index).toMatchObject({ scanned: 2, indexed: 2 });
+      expect(result.enrichment).toMatchObject({ configured: false, enriched: 0 });
+      // GET /api/scan/:id carries the same snapshot.
+      const get = await fetch(`${running.url}/api/scan/${body.job.id}`);
+      expect(get.status).toBe(200);
+      const gbody = await get.json() as any;
+      expect(gbody.job.metadata.result.total).toBe(2);
     } finally {
       await running.close();
     }
@@ -362,6 +403,53 @@ describe('Phase 6 Web API', () => {
       expect(res.status).toBe(200);
       const body = await res.json() as any;
       expect(body.summary.imported).toBe(1);
+    } finally {
+      await running.close();
+    }
+  });
+
+  it('POST /api/import/preview validates without writing', async () => {
+    const { conn } = scratchDb();
+    await runMigrations(conn);
+    const app = await createApp({ conn, skipMigrate: true, auth: LOCAL_POLICY, config: { host: '127.0.0.1', port: 0, autoMigrate: false, auth: { mode: 'local' } } });
+    const running = await startServer(app, { port: 0 });
+    try {
+      const csv = [
+        'First Name,Last Name,Email Address,Company,Position,Connected On,URL',
+        'Jane,Doe,jane@example.com,Stripe,Senior Engineer,01 Jan 2024,',
+        ',,,,,,',
+      ].join('\n');
+      const res = await fetch(`${running.url}/api/import/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json() as any;
+      expect(body.preview.totalRows).toBe(2);
+      expect(body.preview.validRows).toBe(1);
+      expect(body.preview.invalidRows).toBe(1);
+      expect(body.preview.issues).toEqual([{ row: 3, reason: 'missing name' }]);
+      // Preview must not write any contacts.
+      const rows = conn.db.select().from(conn.schema.contacts).all();
+      expect(rows).toHaveLength(0);
+    } finally {
+      await running.close();
+    }
+  });
+
+  it('POST /api/import/preview rejects a missing CSV', async () => {
+    const { conn } = scratchDb();
+    await runMigrations(conn);
+    const app = await createApp({ conn, skipMigrate: true, auth: LOCAL_POLICY, config: { host: '127.0.0.1', port: 0, autoMigrate: false, auth: { mode: 'local' } } });
+    const running = await startServer(app, { port: 0 });
+    try {
+      const res = await fetch(`${running.url}/api/import/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(400);
     } finally {
       await running.close();
     }

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@netpro/db/src/schema.sqlite';
-import { executeImport } from './import';
+import { executeImport, executeImportPreview } from './import';
 import type { SqliteConn } from '@netpro/db';
 
 function createTestConn(): SqliteConn {
@@ -48,7 +48,24 @@ describe('executeImport', () => {
     expect(output).toContain('Imported 1 contacts (0 merged)');
   });
 
-  it('throws when no --linkedin path is given', async () => {
-    await expect(executeImport({}, conn)).rejects.toThrow(/--linkedin/);
+  it('accepts a positional file path (netpro import linkedin.csv)', async () => {
+    const output = await executeImport({ file: csvPath }, conn);
+    expect(output).toContain('Imported 1 contacts (0 merged)');
+  });
+
+  it('prefers the positional file over --linkedin', async () => {
+    const output = await executeImport({ linkedin: csvPath, file: csvPath }, conn);
+    expect(output).toContain('Imported 1 contacts (0 merged)');
+  });
+
+  it('previews without importing', async () => {
+    const output = await executeImportPreview({ file: csvPath });
+    expect(output).toContain('Rows: 1 total — 1 valid, 0 will be skipped');
+    expect(output).toContain('Jane Doe — Stripe');
+  });
+
+  it('throws when no CSV path is given', async () => {
+    await expect(executeImport({}, conn)).rejects.toThrow(/linkedin.csv/);
+    await expect(executeImportPreview({})).rejects.toThrow(/linkedin.csv/);
   });
 });

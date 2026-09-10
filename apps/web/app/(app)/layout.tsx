@@ -58,6 +58,7 @@ export default async function AppLayout({
         <Link href="/pathfinder">Pathfinder</Link>
         <Link href="/people">People</Link>
         <Link href="/activity">Activity</Link>
+        <Link href="/scan">Scan</Link>
         <Link href="/settings">Settings</Link>
         <details className="ml-auto">
           <summary className="cursor-pointer text-slate-500 hover:text-slate-900">More</summary>
