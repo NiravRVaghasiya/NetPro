@@ -575,3 +575,54 @@ never supply its own `workspace_id`. Web CRM API routes
   `--workspace` + config binding; and per-user vs per-workspace GDPR. Until
   those land, do not treat the CRM scoping as certification of multi-tenant
   isolation for the other routes.
+
+## Plugin marketplace (v3.0 Phase 6)
+
+The marketplace is a **static index with checksums, not a curated store**.
+The default index is `marketplace/index.json` in this repo; fetching it is a
+plain GET with a static user agent — no accounts, no install telemetry. Every
+install is verified five ways before it lands, and always lands **disabled**:
+enabling requires the explicit permissions review (`--i-have-reviewed-permissions`
+on the CLI, a confirm checkbox in `/settings/plugins`).
+
+| Knob | Default | Meaning |
+|---|---|---|
+| `MARKETPLACE_INDEX_URL` | this repo's raw `marketplace/index.json` | Index location: https, `file://`, or a plain path. |
+| `NETPRO_PLUGIN_DIR` | `./plugins` (+ repo-root `./plugins` when present) | Where plugins install and load from. Set this explicitly in production. |
+| `MARKETPLACE_NO_CACHE` | unset (1-hour local cache) | `true` disables the local index cache. |
+| `MARKETPLACE_CACHE_PATH` | OS cache dir (`~/.cache/netpro/…`) | Override the cache file (tests, read-only homes). |
+
+```bash
+# Discover and install the reference plugin (offline-friendly: file:// works)
+netpro plugin search event
+MARKETPLACE_INDEX_URL=file://$PWD/marketplace/index.json netpro plugin install example-event-discovery
+netpro plugin enable example-event-discovery --i-have-reviewed-permissions
+netpro plugin update example-event-discovery   # no-op when current; --force to downgrade
+netpro plugin rm example-event-discovery       # unregisters AND deletes the files
+```
+
+**Verification on every install/update:** (1) the index parses as schema 1
+(size-capped at 256 KiB, 1000 entries); (2) the tarball sha256 matches the
+index entry — mismatch is a hard, audited refusal; (3) the archive extracts
+cleanly (vendored USTAR reader: no symlinks, no `..`/absolute escapes,
+8 MiB compressed / 32 MiB inflated / 1000 files / 8 MiB per file) with a
+`manifest.json` at its root; (4) the manifest's name, version, and
+permissions match the index listing exactly; (5) the engine range accepts
+this NetPro. Git sources (https/file only, non-interactive) verify the
+checked-out HEAD against the pinned 40-char commit.
+
+**Self-hosting:** copy `marketplace/` to any static host (GitHub Pages, S3, a
+file share) and set `MARKETPLACE_INDEX_URL` to your `index.json`. Tarball
+URLs may be relative to the index, so the mirror works with no edits. See
+`marketplace/README.md` for the entry format and the tarball rebuild
+commands. Credential-bearing URLs are refused anywhere in the chain.
+
+**Serverless note:** web installs write to `NETPRO_PLUGIN_DIR`, which is
+ephemeral on Vercel/serverless — install via the CLI into a directory baked
+into the image (the Docker image ships `plugins/` + `marketplace/`), or mount
+a persistent volume for self-hosted Docker.
+
+**Audit events:** `plugin.installed`, `plugin.install_failed` (with `reason`),
+`plugin.updated`, `plugin.update_failed`, `plugin.update_refused`,
+`plugin.removed` (with `filesRemoved`) — all in `activity_log`, filterable in
+`/settings/activity`.

@@ -600,6 +600,34 @@ npm run test
 npm run build
 ```
 
+## Install a plugin from the marketplace
+
+NetPro ships a plugin runtime (custom sources, enrichers, AI providers,
+content providers, event discovery, commands) and a self-hosted marketplace —
+a static index, no accounts, no telemetry. The reference entry is the example
+event-discovery plugin:
+
+```bash
+# Browse the index (add a term to filter; --refresh bypasses the local cache)
+netpro plugin search
+
+# Install — checksum-verified, manifest-matched, and always disabled at first
+netpro plugin install example-event-discovery
+
+# Review the printed permissions, then enable
+netpro plugin enable example-event-discovery --i-have-reviewed-permissions
+
+# Later: monotonic updates (downgrades refused unless --force)
+netpro plugin update example-event-discovery
+```
+
+Prefer the web UI? `/settings/plugins` (admin) has the same flow: browse the
+marketplace, install, review the permissions dialog, enable. Plugin secrets
+live in the encrypted vault (`/settings/keys`) as `plugin.<name>.<key>`. To
+self-host the index or publish your own plugin, see
+**[deployment.md](deployment.md#plugin-marketplace-v30-phase-6)** and
+`marketplace/README.md`.
+
 ## Database migrations
 
 Migrations are applied automatically the first time the CLI or web server

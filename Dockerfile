@@ -109,6 +109,12 @@ COPY --from=builder /app/node_modules/pg ./node_modules/pg
 # Next.js's standalone output already places the workspace packages (and the
 # committed migration SQL) at /app/packages/db, which is one of the resolver's
 # candidate paths, so no extra copy of the migrations is needed here.
+# v3.0 Phase 6: the plugin runtime discovers ./plugins relative to the
+# workdir, so a self-hosted container ships the reference plugin and the
+# marketplace index it installs from. (On a read-only filesystem, point
+# NETPRO_PLUGIN_DIR at a writable volume for web installs.)
+COPY --from=builder /app/plugins ./plugins
+COPY --from=builder /app/marketplace ./marketplace
 
 USER netpro
 EXPOSE 3000

@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "updated_at": "2026-09-10T07:30:00.000Z",
+  "plugins": [
+    {
+      "name": "example-event-discovery",
+      "version": "1.0.0",
+      "description": "Example event discovery plugin — offline, minimal, exercises every capability of the plugin contract. Uses one network host (api.example.com) as a placeholder, a setting, and registers a command.",
+      "homepage": "https://github.com/NiravRVaghasiya/NetPro",
+      "source": {
+        "type": "tarball",
+        "url": "tarballs/example-event-discovery-1.0.0.tgz",
+        "sha256": "4c364932f02498d1f7c76313579b7b17efcb784e3ea0c99648059f6a46d977ea"
+      },
+      "manifest": {
+        "permissions": {
+          "network": ["api.example.com"],
+          "capabilities": ["event-discovery", "command"]
+        }
+      }
+    }
+  ]
+}

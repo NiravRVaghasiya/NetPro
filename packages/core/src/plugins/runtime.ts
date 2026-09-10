@@ -1,7 +1,7 @@
 // packages/core/src/plugins/runtime.ts
 // Plugin loader, registry, fetch wrapper, capability registry.
 
-import { promises as fs } from 'node:fs';
+import { promises as fs, existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { SqliteConn, PgConn } from '@netpro/db';
@@ -18,7 +18,7 @@ import type { EventDiscoveryProvider } from '../events/providers';
 
 type Conn = SqliteConn | PgConn;
 
-const CURRENT_ENGINE_VERSION = '3.0.0'; // matches package version for engine check
+export const CURRENT_ENGINE_VERSION = '3.0.0'; // matches package version for engine check
 
 // In-memory capability registries per workspace
 interface WorkspaceRegistry {
@@ -196,8 +196,17 @@ export function createPluginApi(
 export function getPluginDirs(): string[] {
   const envDir = process.env.NETPRO_PLUGIN_DIR?.trim();
   if (envDir) return [envDir];
-  // default: ./plugins relative to cwd, plus ./plugins in repo root if exists
-  return [path.resolve(/* turbopackIgnore: true */ process.cwd(), 'plugins')];
+  // Default: ./plugins relative to cwd. When the web server or CLI runs from
+  // a workspace directory (apps/web, apps/cli), the repo-root ./plugins two
+  // levels up is also a load root if it exists — so a marketplace install and
+  // a plain checkout resolve to the same files. Production deployments should
+  // set NETPRO_PLUGIN_DIR explicitly (see docs/deployment.md).
+  const dirs = [path.resolve(/* turbopackIgnore: true */ process.cwd(), 'plugins')];
+  const repoRootPlugins = path.resolve(/* turbopackIgnore: true */ process.cwd(), '..', '..', 'plugins');
+  if (repoRootPlugins !== dirs[0] && existsSync(repoRootPlugins)) {
+    dirs.push(repoRootPlugins);
+  }
+  return dirs;
 }
 
 export interface LoadedPlugin {

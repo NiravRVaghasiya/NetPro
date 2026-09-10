@@ -3,3 +3,5 @@ export * from './types';
 export * from './manifest';
 export * from './repository';
 export * from './runtime';
+export * from './tarball';
+export * from './marketplace';
