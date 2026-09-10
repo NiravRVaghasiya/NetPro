@@ -35,6 +35,12 @@ import {
 
 const { auth } = NextAuth(authConfig);
 const PROTECTED_ROUTES = [
+  // Phase 9 — local-first observatory (primary navigation)
+  "/observatory",
+  "/network",
+  "/people",
+  "/activity",
+  // Legacy routes — remain protected until Phase 24 removes them
   "/dashboard",
   "/search",
   "/outreach",
