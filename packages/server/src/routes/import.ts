@@ -1,6 +1,7 @@
 // packages/server/src/routes/import.ts
 //
 // POST /api/import
+// POST /api/import/preview
 // GET  /api/import/:id
 //
 // The Web UI trigger for `runImport` (the same CSV pipeline the CLI uses).
@@ -10,11 +11,15 @@
 // job.metadata.result so GET /api/import/:id (alias: GET /api/jobs/:id) can
 // retrieve it later.
 //
+// Phase 15 — `POST /api/import/preview` runs core's `previewImport` (parse +
+// validate, no database writes) so the Web UI's Upload → Preview → Validate →
+// Import flow shares the exact validation the real import performs.
+//
 // There is exactly one import implementation: @netpro/core/src/import.
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { SqliteConn, PgConn } from '@netpro/db';
-import { runImport } from '@netpro/core/src/import';
+import { runImport, previewImport } from '@netpro/core/src/import';
 import { sendJson, readBody } from '../middleware/json';
 import type { JobRegistry } from '../jobs/index';
 import type { EventBus } from '../events/index';
@@ -60,7 +65,7 @@ async function extractCsv(req: IncomingMessage): Promise<string> {
         if (c.length > 0) return c;
       }
     }
-    throw Object.assign(new Error('A CSV file is required (multipart part named \"file\").'), { status: 400 });
+    throw Object.assign(new Error('A CSV file is required (multipart part named "file").'), { status: 400 });
   }
 
   // text/csv, text/plain, or no content-type — treat body as raw CSV.
@@ -179,6 +184,39 @@ export async function handleImportPost(
   }
 }
 
+/**
+ * Phase 15 — the "Preview / Validate" steps of the Web UI import flow.
+ *
+ * Runs `previewImport` (parse + validate, never writes) so the browser can
+ * show the user exactly what will be imported and which rows will be skipped
+ * before POSTing the CSV to `/api/import`. The preview path shares the same
+ * core validation as the import, so a row the preview flags is a row the
+ * import will skip.
+ */
+export async function handleImportPreviewPost(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _deps: ImportDeps
+): Promise<void> {
+  let csv: string;
+  try {
+    csv = await extractCsv(req);
+  } catch (error) {
+    const status = (error as { status?: number })?.status ?? 400;
+    const message = error instanceof Error ? error.message : String(error);
+    sendJson(res, status, { error: message });
+    return;
+  }
+
+  try {
+    const preview = previewImport(csv);
+    sendJson(res, 200, { preview });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    sendJson(res, 400, { error: message });
+  }
+}
+
 export async function handleImportGet(
   req: IncomingMessage,
   res: ServerResponse,
@@ -192,11 +230,11 @@ export async function handleImportGet(
   }
   const job = deps.jobs.get(id);
   if (!job) {
-    sendJson(res, 404, { error: `No import job with id \"${id}\".`, code: 'not_found' });
+    sendJson(res, 404, { error: `No import job with id "${id}".`, code: 'not_found' });
     return;
   }
   if (job.type !== 'import') {
-    sendJson(res, 404, { error: `Job \"${id}\" is not an import.`, code: 'not_found' });
+    sendJson(res, 404, { error: `Job "${id}" is not an import.`, code: 'not_found' });
     return;
   }
   sendJson(res, 200, { job });

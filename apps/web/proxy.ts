@@ -40,6 +40,7 @@ const PROTECTED_ROUTES = [
   "/network",
   "/people",
   "/activity",
+  "/scan",
   // Legacy routes — remain protected until Phase 24 removes them
   "/dashboard",
   "/search",

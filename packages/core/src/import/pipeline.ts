@@ -2,15 +2,8 @@ import { randomUUID } from "node:crypto";
 import { eq, and } from "drizzle-orm";
 import type { SqliteConn, PgConn } from "@netpro/db";
 import { parseLinkedInCSV } from "./linkedin-csv";
-import {
-  normalizeName,
-  normalizeCompany,
-  normalizeTitle,
-  parseLinkedInDate,
-  generateFingerprint,
-  mergeContacts,
-  type NormalizedContact,
-} from "./normalize";
+import { analyzeImportRow } from "./preview";
+import { mergeContacts, type NormalizedContact } from "./normalize";
 import {
   resolveScope,
   workspacePredicate,
@@ -52,40 +45,21 @@ export async function runImport(
 
   for (const [index, raw] of rawContacts.entries()) {
     const row = index + 2; // +1 for 0-index, +1 for the header row
+    const analyzed = analyzeImportRow(raw, row);
+    if (!analyzed.ok) {
+      errors.push({ row, reason: analyzed.reason });
+      continue;
+    }
+
+    const normalized = analyzed.contact;
+    const connectionDate = analyzed.connectionDate;
+
     try {
-      const { firstName, lastName, fullName } = normalizeName(raw);
-      if (!fullName) {
-        errors.push({ row, reason: "missing name" });
-        continue;
-      }
-
-      const { company } = normalizeCompany(raw.company);
-      const { role, seniority } = normalizeTitle(raw.position);
-      const fingerprint = generateFingerprint({
-        email: raw.email,
-        fullName,
-        company,
-      });
-
-      const normalized: NormalizedContact = {
-        fullName,
-        firstName,
-        lastName,
-        email: raw.email,
-        company,
-        role,
-        seniority,
-        location: raw.location,
-        fingerprint,
-      };
-
       const existing = await findExistingContact(conn, normalized, scope);
 
       // The "Connected On" date is when the relationship started — the only
       // truthful growth timeline and the contact's initial lastInteraction
       // (see the Phase 3 analytics spec). Undefined falls back to import time.
-      const connectionDate = parseLinkedInDate(raw.connectedOn);
-
       if (existing) {
         const mergedContact = mergeContacts(
           {
@@ -95,7 +69,7 @@ export async function runImport(
             company: existing.company ?? undefined,
             role: existing.role ?? undefined,
             location: existing.location ?? undefined,
-            fingerprint,
+            fingerprint: normalized.fingerprint,
           },
           normalized,
         );
