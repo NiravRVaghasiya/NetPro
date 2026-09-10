@@ -25,10 +25,11 @@ import { dirname, resolve } from 'node:path';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 process.chdir(repoRoot);
 
-function run(command, args, extraEnv = {}) {
+function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     stdio: 'inherit',
-    env: { ...process.env, ...extraEnv },
+    env: { ...process.env, ...(options.env || {}) },
+    cwd: options.cwd || process.cwd(),
     shell: false,
   });
   if (result.error) throw result.error;
@@ -48,11 +49,12 @@ if (dialect === 'postgresql' && !hasDatabase) {
   console.log('[vercel-build] Applying database migrations...');
   // Build the CLI first: `netpro migrate` is the same code path operators run
   // locally and in Docker, so the deploy step cannot drift from it.
-  const built = run('npm', ['run', 'build', '-w', '@netpro/cli']);
+  // Use npx to ensure the binary is found regardless of PATH setup.
+  const built = run('npx', ['tsup'], { cwd: 'apps/cli' });
   if (built !== 0) process.exit(built);
 
   const migrated = run('node', ['apps/cli/dist/index.js', 'migrate'], {
-    DB_DIALECT: dialect,
+    env: { DB_DIALECT: dialect },
   });
   if (migrated !== 0) {
     console.error('[vercel-build] Migration failed — aborting the deployment.');
