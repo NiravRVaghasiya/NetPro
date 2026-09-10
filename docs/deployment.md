@@ -626,3 +626,61 @@ a persistent volume for self-hosted Docker.
 `plugin.updated`, `plugin.update_failed`, `plugin.update_refused`,
 `plugin.removed` (with `filesRemoved`) — all in `activity_log`, filterable in
 `/settings/activity`.
+
+## Outbound webhooks (v3.0 Phase 7)
+
+Outbound only: NetPro signs and POSTs events to endpoints **you** register —
+there is no inbound ingestion. Admins manage endpoints in `/settings/webhooks`
+or with `netpro webhook`; concepts, receiver recipes and signature-verification
+examples live in [webhooks.md](webhooks.md).
+
+| Knob | Default | Meaning |
+|---|---|---|
+| `NETPRO_WEBHOOK_DELIVERY_RETENTION_DAYS` | `30` | Delivery-log rows older than this are purged by the daily retention job. Garbage values fall back to the default. |
+| `NETPRO_DISABLE_RETENTION` | unset | `true` stops the daily job entirely — raw views, content snapshots **and** webhook deliveries. |
+
+**Delivery contract:** `POST` with `content-type: application/json`,
+`user-agent: NetPro-Webhooks/3.0`, `X-NetPro-Signature: t=<unix>,v1=<hex
+HMAC-SHA256 over "<t>.<body>">`, `X-NetPro-Event: <event>` and
+`X-NetPro-Delivery: <id>`. The body is
+`{ schema: 1, event, workspace_id, actor, timestamp, data }`, rejected at emit
+time above 256 KB. 10 s timeout; anything that is not a 2xx is recorded with
+its status code and error.
+
+**Retries are on demand, not scheduled.** `emitWebhookEvent` attempts each
+matching endpoint immediately, and a failure leaves the delivery `pending`
+until `attempt` reaches `max_attempts` (8), after which it stays `failed`.
+`netpro webhook retry` then drains the backlog — oldest first, at most 50 per
+run — and `netpro webhook redeliver <deliveryId>` re-sends one by hand.
+Nothing polls on its own, so a serverless deployment that receives no traffic
+will not drain the queue: schedule the CLI (cron, CI) or redeliver from
+`/settings/webhooks`.
+
+**Egress is your responsibility.** `createWebhook` refuses non-http(s) URLs,
+URLs carrying credentials and URLs over 2048 characters. The private-network
+check (`localhost`, `127.0.0.1`, `::1`, `10.*`, `192.168.*`, `172.16–31.*`,
+`0.0.0.0`, `*.local`, `*.internal`) is a **CLI warning** over the hostname
+only — it never resolves DNS, and the web API does not enforce it. An admin
+can therefore register an internal target, so confine egress at the network
+layer (reverse proxy / firewall) if that matters to you.
+
+```bash
+netpro webhook events                        # the 18 events + receiver recipes
+netpro webhook add https://hooks.example.com/netpro --events contact.created,followup.created
+netpro webhook list
+netpro webhook test <webhookId> --event contact.created   # a real signed POST
+netpro webhook deliveries <webhookId> --limit 20
+netpro webhook retry                         # drain the pending backlog
+netpro webhook redeliver <deliveryId>
+netpro webhook rotate <webhookId>            # new secret, printed once
+netpro webhook disable <webhookId>           # enable <id> to resume
+netpro webhook rm <webhookId>
+```
+
+There is no CLI `update`: change the URL or event allowlist from
+`/settings/webhooks` (or `PATCH /api/webhooks/[id]`).
+
+**Audit events:** `webhook.created`, `webhook.updated`,
+`webhook.secret_rotated`, `webhook.deleted`, `webhook.event_emitted`,
+`webhook.redelivered` — all in `activity_log`, filterable in
+`/settings/activity`.

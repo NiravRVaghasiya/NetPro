@@ -7,7 +7,7 @@ the product milestones in the [README](README.md)
 
 ## [3.0.0] - 2026-09-10 — v3.0 "The Platform" (Phases 0–8)
 
-NetPro becomes a true platform: workspaces, team collaboration, encrypted vault, plugins, marketplace, and outbound webhooks — all workspace-scoped, audited, and privacy-preserving. Every phase ships with migrations, core, CLI, web, and adversarial tests; CI now runs lint, typecheck, 1650+ tests, build, live Postgres, and Docker smoke.
+NetPro becomes a true platform: workspaces, team collaboration, encrypted vault, plugins, marketplace, and outbound webhooks — all workspace-scoped, audited, and privacy-preserving. Every phase ships with migrations, core, CLI, web, and adversarial tests; CI now runs lint, typecheck, 1698 tests, build, live Postgres, and Docker smoke.
 
 ### Added — Phase 6 (complete): self-hosted marketplace
 
@@ -82,9 +82,9 @@ NetPro becomes a true platform: workspaces, team collaboration, encrypted vault,
 ### Added — Phase 7 (complete): outbound webhooks
 
 - Migration `0014_webhooks` (both dialects): `webhooks` (id, workspace_id FK cascade, url, secret, event_allowlist JSON, status, created_at, updated_at) and `webhook_deliveries` (id, webhook_id FK cascade, event, payload, status pending|delivered|failed, received_at, response_code, error_message, attempt, max_attempts, created_at, updated_at) with indexes `idx_webhooks_workspace`, `idx_webhooks_status`, `idx_webhook_deliveries_webhook|status|attempt`. Fixed journal missing entry and `//` comment + missing `--> statement-breakpoint` delimiters.
-- Core `webhooks.ts`: event catalog (17 events), HMAC-SHA256 `signWebhookPayload` (`t=<unix>,v1=<hmac>`) and `verifyWebhookSignature` with 5min tolerance, `validateWebhookUrl`, `isPrivateNetworkUrl`, `getRetryDelayMs` (60s base, doubling, max 32min), CRUD `list|get|create|update|delete|rotateWebhookSecret`, delivery `listWebhookDeliveries|getWebhookDelivery|attemptDelivery` (10s timeout, headers `X-NetPro-Signature|Event|Delivery`), `emitWebhookEvent` (envelope `{ schema:1, event, workspace_id, actor, timestamp, data }`, 256KB cap, matches allowlist, attempts immediately), `retryPendingDeliveries` (raw join, 50 limit, increments attempt), `redeliverWebhookDelivery`, `purgeExpiredWebhookDeliveries` (30d), `WEBHOOK_RECEIVER_RECIPES` (zapier/n8n/make/node verification example lint-safe, no escaped quotes).
+- Core `webhooks.ts`: event catalog (18 events), HMAC-SHA256 `signWebhookPayload` (`t=<unix>,v1=<hmac>`) and `verifyWebhookSignature` with 5min tolerance, `validateWebhookUrl`, `isPrivateNetworkUrl`, `getRetryDelayMs` (60s base, doubling, max 32min), CRUD `list|get|create|update|delete|rotateWebhookSecret`, delivery `listWebhookDeliveries|getWebhookDelivery|attemptDelivery` (10s timeout, headers `X-NetPro-Signature|Event|Delivery`), `emitWebhookEvent` (envelope `{ schema:1, event, workspace_id, actor, timestamp, data }`, 256KB cap, matches allowlist, attempts immediately), `retryPendingDeliveries` (raw join, 50 limit, increments attempt), `redeliverWebhookDelivery`, `purgeExpiredWebhookDeliveries` (30d), `WEBHOOK_RECEIVER_RECIPES` (zapier/n8n/make/node verification example lint-safe, no escaped quotes).
 - Retention extended: `webhookDeliveriesDeleted` count, env `NETPRO_WEBHOOK_DELIVERY_RETENTION_DAYS` default 30, `apps/web/lib/retention.ts` and `packages/core/src/retention.ts` compose third purge.
-- CLI: `netpro webhook` (21st command) — `list`, `add --url --events`, `show`, `update --url --events --status`, `rotate`, `test --event`, `deliveries --limit`, `redeliver`, `rm`, `events` (catalog + recipes). Tests updated for 21 commands and version 3.0.0.
+- CLI: `netpro webhook` (21st top-level command) — `list`, `events` (catalog + recipes), `add <url> --events [--status]`, `enable <id>`, `disable <id>`, `rotate <id>`, `deliveries <webhookId> --limit`, `test <webhookId> --event`, `redeliver <deliveryId>`, `retry`, `rm <id>`. Tests updated for 21 commands and version 3.0.0.
 - Web: admin-only `/settings/webhooks` page (client.tsx) with list masked, create, status toggle, rotate (secret once), test, deliveries table, redeliver, delete; APIs `GET/POST /api/webhooks`, `GET/PATCH/DELETE /api/webhooks/[id]`, `POST /[id]/rotate|test`, `GET /[id]/deliveries`, `POST /deliveries/[deliveryId]/redeliver`, `GET /events` (events + recipes). Fixed Next.js 15 `params: Promise<...>` typing and added missing exports `testWebhook` and `redeliverWebhook` alias.
 - Docs: `docs/webhooks.md` — concepts, security, CLI, web, receiver recipes, retention & audit, migration, future.
 - Tests: migration test for `0014` in `migrations.test.ts` (tables, columns, indexes, insert, idempotent), plus existing webhook unit tests.
@@ -92,7 +92,7 @@ NetPro becomes a true platform: workspaces, team collaboration, encrypted vault,
 ### Added — Phase 8 (complete): polish, docs & release cut
 
 - Docs: `docs/webhooks.md`, README badge `v3.0.0`, README v3.0 Platform paragraph, `docs/deployment.md` webhook env table (already in Phase 7), `docs/getting-started.md` webhook cookbook (in docs/webhooks.md).
-- Version bump `2.5.0` → `3.0.0` across every workspace, internal ranges, lockfile, CLI, and tests — `turbo run lint` 8/8, `typecheck` 8/8, `test` 8/8 (1653 tests), `build` 4/4 (web + cli + db + core).
+- Version bump `2.5.0` → `3.0.0` across every workspace, internal ranges, lockfile, CLI, and tests — `turbo run lint` 6/6, `typecheck` 6/6, `test` 6/6 (1698 passing), `build` 4/4 (web + cli + db + core).
 - Fixed `apps/web/app/api/webhooks` Next.js 15 typing (`params: Promise`) and `preserve-caught-error` lint (`throw new Error(msg, { cause:e })`), removed `WEBHOOK_EVENTS` unused import, added `eslint-disable any` headers.
 - Fixed `packages/db/migrations/*/0014_webhooks.sql` comment style `//` → `--` and added `--> statement-breakpoint` delimiters; added missing journal entries for both dialects.
 
@@ -169,7 +169,73 @@ NetPro becomes a true platform: workspaces, team collaboration, encrypted vault,
 - Dual-dialect migration `0009_key_vault`, partial unique indexes for nullable
   workspace principals, and adversarial SQLite/API + live-Postgres CI coverage.
 - Phase 4 follows Phase 1 as the roadmap's independent prerequisite for
-  plugins. Phase 2's global tenancy work and the v3.0 release remain pending.
+  plugins, and Phase 2's global tenancy work shipped in this same release.
+
+### Release — the `v3.0.0` cut, 2026-09-10
+
+- Tagged `v3.0.0` at `502b4ca` (the merge of PR #44, `master`'s tip) and
+  published the GitHub release. CI on that exact commit is green in all four
+  jobs: Lint/Typecheck/Test/Build on Node 20 **and** Node 22, PostgreSQL
+  integration (live-server migrations applied twice, vault, hybrid search,
+  events, content, view-beacon ingest and the 5k-contact performance pass),
+  and the Docker image build with its production smoke test.
+- Re-ran the whole gate locally on the release commit: `lint` 6/6,
+  `typecheck` 6/6, `test` 6/6 — **1698 tests passing** (cli 301, core 925,
+  web 427, db 45), with the 57 live-PostgreSQL-only tests skipped locally and
+  exercised in CI — and `build` 4/4. `netpro --version` prints `3.0.0`, and
+  `netpro --help` lists 21 top-level commands including the v3.0 `team`,
+  `plugin` and `webhook`.
+- Marketplace integrity re-checked at the cut: the shipped tarball's sha256
+  matches `marketplace/index.json`
+  (`4c364932…6977ea`), and the reference plugin installs → updates →
+  enables → lists from that index over the built CLI.
+- Docs corrected with the cut, every item re-checked against the code rather
+  than against earlier notes:
+  - The README still carried v2.5's counts (1546 tests / 56 PostgreSQL) and
+    stopped its release narrative at v2.5, so the phase-by-phase v3.0 list and
+    a v3.0 **Deferred** list were added and the counts set to 1698 / 57.
+  - `docs/deployment.md` had **no** webhook documentation at all, despite the
+    Phase 8 entry above claiming a webhook env table was already there. Added
+    an "Outbound webhooks (v3.0 Phase 7)" section (env knobs, delivery
+    contract, on-demand retries, egress posture, CLI recipes, audit events).
+  - Both `.env.example` files gained `NETPRO_WEBHOOK_DELIVERY_RETENTION_DAYS`;
+    `apps/web/.env.example` was also missing the entire retention block and
+    `ENCRYPTION_MASTER_KEY` (Phase 4) — the two knobs this process is the one
+    that reads.
+  - The webhook event catalog is **18** events, not the 17 recorded in the
+    Phase 7 entry above.
+  - The Phase 7 CLI list above named `show` and `update` subcommands that do
+    not exist and an `add --url` flag that is really a positional `<url>`;
+    corrected against `netpro webhook --help` (11 subcommands: `list`,
+    `events`, `add`, `rm`, `enable`, `disable`, `rotate`, `deliveries`,
+    `test`, `redeliver`, `retry`). URL/event edits are web/API-only
+    (`PATCH /api/webhooks/[id]`).
+  - Private-network webhook targets are **warned** about by the CLI, not
+    refused by `createWebhook` — the Phase 7 entry's `isPrivateNetworkUrl`
+    reference is a warning path, and README/deployment.md now say so.
+  - The stale "Phase 2 … remain pending" note in the Phase 4 entry was closed
+    out.
+
+### Deferred — v3.0 deliberately does not ship
+
+- **No plugin sandbox.** A plugin runs in-process with the server's Node
+  privileges. The manifest's network allowlist, the workspace-scoped data
+  boundary and the human permissions-review gate are mitigations, not a
+  container — which is exactly why installs land disabled and the first
+  enable requires an explicit review.
+- **No curated store.** The marketplace is a static, checksummed index
+  (`schema: 1`). NetPro verifies what it downloads; it does not vouch for it.
+  Nothing auto-installs or auto-updates.
+- **No background delivery worker.** Webhooks are attempted when the event is
+  emitted; pending/failed deliveries are retried on demand
+  (`netpro webhook retry`, `redeliver`) rather than by a queue or cron.
+- **Private-network webhook targets are warned about, not blocked.**
+  `isPrivateNetworkUrl` is a hostname-pattern check surfaced as a CLI
+  warning; `createWebhook` validates scheme, embedded credentials and length
+  only, so an admin can still register an internal URL and egress policy
+  remains the operator's (reverse proxy / firewall).
+- **No inbound webhooks** — outbound only, and no SMTP: campaigns still
+  draft, a human still sends.
 
 ## [2.5.0] - 2026-09-09 — v2.5 (The Observer)
 

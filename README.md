@@ -98,14 +98,15 @@
 > See [owner authentication setup](docs/getting-started.md#configure-owner-sign-in).
 
 The full monorepo (CLI + web, dual-dialect Drizzle database, GitHub OAuth via
-Auth.js) builds, lints, typechecks, and tests successfully — **1546 tests**,
-plus 56 more in live PostgreSQL suites that run in CI against a real database
+Auth.js) builds, lints, typechecks, and tests successfully — **1698 tests**,
+plus 57 more in live PostgreSQL suites that run in CI against a real database
 (including a performance pass at 5k contacts / 20k edges / 10k views / 1k
 content items, and the view-beacon ingest suite). **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
 reminders, and batch campaigns are implemented, and per-contact relationship
 scoring now has a producer (interaction logging). **v2.0 — "The Strategist" is
-complete** — shipped as `v2.0.0` on 2026-09-08 — **and
-v2.5 — "The Observer" is complete**, shipped as `v2.5.0` on 2026-09-09:
+complete** — shipped as `v2.0.0` on 2026-09-08 — **v2.5 — "The Observer" is
+complete**, shipped as `v2.5.0` on 2026-09-09 — **and v3.0 — "The Platform" is
+complete**, shipped as `v3.0.0` on 2026-09-10:
 
 - **Phase 1 — Edge provenance (shipped):** `edges` gained `source`,
   `confidence`, `status` + indexes, plus `netpro edge`, CSV mutuals as
@@ -244,12 +245,94 @@ v2.5 — "The Observer" is complete**, shipped as `v2.5.0` on 2026-09-09:
   the analytics/content routes answer 401, the beacons stay public,
   cookieless, and `no-store`/`nosniff`.
 
+- **v3.0 — “The Platform”: complete, shipped as `v3.0.0` on 2026-09-10.**
+  NetPro stops being a single-owner tool and becomes a workspace-scoped
+  platform. Migrations `0008`–`0014` (both dialects), four new core modules
+  (`workspaces`, the `crypto` key vault, `plugins`, `webhooks`), three new CLI
+  commands, six new web pages and 22 new API routes — and a single-owner
+  install keeps behaving exactly as it did in v2.5.
+- **Phase 1 — Workspaces & membership (shipped):** migration `0008` adds
+  `workspaces`, `workspace_members` and `workspace_invites`, plus a
+  `workspace_id` column (and index) on every data table, seeded with a
+  `default` bootstrap workspace. The role matrix is owner > admin > member >
+  viewer, with a break-glass owner that cannot be removed or demoted and a
+  last-owner guard. Surfaced as `netpro team`
+  (`list`/`members`/`invite`/`accept`/`remove`/`role`/`revoke`) and the
+  admin-only `/settings/team`.
+- **Phase 2 — Workspace-scoped engine (shipped):** every core query now
+  carries an explicit `workspace_id` predicate through
+  `bootstrapScope`/`resolveScope`/`workspacePredicate` — CRM, analytics,
+  hybrid search, views/beacon, content, graph edges, events, campaigns,
+  skills, enrichment, import/export and the retention purge. Authorship
+  (`created_by_user`, migration `0010`) stamps who logged an interaction or
+  raised a follow-up, and `0011` backfills any NULL scope into the bootstrap
+  workspace and attaches a DB-level `DEFAULT` on Postgres. Every web API
+  route and page derives its scope from the session (`requireScope()`), every
+  CLI command accepts `--workspace`, and a cross-tenant scope-guard suite
+  asserts no workspace can read another's rows.
+- **Phase 3 — Team collaboration (shipped):** follow-ups became assignable
+  (migration `0012`) with assign/unassign audit trails, removal of a member
+  unassigning their pending follow-ups, an owner-transfer flow, and an
+  audit viewer — `listActivityLog` behind `/settings/activity` and
+  `GET /api/activity`, filterable by action, entity, member and date. The
+  dashboard and contacts list gained “Assigned to me” / “Unassigned” views.
+- **Phase 4 — Encrypted web key vault (shipped):** migration `0009` plus
+  `/settings/keys` store personal and workspace provider credentials
+  encrypted at rest with AES-256-GCM and principal/slot-bound key
+  derivation. The management API answers masked-only, bodies are bounded,
+  writes have member/admin floors, and a read-only env fallback works with no
+  master key. Outreach, AI skills, enrichment and semantic search now read
+  the vault first; the CLI keychain is unchanged.
+- **Phase 5 — Plugin runtime & manifest (shipped):** migration `0013` plus
+  `packages/core/src/plugins` — strict manifest validation (npm-style names,
+  semver, engine ranges, capability allowlist, exact-host network allowlist),
+  an ESM loader that refuses incompatible engines, a per-workspace registry of
+  enrichers / AI providers / content providers / event discovery / commands,
+  and a `fetch` wrapper that blocks any host the manifest did not declare
+  (each block audited). A crashing plugin is isolated, logged and disabled —
+  it never takes the app down. Plugins install **disabled** and need an
+  explicit `--i-have-reviewed-permissions` (or a reviewed checkbox in
+  `/settings/plugins`) before they run. `netpro plugin`
+  (`list`/`paths`/`discover`/`info`/`install`/`enable`/`disable`/`rm`/
+  `settings`) and a reference plugin ship in-tree.
+- **Phase 6 — Self-hosted marketplace (shipped):** `marketplace/index.json`
+  (schema 1) plus a GNU-tar tarball in this repo, consumed by
+  `netpro plugin search|install|update` and `/settings/plugins`. Installs
+  fetch a static index (no telemetry, 1 h cache), verify sha256 (mismatch =
+  hard audited refusal), extract with a vendored USTAR reader that rejects
+  symlinks, absolute paths, `..` escapes, truncation and oversized archives,
+  check that the archive manifest matches the index listing exactly, and
+  register the plugin disabled behind the Phase 5 review gate. Updates are
+  install-over with version monotonicity. Point `MARKETPLACE_INDEX_URL` at
+  your own mirror to self-host; the index is checksums, not curation —
+  nothing auto-installs.
+- **Phase 7 — Outbound webhooks (shipped):** migration `0014` plus
+  `packages/core/src/webhooks` — an 18-event catalog, HMAC-SHA256 signatures
+  (`t=<unix>,v1=<hmac>`, 5-minute tolerance), URL validation (http/https
+  only, no embedded credentials, 2048-char cap) with a CLI-side
+  private-network **warning**, 10 s delivery timeout, exponential backoff
+  (60 s base, 32 min cap, 8 attempts), a delivery log with redelivery, and a
+  30-day purge folded into the daily retention job. Surfaced as
+  `netpro webhook` (`list`/`events`/`add`/`enable`/`disable`/`rotate`/
+  `deliveries`/`test`/`redeliver`/`retry`/`rm`), the admin-only
+  `/settings/webhooks`, and
+  [docs/webhooks.md](docs/webhooks.md) with receiver recipes for Zapier, n8n,
+  Make and a plain Node endpoint. Outbound only — no inbound ingestion.
+- **Phase 8 — Release readiness & the `v3.0.0` cut (shipped):** every
+  workspace moved to `3.0.0` (root, `apps/cli`, `apps/web`, `packages/*`,
+  `netpro --version`); CI runs lint, typecheck, test and build on Node 20 and
+  22, the live-PostgreSQL integration + performance jobs, a Docker image
+  build with a production smoke test, and a marketplace end-to-end pass
+  (search → install → update → enable → list against the shipped index).
+  Locally that gate is **1698 tests passing** (57 live-Postgres tests run in
+  CI) with zero lint or typecheck errors.
+
 **Deferred from v2.0 (deliberate, not forgotten):** live event discovery
 providers (the `EventDiscoveryProvider` interface ships, disabled); a native
 pgvector column + ANN index (a later optimization); AI skills extraction as a
 default (opt-in per run); real SMTP delivery for campaigns (NetPro drafts
-today, a human sends); per-user encrypted web key storage and the `$EDITOR`
-draft-review loop.
+today, a human sends); and the `$EDITOR` draft-review loop. (Per-user
+encrypted web key storage shipped in v3.0 Phase 4.)
 
 **Deferred from v2.5 (privacy by omission, on purpose):** no cross-day viewer
 tracking (daily-salted hashes, 90-day raw-row purge), no contact resolution
@@ -258,6 +341,20 @@ metric integrations beyond the disabled provider stubs (`manual` + `rss`
 ship; devto/twitter/github name the key that would enable them), and no
 cookies, third-party scripts, or off-site beacons anywhere in the observer
 features — see the CHANGELOG's v2.5 Deferred section.
+
+**Deferred from v3.0 (deliberate, not forgotten):** no plugin sandbox — a
+plugin runs in-process with the server's Node privileges, which is exactly why
+the manifest's network allowlist, the workspace data boundary and the human
+permissions-review gate stand in front of every enable; no curated plugin
+store — the marketplace is a static, checksummed index and nothing
+auto-installs or auto-updates; no background webhook delivery worker —
+deliveries are attempted when the event is emitted and pending ones are
+retried on demand (`netpro webhook retry`); private-network webhook targets
+are **warned** about in the CLI, not blocked (the pattern check is
+hostname-only and never resolves DNS), so egress policy stays with the
+operator; no inbound webhook ingestion; and
+still no SMTP — campaigns draft, a human sends. See the CHANGELOG's v3.0
+Deferred section.
 
 > **Analytics scope note:** the clustering story is **two-section** and, since
 > v2.0 Phase 3, graph-native end to end: attribute clusters (normalized
