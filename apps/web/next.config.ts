@@ -55,7 +55,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@netpro/core", "@netpro/db", "@netpro/ui"],
+  transpilePackages: ["@netpro/core", "@netpro/db"],
   reactStrictMode: true,
   // Arena's HTTPS reverse-proxy previews (development only).
   allowedDevOrigins: ["*.e2b.app"],

@@ -36,7 +36,6 @@ COPY apps/web/package.json ./apps/web/
 COPY apps/cli/package.json ./apps/cli/
 COPY packages/core/package.json ./packages/core/
 COPY packages/db/package.json ./packages/db/
-COPY packages/ui/package.json ./packages/ui/
 COPY packages/config/package.json ./packages/config/
 RUN npm ci
 

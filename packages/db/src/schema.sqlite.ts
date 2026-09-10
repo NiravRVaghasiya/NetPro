@@ -337,8 +337,7 @@ export const searchIndex = sqliteTable('search_index', {
 
   // Semantic arm (v2.0 Phase 4). The vector is stored portably as a JSON
   // array of floats so the same producer works on SQLite and Postgres; a
-  // native pgvector column + ANN index is a documented later optimization
-  // (see docs/superpowers/plans/2026-09-07-v2.0-phase4-hybrid-search-progress.md).
+  // native pgvector column + ANN index is a possible later optimization.
   embedding: text('embedding'),
   embeddingModel: text('embedding_model'),
   embeddingDim: integer('embedding_dim'),
