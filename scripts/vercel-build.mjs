@@ -49,7 +49,11 @@ if (dialect === 'postgresql' && !hasDatabase) {
   console.log('[vercel-build] Applying database migrations...');
   // Build the CLI first: `netpro migrate` is the same code path operators run
   // locally and in Docker, so the deploy step cannot drift from it.
-  const built = run('npm', ['run', 'build', '-w', '@netpro/cli']);
+  // Directly invoke tsup via node to bypass npm 11 workspace PATH issues.
+  const tsupBin = resolve(repoRoot, 'node_modules/tsup/dist/cli-default.js');
+  const built = run('node', [tsupBin], {
+    cwd: resolve(repoRoot, 'apps/cli'),
+  });
   if (built !== 0) process.exit(built);
 
   const migrated = run('node', ['apps/cli/dist/index.js', 'migrate'], {
