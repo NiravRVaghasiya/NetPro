@@ -2,16 +2,24 @@
 //
 // GET /api/contacts
 // GET /api/contacts/:id
+// POST /api/contacts
 //
 // Orchestrates @netpro/core CRM — no business logic here, only HTTP
 // plumbing (validation, pagination, error mapping).
+//
+// POST creates one person from a pasted LinkedIn profile URL (`{ linkedinUrl,
+// fullName? }` → 201 `{ status: "created", contact }`, or 200
+// `{ status: "exists", contact }` when the profile is already known — never
+// a silent duplicate). `{ linkedinUrl, dryRun: true }` validates +
+// duplicate-checks without writing, for the UI's "Checking profile…" state.
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { listCrmContacts, getContactTimeline } from '@netpro/core/src/crm';
+import { addPersonFromLinkedIn, checkLinkedInImport } from '@netpro/core/src/crm/add-person';
 import { CrmError } from '@netpro/core/src/crm';
 import { GraphError } from '@netpro/core/src/graph';
 import type { PgConn, SqliteConn } from '@netpro/db';
-import { sendJson } from '../middleware/json';
+import { sendJson, readJsonBody } from '../middleware/json';
 import type { AuthContext } from '../auth/index';
 
 export type ContactsDeps = {
@@ -83,6 +91,56 @@ export async function handleGetContact(
       return;
     }
     sendJson(res, 200, timeline);
+  } catch (error) {
+    const status = errorStatus(error);
+    const message = error instanceof Error ? error.message : String(error);
+    sendJson(res, status, { error: message, code: (error as { code?: string })?.code });
+  }
+}
+
+export async function handleCreateContact(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: ContactsDeps
+): Promise<void> {
+  let body: Record<string, unknown>;
+  try {
+    body = await readJsonBody(req);
+  } catch (error) {
+    const status = (error as { status?: number })?.status ?? 400;
+    sendJson(res, status, { error: error instanceof Error ? error.message : String(error) });
+    return;
+  }
+
+  const linkedinUrl = typeof body.linkedinUrl === 'string' ? body.linkedinUrl : '';
+  const fullName = typeof body.fullName === 'string' ? body.fullName : undefined;
+  const dryRun = body.dryRun === true;
+
+  try {
+    // Workspace scope stays implicit (bootstrap `default`), exactly like the
+    // list route — the single-install server has no session to scope from,
+    // and no request field may widen the workspace.
+    if (dryRun) {
+      const check = await checkLinkedInImport(deps.conn, linkedinUrl);
+      sendJson(res, 200, {
+        profile: {
+          username: check.profile.username,
+          normalizedUrl: check.profile.normalizedUrl,
+        },
+        exists: check.existing !== null,
+        contact: check.existing,
+      });
+      return;
+    }
+    const result = await addPersonFromLinkedIn(deps.conn, { linkedinUrl, fullName });
+    sendJson(res, result.status === 'created' ? 201 : 200, {
+      status: result.status,
+      contact: result.contact,
+      profile: {
+        username: result.profile.username,
+        normalizedUrl: result.profile.normalizedUrl,
+      },
+    });
   } catch (error) {
     const status = errorStatus(error);
     const message = error instanceof Error ? error.message : String(error);

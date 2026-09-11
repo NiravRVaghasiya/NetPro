@@ -22,6 +22,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { getServerUrl, serverFetchJson } from "@/lib/netpro-server";
 import { useNetProEvents } from "@/hooks/use-netpro-events";
+import { AddPersonForm } from "@/components/add-person-form";
 
 type ImportPreview = {
   source: string;
@@ -250,6 +251,11 @@ export default function ImportPage() {
         <div style={LABEL}>1 · Upload</div>
         {dropzone}
         {busy === "preview" ? <p style={{ color: "#6b7280", marginTop: "0.5rem" }}>Previewing…</p> : null}
+        <p style={{ color: "#6b7280", fontSize: "0.9rem", marginTop: "0.9rem" }}>
+          Adding just one person? Paste their LinkedIn profile URL instead — the same check
+          the People page uses:
+        </p>
+        <AddPersonForm defaultExpanded />
       </section>
 
       {/* Steps 2–3 — Preview + Validate */}

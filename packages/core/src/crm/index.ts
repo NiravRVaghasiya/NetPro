@@ -14,3 +14,4 @@ export * from './interactions';
 export * from './follow-ups';
 export * from './timeline';
 export * from './contacts';
+export * from './add-person';

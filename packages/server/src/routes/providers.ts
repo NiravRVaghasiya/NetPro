@@ -25,6 +25,7 @@ import type { SqliteConn, PgConn } from '@netpro/db';
 import { resolveProviderStatus } from '@netpro/core/src/providers';
 import { sendJson } from '../middleware/json';
 import type { AuthContext } from '../auth/index';
+import { vaultPresence } from './credentials';
 
 export type ProvidersDeps = {
   conn: SqliteConn | PgConn;
@@ -50,7 +51,11 @@ export async function handleProviders(
     indexError = e instanceof Error ? e.message : String(e);
   }
 
-  const status = resolveProviderStatus(process.env);
+  // Keys saved through PUT /api/credentials live in the encrypted vault —
+  // merge their (name-only) presence so the strips stay truthful. A vault
+  // read failure degrades to env-only rather than failing the snapshot.
+  const vault = await vaultPresence({ conn: deps.conn, auth: deps.auth });
+  const status = resolveProviderStatus(process.env, { vault });
 
   sendJson(res, 200, {
     // ── Legacy shape (Phase 10) — kept so Observatory/Scan keep working ──

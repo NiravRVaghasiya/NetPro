@@ -38,7 +38,7 @@ export type ProviderId =
   | "twitter"
   | "github";
 
-export type ProviderSource = "env" | "keychain" | "none";
+export type ProviderSource = "env" | "keychain" | "vault" | "none";
 
 export type CapabilityId =
   | "import"
@@ -61,6 +61,8 @@ export interface ProviderDescriptor {
   envVars: readonly string[];
   /** CLI keychain slots (`netpro config set <slot> …`). */
   keychainKeys?: readonly string[];
+  /** Encrypted server-vault slots (`@netpro/core` crypto/vault key names). */
+  vaultKeys?: readonly string[];
   /** What the provider buys you — shown next to the status dot. */
   purpose: string;
   /** Literal: every provider in NetPro is optional (Phase 17). */
@@ -78,6 +80,7 @@ export const PROVIDER_CATALOG: readonly ProviderDescriptor[] = [
     category: "ai",
     envVars: ["OPENAI_API_KEY", "NETPRO_OPENAI_KEY"],
     keychainKeys: ["ai.openai.key"],
+    vaultKeys: ["outreach.openai"],
     purpose: "AI draft generation for outreach (`netpro outreach`).",
     optional: true,
   },
@@ -87,6 +90,7 @@ export const PROVIDER_CATALOG: readonly ProviderDescriptor[] = [
     category: "ai",
     envVars: ["ANTHROPIC_API_KEY", "NETPRO_ANTHROPIC_KEY"],
     keychainKeys: ["ai.anthropic.key"],
+    vaultKeys: ["outreach.anthropic"],
     purpose: "Alternative provider for outreach draft generation.",
     optional: true,
   },
@@ -96,6 +100,7 @@ export const PROVIDER_CATALOG: readonly ProviderDescriptor[] = [
     category: "enrichment",
     envVars: ["HUNTER_API_KEY"],
     keychainKeys: ["enrichment.hunter"],
+    vaultKeys: ["enrichment.hunter"],
     purpose: "Email finding during contact enrichment.",
     optional: true,
   },
@@ -105,6 +110,7 @@ export const PROVIDER_CATALOG: readonly ProviderDescriptor[] = [
     category: "enrichment",
     envVars: ["PDL_API_KEY"],
     keychainKeys: ["enrichment.pdl"],
+    vaultKeys: ["enrichment.pdl"],
     purpose: "Profile enrichment (company, role, industry).",
     optional: true,
   },
@@ -114,6 +120,7 @@ export const PROVIDER_CATALOG: readonly ProviderDescriptor[] = [
     category: "enrichment",
     envVars: ["CLEARBIT_API_KEY"],
     keychainKeys: ["enrichment.clearbit"],
+    vaultKeys: ["enrichment.clearbit"],
     purpose: "Company and domain enrichment.",
     optional: true,
   },
@@ -123,6 +130,7 @@ export const PROVIDER_CATALOG: readonly ProviderDescriptor[] = [
     category: "embeddings",
     envVars: ["EMBEDDINGS_API_KEY", "OPENAI_API_KEY"],
     keychainKeys: ["embeddings.key"],
+    vaultKeys: ["embeddings.openai"],
     purpose: "Semantic (vector) search over contacts.",
     optional: true,
   },
@@ -132,6 +140,7 @@ export const PROVIDER_CATALOG: readonly ProviderDescriptor[] = [
     category: "content",
     envVars: ["DEVTO_API_KEY"],
     keychainKeys: ["content.devto"],
+    vaultKeys: ["content.devto"],
     purpose: "Publish and sync cross-posted content.",
     optional: true,
   },
@@ -141,6 +150,7 @@ export const PROVIDER_CATALOG: readonly ProviderDescriptor[] = [
     category: "content",
     envVars: ["TWITTER_BEARER_TOKEN"],
     keychainKeys: ["content.twitter"],
+    vaultKeys: ["content.twitter"],
     purpose: "Content metrics for cross-posted links.",
     optional: true,
   },
@@ -150,6 +160,7 @@ export const PROVIDER_CATALOG: readonly ProviderDescriptor[] = [
     category: "content",
     envVars: ["GITHUB_TOKEN"],
     keychainKeys: ["content.github"],
+    vaultKeys: ["content.github"],
     purpose: "Repository content sync and metrics.",
     optional: true,
   },
@@ -178,6 +189,7 @@ export interface ProviderState {
   source: ProviderSource;
   envVars: readonly string[];
   keychainKeys: readonly string[];
+  vaultKeys: readonly string[];
   purpose: string;
   optional: true;
 }
@@ -234,6 +246,12 @@ export interface ResolveProviderStatusOptions {
    * leaves this function.
    */
   keychain?: KeychainValues;
+  /**
+   * Encrypted vault slots → presence marker. The server lists its vault
+   * (names only, never ciphertext) and passes presence here; only presence
+   * is inspected and no value ever leaves this function.
+   */
+  vault?: KeychainValues;
   /** Injectable clock (tests). */
   now?: () => Date;
 }
@@ -253,6 +271,14 @@ function hasKeychain(keychain: KeychainValues | undefined, names: readonly strin
   });
 }
 
+function hasVault(vault: KeychainValues | undefined, names: readonly string[] | undefined): boolean {
+  if (!vault || !names) return false;
+  return names.some((name) => {
+    const value = vault[name];
+    return typeof value === "string" && value.trim().length > 0;
+  });
+}
+
 /**
  * Embeddings need two things — an enabled provider and a key. An absent
  * `EMBEDDINGS_PROVIDER` is "disabled", not "unknown" (see
@@ -261,7 +287,8 @@ function hasKeychain(keychain: KeychainValues | undefined, names: readonly strin
  */
 function resolveEmbeddingsGate(
   env: Record<string, string | undefined>,
-  keychain: KeychainValues | undefined
+  keychain: KeychainValues | undefined,
+  vault?: KeychainValues | undefined
 ): { enabled: boolean; warning: string | null } {
   const raw = env.EMBEDDINGS_PROVIDER?.trim().toLowerCase() ?? "";
   if (raw === "" || raw === "disabled" || raw === "none" || raw === "off") {
@@ -274,7 +301,9 @@ function resolveEmbeddingsGate(
     };
   }
   const hasKey =
-    hasEnv(env, ["EMBEDDINGS_API_KEY", "OPENAI_API_KEY"]) || hasKeychain(keychain, ["embeddings.key"]);
+    hasEnv(env, ["EMBEDDINGS_API_KEY", "OPENAI_API_KEY"]) ||
+    hasKeychain(keychain, ["embeddings.key"]) ||
+    hasVault(vault, ["embeddings.openai"]);
   return {
     enabled: hasKey,
     warning: hasKey
@@ -287,14 +316,16 @@ function stateFor(
   descriptor: ProviderDescriptor,
   env: Record<string, string | undefined>,
   keychain: KeychainValues | undefined,
+  vault?: KeychainValues | undefined,
   override?: { configured: boolean; source?: ProviderSource }
 ): ProviderState {
   const fromEnv = hasEnv(env, descriptor.envVars);
   const fromKeychain = hasKeychain(keychain, descriptor.keychainKeys);
-  const configured = override ? override.configured : fromEnv || fromKeychain;
+  const fromVault = hasVault(vault, descriptor.vaultKeys);
+  const configured = override ? override.configured : fromEnv || fromKeychain || fromVault;
   const source: ProviderSource = !configured
     ? "none"
-    : (override?.source ?? (fromEnv ? "env" : "keychain"));
+    : (override?.source ?? (fromEnv ? "env" : fromKeychain ? "keychain" : "vault"));
   return {
     id: descriptor.id,
     label: descriptor.label,
@@ -303,6 +334,7 @@ function stateFor(
     source,
     envVars: descriptor.envVars,
     keychainKeys: descriptor.keychainKeys ?? [],
+    vaultKeys: descriptor.vaultKeys ?? [],
     purpose: descriptor.purpose,
     optional: true,
   };
@@ -364,21 +396,24 @@ export function resolveProviderStatus(
   options: ResolveProviderStatusOptions = {}
 ): ProviderStatusSnapshot {
   const keychain = options.keychain;
+  const vault = options.vault;
   const now = options.now ?? (() => new Date());
   const warnings: string[] = [];
 
-  const embeddingsGate = resolveEmbeddingsGate(env, keychain);
+  const embeddingsGate = resolveEmbeddingsGate(env, keychain, vault);
   if (embeddingsGate.warning) warnings.push(embeddingsGate.warning);
 
   const providers: ProviderState[] = PROVIDER_CATALOG.map((descriptor) => {
     if (descriptor.category === "embeddings") {
-      const hasKey = hasEnv(env, descriptor.envVars) || hasKeychain(keychain, descriptor.keychainKeys);
-      return stateFor(descriptor, env, keychain, {
+      const fromEnv = hasEnv(env, descriptor.envVars);
+      const fromKeychain = hasKeychain(keychain, descriptor.keychainKeys);
+      const hasKey = fromEnv || fromKeychain || hasVault(vault, descriptor.vaultKeys);
+      return stateFor(descriptor, env, keychain, vault, {
         configured: embeddingsGate.enabled && hasKey,
-        source: hasKey ? (hasEnv(env, descriptor.envVars) ? "env" : "keychain") : "none",
+        source: !hasKey ? "none" : fromEnv ? "env" : fromKeychain ? "keychain" : "vault",
       });
     }
-    return stateFor(descriptor, env, keychain);
+    return stateFor(descriptor, env, keychain, vault);
   });
 
   const byCategory = (id: ProviderCategory): ProviderState[] =>
