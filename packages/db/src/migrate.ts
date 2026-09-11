@@ -38,6 +38,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
 import type { PgConn, SqliteConn } from './index';
 
@@ -77,15 +78,27 @@ export function resolveMigrationsFolder(dialect: MigrationDialect): string {
   const folderName = dialect === 'sqlite' ? 'sqlite' : 'postgres';
   const candidates: string[] = [];
 
+  // An operator can relocate migrations when packaging the CLI into a custom
+  // image or a read-only application directory. This is intentionally an
+  // explicit escape hatch rather than another platform-specific assumption.
+  const configured = process.env.NETPRO_MIGRATIONS_DIR?.trim();
+  if (configured) candidates.push(configured);
+
   try {
     candidates.push(dirname(localRequire.resolve('@netpro/db/package.json')));
   } catch {
-    // Not resolvable from this bundle context — fall through to cwd-based paths.
+    // Not resolvable from this bundle context — fall through to cwd/package
+    // candidates below. The published root package does not contain a private
+    // @netpro/db dependency because the CLI is bundled.
   }
+
   // This file's own package directory, for bundlers that rewrite specs but
-  // keep import.meta.url meaningful.
+  // keep import.meta.url meaningful. The extra ancestors cover the published
+  // root package layout: apps/cli/dist/index.js alongside packages/db.
   try {
-    candidates.push(resolve(dirname(new URL(import.meta.url).pathname), '..'));
+    const moduleDir = dirname(fileURLToPath(import.meta.url));
+    candidates.push(resolve(moduleDir, '..'));
+    candidates.push(resolve(moduleDir, '..', '..', '..'));
   } catch {
     // import.meta.url is not a file URL — skip.
   }

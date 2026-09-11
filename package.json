@@ -1,9 +1,26 @@
 {
   "name": "netpro",
-  "private": true,
+  "private": false,
   "version": "3.0.0",
-  "description": "NetPro — open source LinkedIn Premium alternative",
+  "type": "module",
+  "description": "NetPro — your private, local-first professional network",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "apps/cli/dist/**",
+    "packages/db/migrations/**",
+    "docs/getting-started.md",
+    "docs/local-first.md",
+    "docs/phase-18-packaging.md",
+    "docs/phase-19-docker.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "netpro": "./apps/cli/dist/index.js"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -25,11 +42,14 @@
     "test:pg": "vitest run --project @netpro/db",
     "format": "prettier --write \"**/*.{ts,tsx,md,json}\" --ignore-path .gitignore",
     "format:check": "prettier --check \"**/*.{ts,tsx,md,json}\" --ignore-path .gitignore",
+    "package:check": "node scripts/check-package.mjs",
+    "prepack": "npm run build -w apps/cli && npm run package:check",
     "db:migrate": "npm run build -w @netpro/cli && node apps/cli/dist/index.js migrate",
     "db:migrate:status": "node apps/cli/dist/index.js migrate --status"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1"
+    "better-sqlite3": "^12.11.1",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
