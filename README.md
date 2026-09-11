@@ -256,7 +256,7 @@ server.
 
 ```bash
 # Install the CLI from the release bundle
-npm install -g https://github.com/NiravRVaghasiya/NetPro/releases/download/v3.0.0/netpro-3.0.0.tgz
+npm install -g https://github.com/NiravRVaghasiya/NetPro/releases/download/v3.0.1/netpro-3.0.1.tgz
 
 netpro init       # creates ~/.netpro: config.toml, SQLite db, logs, keys
 netpro serve      # runs the API + built-in console at http://127.0.0.1:3777
@@ -267,6 +267,13 @@ netpro status     # install · database · identity · server health · provider
 > distributed as the checksummed tarball attached to each
 > [release](https://github.com/NiravRVaghasiya/NetPro/releases/latest) rather than
 > from the npm registry. See [`docs/releasing.md`](docs/releasing.md).
+>
+> `netpro` "not recognized" right after a successful install is a `PATH`
+> question, not an install failure — npm's global prefix has to be on `PATH`.
+> [When `netpro` is not
+> recognized](docs/getting-started.md#when-netpro-is-not-recognized-after-installing)
+> covers that, plus the bare `npm install -g` that silently installs the current
+> directory.
 
 Then, from another terminal — the first five minutes that matter:
 
@@ -503,10 +510,13 @@ secrets: provider keys belong in the environment, the CLI keychain
 
 ## Project status
 
-**v3.0.0 — "The Platform"** (2026-09-11) is the first tagged
-[release](https://github.com/NiravRVaghasiya/NetPro/releases/tag/v3.0.0), built in
-public through a phased roadmap (v1.0 import/search/analytics/AI drafts → v1.5 CRM
-and campaigns → v2.0 graph engine, pathfinder, hybrid search, skills, events →
+**v3.0.1 — "The Platform"** (2026-09-11) is the current
+[release](https://github.com/NiravRVaghasiya/NetPro/releases/tag/v3.0.1): the
+first tagged cut of the platform, re-issued as a patch because the v3.0.0 asset
+installed but could not run `netpro init` (what happened, and what the gate now
+proves instead: [v3.0.1 notes](docs/releases/v3.0.1.md)). The platform was built
+in public through a phased roadmap (v1.0 import/search/analytics/AI drafts → v1.5
+CRM and campaigns → v2.0 graph engine, pathfinder, hybrid search, skills, events →
 v2.5 privacy-first profile views and content tracking → v3.0 workspaces, key vault,
 plugins, marketplace, webhooks, retention).
 

@@ -26,6 +26,7 @@ import {
 import { sendJson, readJsonBody } from '../middleware/json';
 import type { AuthPolicy } from '../auth/index';
 import type { ServerConfig } from '../config';
+import { SERVER_VERSION } from '../version';
 
 export type SettingsDeps = {
   conn: SqliteConn | PgConn;
@@ -84,7 +85,7 @@ export async function handleGetSettings(
         }
       : null,
     configFile: serializeLocalConfig(rawConfig),
-    version: '3.0.0',
+    version: SERVER_VERSION,
   });
 }
 

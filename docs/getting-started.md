@@ -10,8 +10,8 @@
 For normal use, install the CLI globally from the release bundle:
 
 ```bash
-npm install -g https://github.com/NiravRVaghasiya/NetPro/releases/download/v3.0.0/netpro-3.0.0.tgz
-netpro --version
+npm install -g https://github.com/NiravRVaghasiya/NetPro/releases/download/v3.0.1/netpro-3.0.1.tgz
+netpro --version      # 3.0.1
 ```
 
 > The unscoped npm name `netpro` belongs to an unrelated package, so NetPro is
@@ -26,6 +26,42 @@ For repository development, install the workspace instead:
 ```bash
 npm install
 ```
+
+### When `netpro` is not recognized after installing
+
+The install succeeded; the command is not on `PATH`. `npm install -g` writes its
+shims into npm's **global prefix** — `%AppData%\npm` on Windows,
+`/usr/local/bin` or a version-manager directory elsewhere — and that directory is
+what has to be on `PATH`. Node installed by a package manager (Scoop, nvm,
+Volta, fnm) does not always put it there.
+
+```powershell
+npm config get prefix        # where the shims went
+dir "$env:AppData\npm\netpro*"   # netpro.cmd / netpro.ps1 / netpro should exist
+where netpro                 # does the shell find one?
+```
+
+- If `netpro.cmd` exists but `where netpro` prints nothing, add the prefix from
+  `npm config get prefix` to your user `PATH` (System Properties → Environment
+  Variables → *User variables* → `Path` → New) and open a **new** terminal.
+- To run it without touching `PATH`: `"%AppData%\npm\netpro.cmd" init`.
+
+Two npm behaviours make this look like NetPro's fault. Neither is:
+
+- **`npm install -g` with no package name installs the *current project*
+  globally.** Run from a checkout of this repository, it replaces the globally
+  installed `netpro` with a link to the working tree and prunes the release
+  bundle's dependencies — output like `removed 52 packages, and changed 1
+  package` — which reads like the install deleting itself. Pass the package
+  (`npm install -g <tarball-url>`) or run it from a neutral directory.
+- **`npm warn allow-scripts … not yet covered by allowScripts` is advisory.**
+  With npm 11.17 the install script still runs unless `--strict-allow-scripts` is
+  set, so the warning does not mean `better-sqlite3` was skipped. A package's own
+  `allowScripts` field is not consulted for global installs, which is why it
+  appears even when the manifest lists the package. To silence it, use
+  `npm config set allow-scripts=better-sqlite3 --location=user`.
+
+Running from a source checkout needs no global install at all — see below.
 
 ## Local-first quickstart (recommended)
 

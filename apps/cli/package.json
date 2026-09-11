@@ -1,6 +1,6 @@
 {
   "name": "@netpro/cli",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "private": true,
   "description": "NetPro CLI \u2014 professional networking from your terminal",
   "type": "module",

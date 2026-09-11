@@ -1,11 +1,24 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { createProgram } from './cli';
 
+// commander's `.version()` is a literal in cli.ts, baked into the bundle: the
+// installed CLI has no package.json beside it to read from. That makes
+// "the CLI version" and "the version the tarball ships" two facts that can
+// drift, and only one of them is what `scripts/smoke/installed-package.sh`
+// asserts from the outside (an hour into a release run). Pin them together
+// here, where a missed bump fails in seconds.
+const packagedVersion = (
+  JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')) as {
+    version: string;
+  }
+).version;
+
 describe('CLI root program', () => {
-  it('is named netpro with a version', () => {
+  it('is named netpro with the version the package ships', () => {
     const program = createProgram();
     expect(program.name()).toBe('netpro');
-    expect(program.version()).toBe('3.0.0');
+    expect(program.version()).toBe(packagedVersion);
   });
 
   it('registers all twenty-seven top-level commands (v3.0 Phase 1 adds team, Phase 5 adds plugin, Phase 7 adds webhook; local-first adds serve + status + token, Phase 16 adds scan, Phase 22 adds backup + restore)', () => {
