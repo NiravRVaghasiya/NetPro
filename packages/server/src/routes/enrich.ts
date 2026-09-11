@@ -19,6 +19,7 @@ import { sendJson, readJsonBody, readBody } from '../middleware/json';
 import type { JobRegistry } from '../jobs/index';
 import type { EventBus } from '../events/index';
 import type { AuthContext } from '../auth/index';
+import { resolveProviderStatus } from '@netpro/core/src/providers';
 
 export type EnrichDeps = {
   conn: SqliteConn | PgConn;
@@ -26,6 +27,11 @@ export type EnrichDeps = {
   jobs: JobRegistry;
   events: EventBus;
 };
+
+/** Phase 17 — is any enrichment provider configured right now? */
+function enrichmentConfigured(): boolean {
+  return resolveProviderStatus(process.env).enrichment.configured;
+}
 
 function parseEnrichBody(body: Record<string, unknown>): {
   contactIds?: string[];
@@ -128,40 +134,18 @@ export async function handleEnrichPost(
     let enriched = 0;
     let enrichmentError: string | null = null;
     try {
-      // Check if any provider key is present. If none, short-circuit.
-      const hasHunter = Boolean(process.env.HUNTER_API_KEY?.trim());
-      const hasPdl = Boolean(process.env.PDL_API_KEY?.trim());
-      const hasClearbit = Boolean(process.env.CLEARBIT_API_KEY?.trim());
-      const hasProvider = hasHunter || hasPdl || hasClearbit;
-      if (hasProvider && contactRows.length > 0) {
+      // Phase 17 — one registry decides what is configured and how to build
+      // it: @netpro/core/src/providers. With no key anywhere this resolves to
+      // an empty list and the route short-circuits to a zero-enrichment
+      // success (no network call is even attempted).
+      const { createEnrichmentProviders } = await import('@netpro/core/src/providers');
+      const providers = await createEnrichmentProviders(process.env);
+      if (providers.length > 0 && contactRows.length > 0) {
         // Attempt to call the real enrichment pipeline. We keep the import
         // dynamic so a misconfigured provider does not crash the route module
         // at load time.
         const { EnrichmentPipeline } = await import('@netpro/core/src/enrichment');
-        // The pipeline shape has varied across phases — try the known constructors.
-        // Fallback is to count enriched as 0 without failing.
         try {
-          // Most recent shape: new EnrichmentPipeline(conn, providers)
-          // Providers are constructed from env keys if present.
-          const providers: unknown[] = [];
-          if (hasHunter) {
-            try {
-              const { createHunterProvider } = await import('@netpro/core/src/enrichment/providers/hunter');
-              providers.push(createHunterProvider(process.env.HUNTER_API_KEY!));
-            } catch {}
-          }
-          if (hasPdl) {
-            try {
-              const { createPDLProvider } = await import('@netpro/core/src/enrichment/providers/pdl');
-              providers.push(createPDLProvider(process.env.PDL_API_KEY!));
-            } catch {}
-          }
-          if (hasClearbit) {
-            try {
-              const { createClearbitProvider } = await import('@netpro/core/src/enrichment/providers/clearbit');
-              providers.push(createClearbitProvider(process.env.CLEARBIT_API_KEY!));
-            } catch {}
-          }
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const pipeline: any = new (EnrichmentPipeline as any)(deps.conn, providers);
           const enrichable = contactRows.map((c) => ({
@@ -189,9 +173,7 @@ export async function handleEnrichPost(
       enriched,
       total: contactRows.length,
       enrichmentError,
-      providerConfigured: Boolean(
-        process.env.HUNTER_API_KEY?.trim() || process.env.PDL_API_KEY?.trim() || process.env.CLEARBIT_API_KEY?.trim()
-      ),
+      providerConfigured: enrichmentConfigured(),
     };
     deps.jobs.complete(job.id, { result: summary, stage: 'completed' } as Record<string, unknown>);
     const completed = deps.jobs.get(job.id)!;

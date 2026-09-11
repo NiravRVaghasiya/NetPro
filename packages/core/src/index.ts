@@ -8,6 +8,12 @@ export * as exportPipeline from './export';
 export * as card from './card';
 export * as campaigns from './campaigns';
 export * as graph from './graph';
+// Phase 16 — CLI ↔ Web UI integration: the one scan implementation shared by
+// `netpro scan` (CLI) and POST /api/scan (server).
+export * as scan from './scan';
+// Phase 17 — optional AI/enrichment: one provider status answer for CLI,
+// server, and Web UI.
+export * as providers from './providers';
 export * as skills from './skills';
 // v2.0 Phase 6 — event matcher (attendee import, matching, recommendations).
 export * as events from './events';

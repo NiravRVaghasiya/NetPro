@@ -5,6 +5,7 @@ import { registerStatusCommand } from "./commands/status";
 import { registerTokenCommand } from "./commands/token";
 import { registerConfigCommand } from "./commands/config";
 import { registerImportCommand } from "./commands/import";
+import { registerScanCommand } from "./commands/scan";
 import { registerEnrichCommand } from "./commands/enrich";
 import { registerSearchCommand } from "./commands/search";
 import { registerReindexCommand } from "./commands/reindex";
@@ -44,6 +45,7 @@ export function createProgram(): Command {
   registerTokenCommand(program);
   registerConfigCommand(program);
   registerImportCommand(program);
+  registerScanCommand(program);
   registerEnrichCommand(program);
   registerSearchCommand(program);
   registerReindexCommand(program);

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { SqliteConn, PgConn } from "@netpro/db";
 import { runImport, previewImport } from "@netpro/core/src/import";
 import type { WorkspaceScope } from "@netpro/core/src/workspaces/scope";
+import { runCliJob, type CliJobEmitter } from "../lib/jobs";
 
 export interface ImportCommandOptions {
   /** Positional `netpro import linkedin.csv` (Phase 15). */
@@ -23,14 +24,40 @@ function resolveCsvPath(options: ImportCommandOptions): string {
   return path;
 }
 
+/**
+ * Import, optionally observed.
+ *
+ * Phase 16 — when `emit` is supplied (the command wires it to a Job) the
+ * import publishes the same `import.*` events the server's `POST /api/import`
+ * does, and they reach the same SSE stream, so an import started in a terminal
+ * shows up in the Web UI's Activity feed live. Without `emit` the behaviour is
+ * byte-identical to before — tests and scripted callers are unaffected.
+ */
 export async function executeImport(
   options: ImportCommandOptions,
   conn: SqliteConn | PgConn,
   scope?: WorkspaceScope,
+  emit?: CliJobEmitter,
 ): Promise<string> {
   const path = resolveCsvPath(options);
   const csv = readFileSync(path, "utf-8");
+
+  emit?.publish({ type: "import.started", progress: 5, message: `Importing ${path}`, file: path });
+  emit?.update(5, `Importing ${path}`);
+
+  emit?.publish({ type: "import.progress", progress: 50, message: "Parsing and inserting contacts" });
+  emit?.update(50, "Parsing and inserting contacts");
   const summary = await runImport(csv, conn, scope);
+  emit?.publish({
+    type: "import.completed",
+    progress: 100,
+    message: `Imported ${summary.imported} contacts`,
+    imported: summary.imported,
+    merged: summary.merged,
+    skipped: summary.errors.length,
+    file: path,
+  });
+  emit?.update(100, `Imported ${summary.imported} contacts`);
 
   const lines = [
     `✓ Imported ${summary.imported} contacts (${summary.merged} merged)`,
@@ -98,8 +125,15 @@ export function registerImportCommand(program: Command): void {
         }
         const conn = await openDb();
         const scope = await resolveCliScope(cmd, conn);
-        const output = await executeImport(resolved, conn, scope);
-        console.log(output);
+        // Phase 16 — the import runs as the same Job the Web UI's import does
+        // and publishes into the same event stream, so a terminal import is
+        // visible in Activity/Import while it runs.
+        const execution = await runCliJob({
+          type: "import",
+          metadata: { file: resolved.file ?? resolved.linkedin ?? null, origin: "cli" },
+          run: (emit) => executeImport(resolved, conn, scope, emit),
+        });
+        console.log(execution.result);
       } catch (e) {
         console.error(`netpro import: ${(e as Error).message}`);
         process.exitCode = 1;

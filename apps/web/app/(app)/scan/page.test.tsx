@@ -111,4 +111,75 @@ describe("Scan page", () => {
     const html = await render();
     expect(html).toContain("NetPro server not reachable");
   });
+
+  it("says where a scan came from — the CLI and the UI produce the same job (Phase 16)", async () => {
+    serverFetchJson.mockImplementation(async (path) => {
+      if (path.startsWith("/api/jobs")) {
+        return {
+          ok: true,
+          status: 200,
+          serverUrl: "http://127.0.0.1:3777",
+          data: {
+            total: 1,
+            jobs: [
+              {
+                id: "scan-from-terminal",
+                type: "scan",
+                status: "completed",
+                progress: 100,
+                startedAt: "2026-09-10T00:00:00.000Z",
+                completedAt: "2026-09-10T00:00:05.000Z",
+                metadata: { result: SCAN_RESULT, origin: "cli" },
+              },
+            ],
+          },
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        serverUrl: "http://127.0.0.1:3777",
+        data: { enrichment: { configured: false } },
+      };
+    });
+
+    const html = await render();
+    expect(html).toContain("started in a terminal");
+    expect(html).toContain("netpro scan");
+  });
+
+  it("shows provider status so an offline scan is self-explanatory (Phase 17)", async () => {
+    serverFetchJson.mockImplementation(async (path) => {
+      if (path.startsWith("/api/jobs")) {
+        return { ok: true, status: 200, serverUrl: "http://127.0.0.1:3777", data: { total: 0, jobs: [] } };
+      }
+      return {
+        ok: true,
+        status: 200,
+        serverUrl: "http://127.0.0.1:3777",
+        data: {
+          enrichment: { configured: false },
+          runsWithoutProviders: true,
+          categories: [
+            { id: "enrichment", label: "Enrichment", configured: false, detail: "Not configured", providers: [] },
+            { id: "embeddings", label: "Embeddings", configured: false, detail: "Disabled", providers: [] },
+          ],
+          degraded: [
+            {
+              capability: "enrichment",
+              label: "Contact enrichment",
+              reason: "Scans run fully offline.",
+              enable: "Set HUNTER_API_KEY …",
+            },
+          ],
+        },
+      };
+    });
+
+    const html = await render();
+    expect(html).toContain("Providers");
+    expect(html).toContain("Enrichment");
+    expect(html).toContain("all optional");
+    expect(html).toContain("Contact enrichment");
+  });
 });

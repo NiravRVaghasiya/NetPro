@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { isGitHubConfigured, resolveWebAuthMode } from "@/lib/auth-mode";
 import { resolveInstallationIdentity } from "@/lib/local-owner";
+import { getServerUrl, serverFetchJson } from "@/lib/netpro-server";
+import {
+  ProviderStatus,
+  type ProviderStatusPayload,
+} from "@/components/provider-status";
 
 export const metadata = {
   title: "Settings — NetPro",
@@ -76,9 +81,22 @@ function integrationsFromEnv(env: NodeJS.ProcessEnv): Integration[] {
   ];
 }
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
   const integrations = integrationsFromEnv(process.env);
   const installation = resolveInstallationIdentity().identity;
+
+  // Phase 17 — provider status comes from the NetPro server, which reads the
+  // same @netpro/core registry as the CLI (`netpro status`). The Web UI never
+  // inspects provider keys itself.
+  let providers: ProviderStatusPayload | null = null;
+  let providersUnavailable = false;
+  try {
+    const res = await serverFetchJson<ProviderStatusPayload>("/api/providers");
+    if (res.ok) providers = res.data;
+    else providersUnavailable = true;
+  } catch {
+    providersUnavailable = true;
+  }
 
   return (
     <div style={{ maxWidth: 720 }}>
@@ -97,6 +115,17 @@ export default function SettingsPage() {
           <code>NETPRO_HOME</code>) and never sent off this machine.
         </p>
       </section>
+      <section className="my-5">
+        {providersUnavailable ? (
+          <p className="mb-2 text-xs text-amber-700">
+            Provider status comes from the NetPro server (<code>{getServerUrl()}</code>) — start{" "}
+            <code>netpro serve</code> to see it here. NetPro runs either way; the table below reads
+            this process&apos;s own environment as a fallback.
+          </p>
+        ) : null}
+        <ProviderStatus status={providers} title="AI &amp; enrichment providers" />
+      </section>
+
       <p className="my-5"><Link href="/settings/keys" className="text-emerald-800 underline">Manage encrypted provider keys →</Link></p>
       <section className="my-5 rounded-xl border border-slate-200 p-5">
         <h2 className="text-base font-semibold text-[#183c30]">
