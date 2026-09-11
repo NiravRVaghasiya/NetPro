@@ -32,6 +32,7 @@ import {
 import { authStartupDiagnostics, describeAuthPolicy, loadAuthPolicy, type AuthPolicy } from './auth/index';
 import { createApp, type NetProApp } from './app';
 import { loadConfig } from './config';
+import { startRetentionSchedule } from './retention';
 import type { RunningServer } from './server';
 import { startServer } from './server';
 
@@ -145,7 +146,11 @@ export async function runServe(options: RunServeOptions = {}): Promise<ServeHand
   const fatal = diagnostics.find((d) => d.level === 'error');
   if (fatal) throw new LocalConfigError(fatal.message);
 
-  const app = await createApp({ config, auth: policy });
+  // The environment overlay must reach createDb() too: config came from
+  // loadConfig(env), so the database must resolve from the same overlay —
+  // otherwise an embedder/tests' scratch NETPRO_HOME/DB_PATH is silently
+  // ignored and the server opens ~/.netpro/netpro.db instead.
+  const app = await createApp({ config, auth: policy, env });
 
   let running: RunningServer;
   try {
@@ -154,6 +159,12 @@ export async function runServe(options: RunServeOptions = {}): Promise<ServeHand
     await app.close().catch(() => {});
     throw friendlyListenError(error, config.host, config.port);
   }
+
+  // Phase 24 — the daily retention purge moved here from the Web UI's
+  // instrumentation. It is self-guarded (at most one run per 24 h) and
+  // `null` when NETPRO_DISABLE_RETENTION=true; failures are logged, never
+  // thrown, so it cannot break startup or the request path.
+  const retentionSchedule = startRetentionSchedule(app.conn, env, log);
 
   printBanner(running, app, env, policy, createdToken, log);
   for (const warning of diagnostics.filter((d) => d.level === 'warning')) {
@@ -169,6 +180,7 @@ export async function runServe(options: RunServeOptions = {}): Promise<ServeHand
 
   const signals = options.signals ?? ['SIGINT', 'SIGTERM'];
   const onSignal = (signal: NodeJS.Signals): void => {
+    retentionSchedule?.stop();
     void running
       .close()
       .catch(() => {})
@@ -183,6 +195,7 @@ export async function runServe(options: RunServeOptions = {}): Promise<ServeHand
     stopped,
     close: async () => {
       try {
+        retentionSchedule?.stop();
         await running.close();
       } finally {
         for (const signal of signals) process.removeListener(signal, onSignal);

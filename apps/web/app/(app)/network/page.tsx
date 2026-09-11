@@ -14,12 +14,13 @@
 // Two modes:
 //   * no `target` → interactive network overview (force graph + communities + hubs)
 //   * `target`    → ranked k-shortest warm-intro chains (who can introduce me?)
+//
+// Phase 24 — the direct-DB fallback is gone, so this page is a pure client of
+// `GET /api/graph*`. When the server is unreachable it says so instead of
+// computing the graph locally.
 
 import Link from "next/link";
-import { requireScope } from "@/lib/authz";
 import { getServerUrl, serverFetchJson } from "@/lib/netpro-server";
-import { conn } from "@/lib/db";
-import { getNetworkGraph, planIntroPaths, getNetworkVisualization } from "@netpro/core/src/graph";
 import { NetworkGraphView } from "@/components/network-graph";
 
 export const metadata = { title: "Network — NetPro" };
@@ -128,7 +129,6 @@ export default async function NetworkPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireScope();
   const sp = await searchParams;
   const target = one(sp.target) ?? one(sp.to);
   const from = one(sp.from);
@@ -146,14 +146,31 @@ export default async function NetworkPage({
     } catch (e) {
       serverError = e instanceof Error ? e.message : String(e);
     }
-    if (!plan || serverError) {
-      try {
-        const fetched = await planIntroPaths(conn, { target, from, k: 3 }, {} as never);
-        plan = fetched as unknown as PathPlan;
-        serverError = null;
-      } catch (e) {
-        plan = { error: e instanceof Error ? e.message : String(e) };
-      }
+
+    if (serverError && !plan) {
+      return (
+        <div>
+          <h1>Network — Pathfinder</h1>
+          <div
+            style={{
+              background: "#fffbeb",
+              border: "1px solid #fde68a",
+              color: "#92400e",
+              borderRadius: 10,
+              padding: "0.6rem 0.9rem",
+              marginTop: "0.75rem",
+            }}
+          >
+            Server not reachable at <code>{serverUrl}</code> — run <code>netpro serve</code> for pathfinding.{" "}
+            <em>({serverError})</em>
+          </div>
+          <p>
+            <Link href="/network" style={{ color: "#2563eb" }}>
+              ← Back to network overview
+            </Link>
+          </p>
+        </div>
+      );
     }
 
     if (plan?.error) {
@@ -189,11 +206,7 @@ export default async function NetworkPage({
               from <strong>{from}</strong>
             </>
           ) : null}
-          {serverError ? (
-            <span style={{ color: "#92400e" }}> (server unreachable — local result)</span>
-          ) : (
-            <span style={{ color: "#6b7280" }}> — via {serverUrl}</span>
-          )}
+          <span style={{ color: "#6b7280" }}> — via {serverUrl}</span>
         </p>
         {p.found && p.paths && p.paths.length > 0 ? (
           <ol style={{ paddingLeft: "1.1rem" }}>
@@ -223,7 +236,7 @@ export default async function NetworkPage({
                       {i > 0 ? (
                         <span style={{ color: "#9ca3af" }}> {n.via?.relations.join(", ")} → </span>
                       ) : null}
-                      <Link href={`/graph/${n.contactId}`} style={{ color: "#2563eb" }}>
+                      <Link href={`/people/${n.contactId}`} style={{ color: "#2563eb" }}>
                         {n.fullName}
                       </Link>{" "}
                       <span style={{ color: "#6b7280", fontSize: "0.8rem" }}>
@@ -254,7 +267,6 @@ export default async function NetworkPage({
 
   // ── Overview ─────────────────────────────────────────────────────
   let graph: GraphOverview | null = null;
-  // Visualization payload (interactive)
   let viz: GraphViz | null = null;
   let serverError: string | null = null;
 
@@ -270,30 +282,24 @@ export default async function NetworkPage({
   } catch (e) {
     serverError = e instanceof Error ? e.message : String(e);
   }
-  if (!graph || serverError) {
-    try {
-      const [g, v] = await Promise.all([
-        getNetworkGraph(conn, {} as never) as unknown as GraphOverview,
-        getNetworkVisualization(conn, {} as never) as unknown as GraphViz,
-      ]);
-      graph = g;
-      viz = v;
-      serverError = null;
-    } catch (e) {
-      return (
-        <div>
-          <h1>Network</h1>
-          <p style={{ color: "#dc2626" }}>{e instanceof Error ? e.message : String(e)}</p>
-        </div>
-      );
-    }
-  }
 
   if (!graph) {
     return (
       <div>
         <h1>Network</h1>
-        <p>Loading…</p>
+        <div
+          style={{
+            background: "#fffbeb",
+            border: "1px solid #fde68a",
+            color: "#92400e",
+            borderRadius: 10,
+            padding: "0.6rem 0.9rem",
+            marginTop: "0.75rem",
+          }}
+        >
+          Server not reachable at <code>{serverUrl}</code> — run <code>netpro serve</code> for the graph.{" "}
+          {serverError ? <em>({serverError})</em> : null}
+        </div>
       </div>
     );
   }
@@ -311,23 +317,18 @@ export default async function NetworkPage({
       <div>
         <h1>Network</h1>
         <p style={{ color: "#9ca3af" }}>
-          No confirmed edges yet. <Link href="/import" style={{ color: "#2563eb" }}>Import a LinkedIn CSV</Link> or{" "}
-          <Link href="/edges" style={{ color: "#2563eb" }}>
-            add links yourself
-          </Link>
+          No confirmed edges yet. <Link href="/import" style={{ color: "#2563eb" }}>Import a LinkedIn CSV</Link> or run{" "}
+          <code>netpro import contacts.csv</code> to build the graph.
           {graph.pendingCandidates ? (
-            <>
+            <span>
               {" · "}
-              <Link href="/edges?status=pending" style={{ color: "#2563eb" }}>
-                {graph.pendingCandidates} pending candidate{graph.pendingCandidates === 1 ? "" : "s"}
-              </Link>
-            </>
+              {graph.pendingCandidates} pending candidate{graph.pendingCandidates === 1 ? "" : "s"}
+            </span>
           ) : null}
           .
         </p>
         <p style={{ color: "#6b7280", fontSize: "0.85rem" }}>
           Server: <code>{serverUrl}</code>
-          {serverError ? <span style={{ color: "#92400e" }}> — {serverError} (local fallback)</span> : null}
         </p>
         {viz ? <div style={{ marginTop: "1rem" }}><NetworkGraphView data={viz as never} serverUrl={serverUrl} /></div> : null}
       </div>
@@ -342,15 +343,12 @@ export default async function NetworkPage({
         {graph.nodes} of {graph.totalContacts} contacts linked by {graph.edges} confirmed edge{graph.edges === 1 ? "" : "s"} ·{" "}
         {graph.components?.count} component{graph.components?.count === 1 ? "" : "s"} (largest {graph.components?.largestSize})
         {graph.pendingCandidates ? (
-          <>
+          <span>
             {" · "}
-            <Link href="/edges?status=pending" style={{ color: "#2563eb" }}>
-              {graph.pendingCandidates} pending
-            </Link>
-          </>
+            {graph.pendingCandidates} pending
+          </span>
         ) : null}
         <span style={{ fontSize: "0.8rem" }}> — via {serverUrl}</span>
-        {serverError ? <span style={{ color: "#92400e", fontSize: "0.8rem" }}> — {serverError} (local fallback)</span> : null}
       </p>
 
       <form method="GET" action="/network" style={{ marginTop: "0.75rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
@@ -382,7 +380,7 @@ export default async function NetworkPage({
           <NetworkGraphView data={viz as never} serverUrl={serverUrl} />
         </div>
       ) : (
-        <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginTop: "1rem" }}>Visualization data unavailable — <Link href="/graph" style={{ color: "#2563eb" }}>open the pathfinder</Link> instead.</p>
+        <p style={{ color: "#9ca3af", fontSize: "0.9rem", marginTop: "1rem" }}>Visualization data unavailable from the server.</p>
       )}
 
       <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", marginTop: "1.15rem" }}>
@@ -408,7 +406,7 @@ export default async function NetworkPage({
           <ul>
             {(graph.centrality?.top ?? []).map((t) => (
               <li key={t.contactId}>
-                <Link href={`/contacts/${t.contactId}`} style={{ color: "#2563eb" }}>
+                <Link href={`/people/${t.contactId}`} style={{ color: "#2563eb" }}>
                   {t.fullName}
                 </Link>{" "}
                 — {t.degree} edge{t.degree === 1 ? "" : "s"}
@@ -428,16 +426,16 @@ export default async function NetworkPage({
           <ul>
             {graph.warmIntros.map((w) => (
               <li key={`${w.contactId}-${w.targetId}`}>
-                <Link href={`/contacts/${w.contactId}`} style={{ color: "#2563eb" }}>
+                <Link href={`/people/${w.contactId}`} style={{ color: "#2563eb" }}>
                   {w.contactName}
                 </Link>{" "}
                 →{" "}
-                <Link href={`/contacts/${w.targetId}`} style={{ color: "#2563eb" }}>
+                <Link href={`/people/${w.targetId}`} style={{ color: "#2563eb" }}>
                   {w.targetName}
                 </Link>{" "}
                 <span style={{ color: "#6b7280" }}>
                   via{" "}
-                  <Link href={`/contacts/${w.viaId}`} style={{ color: "#2563eb" }}>
+                  <Link href={`/people/${w.viaId}`} style={{ color: "#2563eb" }}>
                     {w.viaName}
                   </Link>{" "}
                   ({w.hops} hops)
@@ -456,10 +454,7 @@ export default async function NetworkPage({
 
       <p style={{ marginTop: "1rem", color: "#6b7280", fontSize: "0.85rem" }}>
         Pathfinding uses the existing Louvain + Brandes algorithms in <code>packages/core</code> — the UI never reimplements them.
-        See <Link href="/graph" style={{ color: "#2563eb" }}>
-          legacy graph view
-        </Link>{" "}
-        for the full interactive explorer. Server: <code>{serverUrl}</code>
+        Server: <code>{serverUrl}</code>
       </p>
     </div>
   );

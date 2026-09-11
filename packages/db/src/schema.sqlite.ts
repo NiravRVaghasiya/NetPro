@@ -1,6 +1,11 @@
 import { sql } from 'drizzle-orm';
 import { sqliteTable, text, integer, real, primaryKey, index, unique, uniqueIndex } from 'drizzle-orm/sqlite-core';
-import type { AdapterAccountType } from 'next-auth/adapters';
+
+// Phase 24 — the Auth.js adapter is gone, so the account `type` column no
+// longer derives from `next-auth/adapters`. The union below is the exact set
+// Auth.js allowed; the legacy `account` table keeps it for migration
+// compatibility (rows written by earlier releases still validate the same).
+export type AuthAccountType = 'oauth' | 'oidc' | 'email' | 'webauthn';
 
 // v3.0 Phase 1 — workspaces data model (migration 0008). Single-owner installs
 // get a bootstrap workspace `default`; multi-member installs share it until
@@ -475,7 +480,7 @@ export const accounts = sqliteTable(
   'account',
   {
     userId: text('userId').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    type: text('type').$type<AdapterAccountType>().notNull(),
+    type: text('type').$type<AuthAccountType>().notNull(),
     provider: text('provider').notNull(),
     providerAccountId: text('providerAccountId').notNull(),
     refresh_token: text('refresh_token'),

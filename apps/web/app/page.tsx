@@ -10,10 +10,10 @@
 //   → Import, search, warm-intro paths — all through the local server at
 //     http://127.0.0.1:3777.
 //
-// The page is public (proxy.ts allows "/") and links into the authenticated
-// app shell. The server's health endpoint is fetched client-side only if the
-// caller wants a live dot — the static shell must not 500 when `netpro serve`
-// is not running.
+// Phase 24 — there is no proxy/auth middleware in the Web UI anymore, so this
+// page is unconditionally public and links into the app shell. It must not
+// 500 when `netpro serve` is not running — the server's health endpoint is
+// fetched client-side only if the caller wants a live dot.
 
 import Link from "next/link";
 

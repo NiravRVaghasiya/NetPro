@@ -62,8 +62,9 @@ the NetPro server (no import logic in React, no direct database):
    (imported / merged / relationship candidates / skipped) with links into
    the Observatory and Activity.
 
-The legacy Next.js `/api/import` route remains as a compatibility path until
-Phase 24 removes the old Web architecture; the new page does not use it.
+Phase 24 removed the legacy Next.js `/api/import` route together with the old
+Web architecture; `POST /api/import` on the standalone server is the only
+import endpoint, and the page has always used it.
 
 ## Exit criteria (plan)
 

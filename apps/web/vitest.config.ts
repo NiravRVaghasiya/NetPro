@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   // Vite 8 uses Oxc; transform Next's preserved JSX for component render tests.
   oxc: { jsx: { runtime: "automatic" } },
-  // Mirrors tsconfig's "@/*" path mapping so route tests can vi.mock('@/lib/db').
+  // Mirrors tsconfig's "@/*" path mapping so route tests can vi.mock('@/lib/netpro-server').
   resolve: {
     alias: {
       "@": fileURLToPath(new URL(".", import.meta.url)),

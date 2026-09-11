@@ -15,9 +15,9 @@
 //   * **Rotates every UTC day** — a hash from Monday cannot be correlated
 //     with a hash from Tuesday, so there is no cross-day fingerprint even if
 //     the base salt leaks.
-//   * **Keyed** — without `NETPRO_VIEW_SALT` (or the fallback secret) an
-//     attacker cannot precompute the hash for an IP, and a breached database
-//     yields values that are useless off-line.
+//   * **Keyed** — without the operator's `NETPRO_VIEW_SALT` an attacker
+//     cannot precompute the hash for an IP, and a breached database yields
+//     values that are useless off-line.
 //   * **UA-bound** — two people behind one NAT with different browsers get
 //     different hashes, so "same hash" means "same person-ish", not "same
 //     house".

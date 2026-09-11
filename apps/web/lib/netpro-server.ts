@@ -21,11 +21,10 @@
 //     for EventSource.
 //
 // When the server is unreachable (e.g. during `next dev` without `netpro
-// serve`), callers should degrade gracefully: the Observatory shows a banner
-// "Server not reachable at http://127.0.0.1:3777 — run `netpro serve`", but
-// the UI still renders via its direct DB fallback where available. The new
-// Observatory/Network/Activity pages are server-driven; the legacy
-// Dashboard/Search/Contacts pages remain direct-DB until Phase 24 removes them.
+// serve`), callers degrade gracefully: every page shows a banner
+// "Server not reachable at http://127.0.0.1:3777 — run `netpro serve`" and
+// renders an empty shell. Phase 24 removed the direct-DB fallback, so the Web
+// UI is a pure client of the server: no database access, no business logic.
 
 /** The local NetPro server's origin. */
 export function getServerUrl(env: NodeJS.ProcessEnv = process.env): string {
@@ -111,61 +110,6 @@ export async function serverFetchJson<T>(path: string, options: ServerFetchOptio
   return { ok: res.ok, status: res.status, data, serverUrl: base };
 }
 
-/** Convenience: GET /api/health */
-export async function fetchServerHealth(opts: ServerFetchOptions = {}) {
-  return serverFetchJson<{ status: string; dialect: string; latencyMs: number }>(
-    '/api/health',
-    opts
-  );
-}
-
-/** Convenience: GET /api/server-info */
-export async function fetchServerInfo(opts: ServerFetchOptions = {}) {
-  return serverFetchJson<{
-    name: string;
-    service: string;
-    authMode: string;
-  }>('/api/server-info', opts);
-}
-
-/** Convenience: GET /api/analytics/overview */
-export async function fetchAnalyticsOverview(opts: ServerFetchOptions = {}) {
-  return serverFetchJson<unknown>('/api/analytics', opts);
-}
-
-/** Convenience: GET /api/graph */
-export async function fetchGraph(opts: ServerFetchOptions = {}) {
-  return serverFetchJson<unknown>('/api/graph', opts);
-}
-
-/** Convenience: GET /api/search?q=... */
-export async function fetchSearch(
-  query: string,
-  extra: Record<string, string | undefined> = {},
-  opts: ServerFetchOptions = {}
-) {
-  const params = new URLSearchParams();
-  if (query) params.set('q', query);
-  for (const [k, v] of Object.entries(extra)) {
-    if (v !== undefined && v !== '') params.set(k, v);
-  }
-  const qs = params.toString();
-  return serverFetchJson<unknown>(`/api/search${qs ? `?${qs}` : ''}`, opts);
-}
-
-/** Convenience: GET /api/jobs */
-export async function fetchJobs(
-  filter: { type?: string; status?: string; limit?: string } = {},
-  opts: ServerFetchOptions = {}
-) {
-  const params = new URLSearchParams();
-  if (filter.type) params.set('type', filter.type);
-  if (filter.status) params.set('status', filter.status);
-  if (filter.limit) params.set('limit', filter.limit);
-  const qs = params.toString();
-  return serverFetchJson<{ jobs: unknown[]; total: number }>(`/api/jobs${qs ? `?${qs}` : ''}`, opts);
-}
-
 /** The SSE URL the browser should connect to (EventSource). */
 export function getEventsUrl(
   extra: Record<string, string | undefined> = {},
@@ -184,16 +128,4 @@ export function getEventsUrl(
   }
   const qs = params.toString();
   return `${base}/api/events${qs ? `?${qs}` : ''}`;
-}
-
-/** Whether the UI should treat the server as the source of truth. */
-export function isServerMode(env: NodeJS.ProcessEnv = process.env): boolean {
-  // When NEXT_PUBLIC_NETPRO_SERVER_URL is set we are definitely server-mode.
-  // When running inside `netpro serve`'s embedded `@netpro/server`, the
-  // server is always at 127.0.0.1:3777 and the legacy direct-DB path is still
-  // valid — but the Observatory/Network/Activity pages should prefer the
-  // server to demonstrate the Phase 9 foundation.
-  if (env.NEXT_PUBLIC_NETPRO_SERVER_URL || env.NETPRO_SERVER_URL) return true;
-  // Default local-first: try the server first, fall back to DB.
-  return true;
 }

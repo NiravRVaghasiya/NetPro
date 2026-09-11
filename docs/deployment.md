@@ -23,12 +23,14 @@ and [Phase 19 — Docker](phase-19-docker.md).
 > **Authentication, in one paragraph.** Local NetPro needs no credentials at
 > all: requests from `127.0.0.1` are the operator, identified by the
 > installation identity in `~/.netpro/config.toml` (see
-> [phase-5-authentication.md](phase-5-authentication.md)). A *deployed* Web UI
-> is reachable from other machines, so pick a mode: `NETPRO_AUTH_MODE=github`
-> (GitHub OAuth — the GitHub variables below become required) or
-> `NETPRO_AUTH_MODE=open` when a reverse proxy, VPN, or private network already
-> authenticates callers. `local` mode must never be published on a public
-> interface for the Web UI.
+> [phase-5-authentication.md](phase-5-authentication.md)). Phase 24 removed the
+> Web UI's Auth.js flows, so the Web UI performs no authentication of its own —
+> it is a pure client of the server, and *all* authentication is the server's
+> job. A deployed server picks a mode: `NETPRO_AUTH_MODE=token` (every caller
+> presents the access token) or `NETPRO_AUTH_MODE=open` when a reverse proxy,
+> VPN, or private network already authenticates callers. To expose the Web UI
+> itself beyond this machine, put your own auth/TLS reverse proxy in front of
+> it.
 
 ---
 
@@ -73,13 +75,12 @@ one-connection pool (see [Connection pooling](#connection-pooling)).
 | Mode | Set | Who gets in |
 | --- | --- | --- |
 | `local` (default) | nothing | Requests from the machine the server runs on. **Only** valid when the process is reachable on loopback (see the caveat in [phase-5-authentication.md](phase-5-authentication.md)). |
-| `github` | `NETPRO_AUTH_MODE=github` + the GitHub variables below | Every caller signs in with GitHub. One account is the break-glass owner. |
+| `token` | `NETPRO_AUTH_MODE=token` | Every caller, loopback included, presents the access token (`netpro token`, `Authorization: Bearer`). |
 | `open` | `NETPRO_AUTH_MODE=open` | Nobody is authenticated by NetPro — only correct behind your own auth (reverse proxy with sign-in, VPN, private network). |
 
-`netpro serve` (the CLI server) has a fourth, `token`: every request needs the
-access token from `~/.netpro/keys/access-token` (`netpro token`). The Web UI
-maps `token` to `local` because a browser cannot attach a bearer token to a
-navigation.
+Phase 24 removed the Web UI's Auth.js `github` mode: the Web UI no longer
+signs anyone in, so there is no `NETPRO_OWNER_GITHUB_ID`, `NEXTAUTH_SECRET`, or
+OAuth app to configure.
 
 ### 3. Set environment variables
 
@@ -87,12 +88,8 @@ navigation.
 | --- | --- | --- |
 | `DATABASE_URL` | ✅ (Postgres) | Your Postgres connection string |
 | `DB_DIALECT` | Recommended | `postgresql` — never inferred; set it explicitly |
-| `NETPRO_AUTH_MODE` | Recommended | `github` for a public deployment, `open` behind your own auth |
-| `NEXTAUTH_SECRET` | For `github` | `openssl rand -base64 32` |
-| `APP_URL` | For `github` | Your final HTTPS origin, e.g. `https://netpro.example.com` (sets `AUTH_URL`) |
-| `GITHUB_CLIENT_ID` | For `github` | From your GitHub OAuth app |
-| `GITHUB_CLIENT_SECRET` | For `github` | From your GitHub OAuth app |
-| `NETPRO_OWNER_GITHUB_ID` | For `github` | Your **numeric** GitHub ID — `gh api users/YOUR_USERNAME --jq .id` |
+| `NETPRO_AUTH_MODE` | Recommended | `token` for a public deployment, `open` behind your own auth |
+| `NETPRO_AUTH_TOKEN` | For `token` | The access token every caller must present (or mount `~/.netpro/keys/access-token`) |
 | `NETPRO_AUTO_MIGRATE` | Recommended | `false` when you migrate as a release step — see [Migrations](#migrations) |
 | `NETPRO_HOST` | For remote API | Bind address — `127.0.0.1` (default) or `0.0.0.0` to expose deliberately |
 | `NETPRO_ALLOWED_ORIGINS` | For remote UI | CSV origin allow-list for a browser UI on another origin — see [checklist](#remote-exposure-checklist) |
@@ -108,26 +105,10 @@ Environment variables always win over `~/.netpro/config.toml` (where the
 local-first `netpro init` / `netpro serve` path stores its settings — see
 [local-first.md](local-first.md)). A container has no meaningful home-directory
 config by default, so this table remains the source of truth for deployments.
+Phase 24 removed the Web UI's own `DATABASE_URL`/Auth.js environment: the Web
+UI needs only `NETPRO_SERVER_URL` to reach the server.
 
-In `github` mode, `NETPRO_OWNER_GITHUB_ID` is the break-glass owner: if it is
-unset, membership in the bootstrap workspace decides who gets in. Get it wrong
-and either nobody can sign in (fails closed, safe) or the wrong account can.
-It is your numeric account ID, not your username and not the OAuth client ID.
-
-### 4. Create the GitHub OAuth app (only for `github` mode)
-
-**Settings → Developer settings → OAuth Apps → New OAuth App.**
-
-- Application name: anything (`NetPro`)
-- Homepage URL: `https://netpro.example.com`
-- Authorization callback URL: `https://netpro.example.com/api/auth/callback/github`
-
-Then set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `NEXTAUTH_SECRET`,
-`NETPRO_OWNER_GITHUB_ID`, and `APP_URL` to your origin. If the host assigns its
-domain on the first deploy, deploy once, then update the callback URL and
-`APP_URL`, then redeploy.
-
-### 5. Verify
+### 4. Verify
 
 ```bash
 curl https://netpro.example.com/api/health
@@ -145,19 +126,18 @@ authenticated caller.
 
 ```bash
 cp .env.example .env
-# Edit .env: set POSTGRES_PASSWORD and APP_URL. That is enough to run.
-# For a Web UI reachable from other machines, also set NETPRO_AUTH_MODE=github
-# and the GitHub variables (see step 2 above) — local mode is loopback-only.
+# Edit .env: set POSTGRES_PASSWORD. That is enough to run locally.
 docker compose build
 docker compose up -d
-curl http://localhost:3000/api/health   # Web UI process
-curl http://localhost:3777/api/health   # standalone NetPro API
+curl http://localhost:3000/            # Web UI (pure client — no /api of its own)
+curl http://localhost:3777/api/health  # standalone NetPro API
 ```
 
 The stack runs four services: `db` (Postgres 16), a one-shot `migrate` job,
 `server` (`@netpro/server`, the stable API/jobs/SSE process), and `web` (the
-Next.js UI). The web service waits for both migrations and the API health check,
-so it never performs schema changes on a request path. The API is published on
+Next.js UI). Phase 24 made the web service a pure client: it needs only
+`NETPRO_SERVER_URL` (pointed at `http://server:3777` on the private network)
+and waits for the API health check before starting. The API is published on
 `127.0.0.1:3777` and the UI on `127.0.0.1:3000` by default.
 
 Notes on the defaults:
@@ -167,16 +147,15 @@ Notes on the defaults:
   exposes your database to the internet. Uncomment the `ports` block in
   `docker-compose.yml` only if you need local inspection, and bind it to
   `127.0.0.1`.
-- **The web port is published on `127.0.0.1` only.** Local mode decides who is
-  the operator from the request's Host header, so the default deployment must
-  not be reachable from another machine. To expose it, set
-  `NETPRO_AUTH_MODE=github` (or `open` behind your own auth) *and* publish a
-  public interface deliberately — see
-  [phase-5-authentication.md](phase-5-authentication.md).
-- **`APP_URL` must be your real external origin when using `github` mode.** It
-  sets `AUTH_URL` (and `NEXTAUTH_URL`); see [Host trust](#host-trust).
+- **The web port is published on `127.0.0.1` only.** The Web UI has no
+  authentication of its own (Phase 24), so the default deployment must not be
+  reachable from another machine. To expose it, put your own auth/TLS reverse
+  proxy in front of port 3000 and publish a public interface deliberately.
+- **The API port is published on `127.0.0.1` only.** The server decides who is
+  the operator (loopback in `local` mode, the access token in `token` mode),
+  so publish `3777` publicly only behind your own auth.
 - For HTTPS, terminate TLS at a reverse proxy (Caddy, nginx, Traefik) in front
-  of port 3000 and set `APP_URL` to the `https://` origin.
+  of port 3000.
 
 Upgrades:
 
@@ -244,11 +223,11 @@ start so the console always shows what you chose.
    `config.toml`) is the only way off loopback. A remote bind with no access
    token mints one rather than serve strangers.
 2. **Authenticate.** `local` mode: remote callers present the access token
-   (`netpro token`, `Authorization: Bearer`). `open` mode answers anyone —
-   correct only behind a proxy/VPN that authenticates first; the server warns
-   on every start. Web UI sessions (`github` mode) need `NEXTAUTH_SECRET` plus
-   the OAuth variables in §3, and `APP_URL` must be the final HTTPS origin or
-   Auth.js fails with `UntrustedHost`.
+   (`netpro token`, `Authorization: Bearer`). `token` mode: every caller,
+   loopback included, presents the token. `open` mode answers anyone — correct
+   only behind a proxy/VPN that authenticates first; the server warns on every
+   start. The Web UI has no sessions of its own (Phase 24), so the only thing
+   a remote Web UI needs is your own reverse-proxy auth in front of it.
 3. **Terminate TLS.** The server speaks plain HTTP; put nginx/Caddy/Traefik in
    front for anything beyond a trusted LAN, forward `X-Forwarded-Host` and
    `X-Forwarded-Proto`, and set `NETPRO_HSTS=true` so browsers remember the
@@ -278,25 +257,27 @@ start so the console always shows what you chose.
 
 ## Configuration reference
 
+> **Phase 24 note.** The feature sections below (Skills, Events, Graph, profile
+> view tracking, viewer analytics, content tracker, data retention, encrypted
+> provider keys, the workspace-scoped CRM, the plugin marketplace, and
+> outbound webhooks) document capabilities that live in `@netpro/core` and are
+> driven by the CLI (`netpro skills`, `netpro events`, `netpro card`, `netpro
+> content`, `netpro plugin`, …). Their old Web UI pages and their Next.js API
+> routes (`/api/skills/*`, `/api/card/*`, `/api/content/*`,
+> `/api/interactions`, `/api/follow-ups`, `/api/webhooks/*`, …) were removed in
+> Phase 24 — the standalone server's route table is the only API; see
+> [phase-24-deprecate-old-web.md](phase-24-deprecate-old-web.md).
+
 ### Host trust
 
-Auth.js v5 decides whether to trust the incoming `Host` header from
-`AUTH_URL`, `AUTH_TRUST_HOST`, or a non-production `NODE_ENV` — **not** from
-`NEXTAUTH_URL`. Because NetPro documents `NEXTAUTH_URL`, it also treats a
-configured `NEXTAUTH_URL` as an explicit statement of trust
-(`apps/web/lib/trust-host.ts`); naming your own origin is the same decision
-`AUTH_TRUST_HOST` asks for. This only matters in `NETPRO_AUTH_MODE=github`;
-local mode never asks Auth.js for a session.
-
-If you see this in your logs, one of those values is missing:
-
-```
-[auth][error] UntrustedHost: Host must be trusted. URL was: .../api/auth/session
-```
-
-Behind a reverse proxy, make sure it sets `X-Forwarded-Host` and
-`X-Forwarded-Proto` correctly — card writes enforce same-origin using them.
-Set `AUTH_TRUST_HOST=false` to force trust off if your proxy is untrusted.
+Phase 24 removed Auth.js from the Web UI, so there is no `AUTH_URL`,
+`AUTH_TRUST_HOST`, or `NEXTAUTH_URL` to configure and no `UntrustedHost`
+failure mode. The server's own loopback trust is the only "host trust" that
+remains: a request is treated as the local operator only when the socket peer
+is a loopback address *and* no proxy headers (`X-Forwarded-For`,
+`X-Real-IP`, `Forwarded`) are present. Behind a reverse proxy, make sure it
+sets `X-Forwarded-Host` and `X-Forwarded-Proto` correctly, and authenticate
+callers with a token (`token` mode) or your own proxy auth (`open` mode).
 
 ### Database TLS
 
@@ -462,7 +443,7 @@ request must never break the visitor's page.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `NETPRO_VIEW_SALT` | `NEXTAUTH_SECRET`, then a built-in constant | Base salt for the daily-salted HMAC viewer hashes (`viewer_ip`, `viewer_fingerprint`). Set your own on a fresh install; the hashes are never reversible, and changing the salt later does not break anything — it only resets the 5-minute / 1-hour de-duplication windows and the owner-view lookback. |
+| `NETPRO_VIEW_SALT` | a built-in constant | Base salt for the daily-salted HMAC viewer hashes (`viewer_ip`, `viewer_fingerprint`). Set your own on a fresh install; the hashes are never reversible, and changing the salt later does not break anything — it only resets the 5-minute / 1-hour de-duplication windows and the owner-view lookback. |
 | `NETPRO_DISABLE_VIEWS` | *(unset)* | `true` → the beacons keep answering exactly as usual (GIF 200, `{ counted: false, reason: "disabled" }`) but write no rows. The rest of the card, and the settings panel (which says "Disabled"), keep working. |
 
 Operational notes:
@@ -546,9 +527,10 @@ purge ran within the last 24 h. So:
   (idempotent — the second removes nothing) and both log. A duplicate costs
   one extra zero-count row; correctness never depends on the race.
 
-The schedule starts in `instrumentation.ts` after the startup migrations and
-is independent of `NETPRO_AUTO_MIGRATE` (it is DML, not DDL). A purge
-failure is logged and swallowed — it never affects request paths.
+The schedule starts in the standalone server (`packages/server/src/retention.ts`,
+wired into `netpro serve`) since Phase 24 and is independent of
+`NETPRO_AUTO_MIGRATE` (it is DML, not DDL). A purge failure is logged and
+swallowed — it never affects request paths.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
@@ -556,8 +538,9 @@ failure is logged and swallowed — it never affects request paths.
 | `NETPRO_VIEW_RETENTION_DAYS` | `90` | Raw-view window. Positive integers only; garbage/zero/negative values fall back to the default (a typo must not widen the window to "delete everything"). |
 | `NETPRO_CONTENT_METRIC_RETENTION_DAYS` | `365` | Content-snapshot window; same lenient parsing. |
 
-The Settings → Card tracking panel shows the effective windows, so the UI
-and the job can never promise different horizons.
+The effective windows are resolved from the same environment variables by the
+server job and the CLI, so the purge and `netpro card --views` can never
+promise different horizons.
 
 ### Security headers
 
@@ -572,17 +555,13 @@ additionally marked no-store so no shared cache or CDN retains private data.
 ## Production checklist
 
 - [ ] `DB_DIALECT=postgresql` with a managed Postgres `DATABASE_URL` (never SQLite)
-- [ ] A deliberate `NETPRO_AUTH_MODE` — `github` (or `open` behind your own auth) for anything reachable beyond loopback
-- [ ] `NEXTAUTH_SECRET` generated with `openssl rand -base64 32`, unique to this instance (github mode)
+- [ ] A deliberate `NETPRO_AUTH_MODE` — `token` (or `open` behind your own auth) for anything reachable beyond loopback
+- [ ] `NETPRO_AUTH_TOKEN` set (or `~/.netpro/keys/access-token` mounted) in `token` mode
 - [ ] `netpro reindex` run once after deploying (search falls back to substring matching until it is)
-- [ ] `NETPRO_OWNER_GITHUB_ID` is your numeric GitHub ID, and you can sign in (github mode)
-- [ ] Anyone else's GitHub account is rejected at sign-in
-- [ ] `NEXTAUTH_URL` (or `AUTH_URL`) matches your real HTTPS origin (github mode)
-- [ ] OAuth callback URL registered as `<origin>/api/auth/callback/github`
 - [ ] `/api/health` returns `healthy`
-- [ ] `/api/card` returns 401 when signed out
-- [ ] `/api/events` returns 401 when signed out (every `/api` route is owner-only)
-- [ ] The web process can hold your graph in memory (comfortable to ~50k edges; see [Graph](#graph-v20-phases-23))
+- [ ] `/api/contacts` returns 401 when no token is presented (in `token` mode)
+- [ ] The Web UI is behind your own auth if published beyond loopback
+- [ ] The server process can hold your graph in memory (comfortable to ~50k edges; see [Graph](#graph-v20-phases-23))
 - [ ] Postgres is not reachable from the public internet
 - [ ] Migrations run as a deploy step, with `NETPRO_AUTO_MIGRATE=false`
 - [ ] You have a database backup/restore plan — NetPro does not make backups
@@ -591,9 +570,12 @@ additionally marked no-store so no shared cache or CDN retains private data.
 
 ## Troubleshooting
 
-**`UntrustedHost` in the logs, every request 401s, `/api/auth/providers`
-returns a configuration error.** Set `NEXTAUTH_URL` (or `AUTH_URL`) to your
-external origin and restart. See [Host trust](#host-trust).
+**Every request 401s, even from the machine the server runs on.** In `token`
+mode every caller needs the access token — `netpro token` prints it, and
+`Authorization: Bearer <token>` (or `?token=` for the EventSource) admits the
+caller. In `local` mode a 401 from a non-loopback caller is expected: present
+the token instead. See [Host trust](#host-trust) and
+[phase-5-authentication.md](phase-5-authentication.md).
 
 **`SELF_SIGNED_CERT_IN_CHAIN` / `unable to verify the first certificate`.**
 Your provider signs with its own CA. Append `?sslmode=require` to

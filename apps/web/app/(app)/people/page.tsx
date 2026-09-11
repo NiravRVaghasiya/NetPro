@@ -1,24 +1,22 @@
 // apps/web/app/(app)/people/page.tsx
 //
-// Phase 9 — People: the server-backed contacts list.
+// Phase 24 — People: the server-backed contacts list.
 //
 // The plan's "People" is the Web UI's CRM surface. It must not duplicate
 // `packages/core`'s contact logic — it calls the server's Web API, which
-// orchestrates `packages/core/src/crm`. This page demonstrates that contract:
+// orchestrates `packages/core/src/crm`. This page is that contract, with the
+// Phase 24 simplification: the direct-DB fallback is gone, so the Web UI is a
+// pure client of `GET /api/contacts` and never opens the database itself.
 //
 //   GET /api/contacts?limit=&offset=&sort=   → { contacts, total, limit, offset }
-//   GET /api/contacts/:id                    → ContactTimeline (via /contacts/[id])
+//   GET /api/contacts/:id                    → ContactTimeline (via /people/[id])
 //
 // The server is the source of truth for workspace scoping; the browser never
-// invents an id. When the server is not reachable the page falls back to the
-// direct-DB CRM (the same codepath the legacy /contacts page uses) so the
-// operator is not blocked during `next dev`.
+// invents an id. When the server is not reachable the page shows a banner —
+// run `netpro serve` — rather than silently reading the database.
 
 import Link from "next/link";
-import { requireScope } from "@/lib/authz";
 import { getServerUrl, serverFetchJson } from "@/lib/netpro-server";
-import { conn } from "@/lib/db";
-import { listCrmContacts } from "@netpro/core/src/crm";
 
 export const metadata = { title: "People — NetPro" };
 
@@ -28,12 +26,21 @@ function one(v: string | string[] | undefined): string | undefined {
   return s ? s : undefined;
 }
 
+type ContactRow = {
+  id: string;
+  fullName: string;
+  company?: string | null;
+  role?: string | null;
+  email?: string | null;
+  relationshipScore?: number | null;
+  lastInteraction?: string | null;
+};
+
 export default async function PeoplePage({
   searchParams,
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireScope();
   const sp = await searchParams;
   const limit = Math.min(Math.max(Number(one(sp.limit) ?? 25), 1), 100);
   const offset = Math.max(Number(one(sp.offset) ?? 0), 0);
@@ -41,16 +48,7 @@ export default async function PeoplePage({
   const q = one(sp.q) ?? one(sp.query) ?? "";
   const serverUrl = getServerUrl();
 
-  // Prefer server; fall back to direct core.
-  let contacts: Array<{
-    id: string;
-    fullName: string;
-    company?: string | null;
-    role?: string | null;
-    email?: string | null;
-    relationshipScore?: number | null;
-    lastInteraction?: string | null;
-  }> = [];
+  let contacts: ContactRow[] = [];
   let total = 0;
   let serverReachable = false;
   let serverError: string | null = null;
@@ -61,46 +59,28 @@ export default async function PeoplePage({
       offset: String(offset),
       sort,
     });
-    if (q) qs.set("q", q);
-    // The server's /api/contacts does not support free-text `q` yet — it is a
-    // CRM list. When `q` is present we hit /api/search instead, which is the
-    // hybrid path. For now keep people as the CRM list and use search for `q`.
-    const path = q ? `/api/search?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}` : `/api/contacts?${qs.toString()}`;
+    // The server's /api/contacts is a CRM list; free-text `q` goes to the
+    // hybrid search path (/api/search returns the same contact shape).
+    const path = q
+      ? `/api/search?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`
+      : `/api/contacts?${qs.toString()}`;
     const res = await serverFetchJson<{
-      contacts?: typeof contacts;
+      contacts?: ContactRow[];
       total?: number;
-      // search shape is also supported
     }>(path);
     if (res.ok) {
-      const data = res.data as { contacts?: typeof contacts; total?: number };
-      // /api/search returns { contacts, total } as well, so unify.
-      if (Array.isArray((data as { contacts: unknown }).contacts)) {
-        contacts = (data as { contacts: typeof contacts }).contacts;
+      const data = res.data;
+      if (Array.isArray(data.contacts)) {
+        contacts = data.contacts;
         total = data.total ?? contacts.length;
-      } else if (Array.isArray((data as unknown as { results?: unknown[] }).results)) {
-        // Defensive: some search impls return results
-        contacts = [];
-        total = 0;
       }
       serverReachable = true;
     } else {
-      serverError = (res.data as { error?: string })?.error ?? `Server ${res.status}`;
+      serverError =
+        (res.data as { error?: string })?.error ?? `Server ${res.status}`;
     }
   } catch (e) {
     serverError = e instanceof Error ? e.message : String(e);
-  }
-
-  if (!serverReachable) {
-    try {
-      // Direct-DB fallback — never duplicates business logic, just calls core.
-      const page = await listCrmContacts(conn, { limit, offset, sort: (sort as "recent" | "score" | "name" | "follow-up") ?? "recent" });
-      contacts = page.contacts as typeof contacts;
-      total = page.total;
-    } catch (e) {
-      serverError = e instanceof Error ? e.message : String(e);
-      contacts = [];
-      total = 0;
-    }
   }
 
   return (
@@ -115,10 +95,9 @@ export default async function PeoplePage({
               matching &quot;{q}&quot;
             </>
           ) : null}
-          {!serverReachable ? <span style={{ color: "#92400e" }}> — local</span> : null}
         </span>
         <span style={{ color: "#9ca3af", fontSize: "0.8rem", marginLeft: "auto" }}>
-          via {serverReachable ? serverUrl : "local DB"}
+          via {serverUrl}
         </span>
       </div>
 
@@ -134,8 +113,8 @@ export default async function PeoplePage({
             fontSize: "0.85rem",
           }}
         >
-          Server not reachable at <code>{serverUrl}</code> — showing local data. Run <code>netpro serve</code> for the server-backed
-          view with live updates. {serverError ? <em> ({serverError})</em> : null}
+          Server not reachable at <code>{serverUrl}</code> — run <code>netpro serve</code> for the People list.{" "}
+          {serverError ? <em> ({serverError})</em> : null}
         </div>
       ) : null}
 
@@ -191,7 +170,7 @@ export default async function PeoplePage({
               {contacts.map((c) => (
                 <tr key={c.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
                   <td style={{ padding: "0.5rem 0.6rem" }}>
-                    <Link href={`/contacts/${c.id}`} style={{ color: "#2563eb" }}>
+                    <Link href={`/people/${c.id}`} style={{ color: "#2563eb" }}>
                       {c.fullName}
                     </Link>
                   </td>
@@ -229,11 +208,7 @@ export default async function PeoplePage({
 
       <p style={{ marginTop: "1rem", color: "#6b7280", fontSize: "0.85rem" }}>
         This page calls <code>GET /api/contacts</code> and <code>GET /api/search</code> on the local NetPro server, which in turn
-        calls <code>@netpro/core</code> — the UI never reimplements CRM scoring. Legacy route{" "}
-        <Link href="/contacts" style={{ color: "#2563eb" }}>
-          /contacts
-        </Link>{" "}
-        remains until Phase 24.
+        calls <code>@netpro/core</code> — the UI never reimplements CRM scoring.
       </p>
     </div>
   );

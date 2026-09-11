@@ -20,8 +20,9 @@
 //
 // What this replaces: GitHub OAuth as the application's identity system. The
 // server never needs GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET,
-// NETPRO_OWNER_GITHUB_ID, NEXTAUTH_SECRET, or NEXTAUTH_URL to run — those
-// remain available to `apps/web` as an optional sign-in integration.
+// NETPRO_OWNER_GITHUB_ID, NEXTAUTH_SECRET, or NEXTAUTH_URL to run. Phase 24
+// removed the Web UI's Auth.js sign-in entirely, so there is no GitHub
+// integration left anywhere: `local` / `token` / `open` are the only modes.
 //
 // This module performs no domain work: it answers "who is calling?" and
 // nothing else. Authorization decisions stay with the routes.

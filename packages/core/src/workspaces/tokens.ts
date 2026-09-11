@@ -2,7 +2,9 @@
 // HMAC-signed, expiring invite tokens — same construction as the ?v= view tokens.
 // Token format: base64url(inviteId|expiresAtMs|hmac)
 // hmac = HMAC-SHA256(secret, inviteId|expiresAtMs)
-// Verification is timing-safe; expiration is checked; secret is NEXTAUTH_SECRET.
+// Verification is timing-safe; expiration is checked. The secret is supplied by
+// the caller (`netpro team invite` reads NETPRO_INVITE_SECRET; the old
+// NEXTAUTH_SECRET name still works as a fallback).
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { WorkspaceError } from './types';
@@ -23,7 +25,7 @@ function hmac(secret: string, message: string): string {
  * Create a signed invite token.
  * @param inviteId - the invite row id
  * @param expiresAt - expiration date
- * @param secret - HMAC secret (NEXTAUTH_SECRET)
+ * @param secret - HMAC secret (caller-supplied; see file header)
  */
 export function createInviteToken(
   inviteId: string,

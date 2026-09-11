@@ -55,7 +55,9 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@netpro/core", "@netpro/db"],
+  // Phase 24 — the Web UI no longer imports @netpro/core or @netpro/db, so no
+  // workspace packages need transpiling. The UI is a pure client of the
+  // standalone `@netpro/server` process.
   reactStrictMode: true,
   // Arena's HTTPS reverse-proxy previews (development only).
   allowedDevOrigins: ["*.e2b.app"],

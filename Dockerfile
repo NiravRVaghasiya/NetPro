@@ -147,7 +147,10 @@ EXPOSE 3000 3777
 # though the server is up and answering fine on 127.0.0.1. Verified directly
 # with `docker exec ... wget http://localhost:3000/...` (fails) vs
 # `wget http://127.0.0.1:3000/...` (succeeds) against a running container.
+# Phase 24 — the Web UI has no /api routes of its own, so the healthcheck
+# probes the landing page. The standalone @netpro/server (compose `server`
+# service) carries its own /api/health probe.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
+  CMD wget -qO- http://127.0.0.1:3000/ || exit 1
 
 CMD ["node", "apps/web/server.js"]

@@ -5,38 +5,50 @@
 //
 // The page is a client of the local NetPro server (`GET /api/search`, which
 // orchestrates `packages/core/search` — portable/portable+FTS/hybrid with RRF
-// fusion stay in core) and degrades to the same core call when the server is
-// not running, so `next dev` without `netpro serve` keeps working.
+// fusion stay in core). Phase 24 removed the direct-DB fallback, so the Web
+// UI never runs the search engine itself: it translates the URL into the
+// server's query string and renders the response.
 //
 // Filters cover the plan's list — Name, Company, Role, Location, Skills,
 // Tags, Relationship strength, Community (plus the pre-existing Industry,
 // Seniority, Has-email, and recency refinements) — and every hit explains
-// itself ("Matched because ✓ …") with core's pure `explainMatch`, the same
-// lines `netpro search --explain` prints.
+// itself ("Matched because ✓ …") with the `matchReasons` the server computes
+// from core's pure `explainMatch`.
 
 import Link from "next/link";
-import { requireScope } from "@/lib/authz";
-import { conn } from "@/lib/db";
 import { getServerUrl, serverFetchJson } from "@/lib/netpro-server";
-import {
-  explainMatch,
-  isSearchMode,
-  searchContacts,
-  type ContactSearchResult,
-  type FacetBucket,
-  type MatchReason,
-  type SearchContactsOptions,
-  type SearchEngineReport,
-  type SearchFacets,
-} from "@netpro/core/src/search";
-import { searchEmbedder, semanticSearchAvailable } from "@/lib/search-config";
-import { providerEnvironment, providerStatusEnvironment } from "@/lib/vault";
 
 export const metadata = { title: "Search — NetPro" };
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-type SearchHit = ContactSearchResult & { matchReasons?: MatchReason[] };
+type MatchReason = { text: string };
+
+type SearchHit = {
+  id: string;
+  fullName: string;
+  company?: string | null;
+  role?: string | null;
+  email?: string | null;
+  location?: string | null;
+  relationshipScore?: number | null;
+  skills?: string[];
+  tags?: string[];
+  matchReasons?: MatchReason[];
+};
+
+type FacetBucket = { value: string; count: number };
+type SearchFacets = Record<string, FacetBucket[]>;
+
+type SearchEngineReport = {
+  requested: string;
+  mode: string;
+  arms: {
+    keyword: { used: boolean; reason?: string };
+    semantic: { used: boolean; reason?: string };
+  };
+  truncated: boolean;
+};
 
 type SearchResults = {
   contacts: SearchHit[];
@@ -46,6 +58,8 @@ type SearchResults = {
   facets: SearchFacets;
   engine: SearchEngineReport;
 };
+
+const SEARCH_MODES = ["portable", "keyword", "hybrid"] as const;
 
 function one(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -131,7 +145,6 @@ export default async function SearchPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const scope = await requireScope();
   const sp = await searchParams;
   const serverUrl = getServerUrl();
 
@@ -144,15 +157,13 @@ export default async function SearchPage({
   // bookmark should still render results, and the engine badge reports what
   // actually ran.
   const requestedMode = one(sp.mode);
-  const mode = isSearchMode(requestedMode) ? requestedMode : undefined;
+  const mode = (SEARCH_MODES as readonly string[]).includes(requestedMode ?? "")
+    ? requestedMode
+    : undefined;
 
-  // Hand-typed URLs must not 500 the page: unparseable numbers degrade to
-  // "no filter", exactly as the server route treats them.
   const minScoreRaw = one(sp.minScore);
   const minScoreNum =
-    minScoreRaw === undefined || minScoreRaw === ""
-      ? undefined
-      : Number(minScoreRaw);
+    minScoreRaw === undefined || minScoreRaw === "" ? undefined : Number(minScoreRaw);
   const minScore =
     minScoreNum !== undefined &&
     Number.isFinite(minScoreNum) &&
@@ -172,36 +183,22 @@ export default async function SearchPage({
       ? Math.trunc(activeWithinNum)
       : undefined;
 
-  const options: SearchContactsOptions = {
-    query: one(sp.q),
-    name: one(sp.name),
-    company: one(sp.company),
-    role: one(sp.role),
-    location: one(sp.location),
-    industry: one(sp.industry),
-    seniority: one(sp.seniority),
-    hasEmail: one(sp.hasEmail) === "true",
-    minScore,
-    lastActiveWithinDays: activeWithin,
-    skills: splitList(one(sp.skills)),
-    tags: splitList(one(sp.tags)),
-    community: one(sp.community),
-    sort: (one(sp.sort) as SearchContactsOptions["sort"]) ?? "relevance",
-    limit,
-    offset,
-    mode,
-  };
+  // The semantic toggle is only offered when the *server* reports it as
+  // available (GET /api/providers → capabilities.semanticSearch). The UI never
+  // inspects provider keys itself (Phase 17).
+  let semanticAvailable = false;
+  try {
+    const providers = await serverFetchJson<{
+      capabilities?: { semanticSearch?: string };
+    }>("/api/providers");
+    if (providers.ok) {
+      semanticAvailable = providers.data.capabilities?.semanticSearch === "available";
+    }
+  } catch {
+    semanticAvailable = false;
+  }
 
-  const embeddingEnv =
-    mode === "hybrid"
-      ? await providerEnvironment(["embeddings.openai", "outreach.openai"])
-      : await providerStatusEnvironment([
-          "embeddings.openai",
-          "outreach.openai",
-        ]);
-  const semanticAvailable = semanticSearchAvailable(embeddingEnv);
-
-  // ── Server first, core fallback ────────────────────────────────────
+  // ── Server call ─────────────────────────────────────────────────────
   let results: SearchResults | null = null;
   let serverError: string | null = null;
   let communityLabels: string[] = [];
@@ -210,20 +207,22 @@ export default async function SearchPage({
     const set = (k: string, v: string | undefined): void => {
       if (v !== undefined && v !== "") qs.set(k, v);
     };
-    set("q", options.query);
-    set("name", options.name);
-    set("company", options.company);
-    set("role", options.role);
-    set("location", options.location);
-    set("industry", options.industry);
-    set("seniority", options.seniority);
-    if (options.hasEmail) qs.set("hasEmail", "true");
+    set("q", one(sp.q));
+    set("name", one(sp.name));
+    set("company", one(sp.company));
+    set("role", one(sp.role));
+    set("location", one(sp.location));
+    set("industry", one(sp.industry));
+    set("seniority", one(sp.seniority));
+    if (one(sp.hasEmail) === "true") qs.set("hasEmail", "true");
     if (minScore !== undefined) qs.set("minScore", String(minScore));
     if (activeWithin !== undefined) qs.set("activeWithin", String(activeWithin));
-    if (options.skills) qs.set("skills", options.skills.join(","));
-    if (options.tags) qs.set("tags", options.tags.join(","));
-    set("community", options.community);
-    set("sort", options.sort);
+    const skills = splitList(one(sp.skills));
+    const tags = splitList(one(sp.tags));
+    if (skills) qs.set("skills", skills.join(","));
+    if (tags) qs.set("tags", tags.join(","));
+    set("community", one(sp.community));
+    set("sort", one(sp.sort));
     qs.set("limit", String(limit));
     qs.set("offset", String(offset));
     if (mode) qs.set("mode", mode);
@@ -251,22 +250,29 @@ export default async function SearchPage({
   } catch (e) {
     serverError = e instanceof Error ? e.message : String(e);
   }
+
+  const activeSort = one(sp.sort) ?? "relevance";
+
   if (!results) {
-    const fallback = await searchContacts(
-      conn,
-      options,
-      mode === "hybrid" ? { embedder: searchEmbedder(embeddingEnv) } : {},
-      scope,
+    return (
+      <div>
+        <h1>Search</h1>
+        <div
+          style={{
+            background: "#fffbeb",
+            border: "1px solid #fde68a",
+            color: "#92400e",
+            borderRadius: 10,
+            padding: "0.6rem 0.9rem",
+            marginTop: "0.75rem",
+          }}
+        >
+          Server not reachable at <code>{serverUrl}</code> — run <code>netpro serve</code> for search.{" "}
+          {serverError ? <em>({serverError})</em> : null}
+        </div>
+      </div>
     );
-    results = {
-      ...fallback,
-      contacts: fallback.contacts.map((c) => ({
-        ...c,
-        matchReasons: explainMatch(c, options),
-      })),
-    };
   }
-  const activeSort = options.sort ?? "relevance";
 
   return (
     <div>
@@ -274,12 +280,6 @@ export default async function SearchPage({
       <p style={{ color: "#6b7280", fontSize: "0.9rem", marginTop: 0 }}>
         Hybrid people search — name, company, role, location, skills, tags,
         relationship strength, community. Server: <code>{serverUrl}</code>
-        {serverError ? (
-          <span style={{ color: "#92400e" }}>
-            {" "}
-            — {serverError} (local fallback)
-          </span>
-        ) : null}
       </p>
 
       <form method="GET" action="/search">
@@ -287,7 +287,7 @@ export default async function SearchPage({
           type="search"
           name="q"
           placeholder="Search by name, company, role, email…"
-          defaultValue={options.query ?? ""}
+          defaultValue={one(sp.q) ?? ""}
           aria-label="Search contacts"
         />
         <select
@@ -297,8 +297,8 @@ export default async function SearchPage({
         >
           <option value="portable">Exact match</option>
           <option value="keyword">Smart (full-text)</option>
-          {/* Only offered when a key is configured: a toggle that silently
-              does nothing is worse than no toggle. */}
+          {/* Only offered when the server has a key configured: a toggle that
+              silently does nothing is worse than no toggle. */}
           {semanticAvailable ? (
             <option value="hybrid">Smart + semantic</option>
           ) : null}
@@ -323,7 +323,7 @@ export default async function SearchPage({
         }}
       >
         {/* Preserve the free-text query, engine, and sort across filter changes. */}
-        <input type="hidden" name="q" value={options.query ?? ""} />
+        <input type="hidden" name="q" value={one(sp.q) ?? ""} />
         {mode ? <input type="hidden" name="mode" value={mode} /> : null}
         <input type="hidden" name="sort" value={activeSort} />
         <label style={{ display: "grid", gap: "0.15rem" }}>
@@ -331,7 +331,7 @@ export default async function SearchPage({
           <input
             name="name"
             placeholder="Full name"
-            defaultValue={options.name ?? ""}
+            defaultValue={one(sp.name) ?? ""}
           />
         </label>
         <label style={{ display: "grid", gap: "0.15rem" }}>
@@ -339,7 +339,7 @@ export default async function SearchPage({
           <input
             name="company"
             placeholder="Company"
-            defaultValue={options.company ?? ""}
+            defaultValue={one(sp.company) ?? ""}
           />
         </label>
         <label style={{ display: "grid", gap: "0.15rem" }}>
@@ -347,7 +347,7 @@ export default async function SearchPage({
           <input
             name="role"
             placeholder="Role"
-            defaultValue={options.role ?? ""}
+            defaultValue={one(sp.role) ?? ""}
           />
         </label>
         <label style={{ display: "grid", gap: "0.15rem" }}>
@@ -355,7 +355,7 @@ export default async function SearchPage({
           <input
             name="location"
             placeholder="Location"
-            defaultValue={options.location ?? ""}
+            defaultValue={one(sp.location) ?? ""}
           />
         </label>
         <label style={{ display: "grid", gap: "0.15rem" }}>
@@ -363,7 +363,7 @@ export default async function SearchPage({
           <input
             name="industry"
             placeholder="Industry"
-            defaultValue={options.industry ?? ""}
+            defaultValue={one(sp.industry) ?? ""}
           />
         </label>
         <label style={{ display: "grid", gap: "0.15rem" }}>
@@ -371,7 +371,7 @@ export default async function SearchPage({
           <input
             name="skills"
             placeholder="python, kubernetes"
-            defaultValue={options.skills?.join(", ") ?? ""}
+            defaultValue={splitList(one(sp.skills))?.join(", ") ?? ""}
           />
         </label>
         <label style={{ display: "grid", gap: "0.15rem" }}>
@@ -379,7 +379,7 @@ export default async function SearchPage({
           <input
             name="tags"
             placeholder="founder, ai"
-            defaultValue={options.tags?.join(", ") ?? ""}
+            defaultValue={splitList(one(sp.tags))?.join(", ") ?? ""}
           />
         </label>
         <label style={{ display: "grid", gap: "0.15rem" }}>
@@ -389,7 +389,7 @@ export default async function SearchPage({
           <input
             name="community"
             placeholder="Label, Community N, or id"
-            defaultValue={options.community ?? ""}
+            defaultValue={one(sp.community) ?? ""}
             list="netpro-communities"
           />
         </label>
@@ -424,7 +424,7 @@ export default async function SearchPage({
           <span style={{ fontSize: "0.75rem", color: "#6b7280" }}>
             Seniority
           </span>
-          <select name="seniority" defaultValue={options.seniority ?? ""}>
+          <select name="seniority" defaultValue={one(sp.seniority) ?? ""}>
             <option value="">Any seniority</option>
             {SENIORITIES.map((s) => (
               <option key={s} value={s}>
@@ -440,7 +440,7 @@ export default async function SearchPage({
             type="checkbox"
             name="hasEmail"
             value="true"
-            defaultChecked={options.hasEmail}
+            defaultChecked={one(sp.hasEmail) === "true"}
           />
           Has email
         </label>
@@ -532,7 +532,7 @@ function SearchHitCard({ hit }: { hit: SearchHit }) {
         }}
       >
         <Link
-          href={`/contacts/${hit.id}`}
+          href={`/people/${hit.id}`}
           style={{ fontWeight: 600, color: "#111827", fontSize: "1.05rem" }}
         >
           {hit.fullName}
@@ -540,14 +540,14 @@ function SearchHitCard({ hit }: { hit: SearchHit }) {
         <span
           style={{
             fontSize: "0.8rem",
-            color: scoreTone(hit.relationshipScore),
-            border: `1px solid ${scoreTone(hit.relationshipScore)}33`,
+            color: scoreTone(hit.relationshipScore ?? null),
+            border: `1px solid ${scoreTone(hit.relationshipScore ?? null)}33`,
             borderRadius: 999,
             padding: "0.05rem 0.5rem",
           }}
           title="Relationship strength"
         >
-          {hit.relationshipScore !== null
+          {hit.relationshipScore !== null && hit.relationshipScore !== undefined
             ? `strength ${hit.relationshipScore.toFixed(2)}`
             : "no score yet"}
         </span>
@@ -690,7 +690,7 @@ function EngineBadge({
 
 function Facets({ facets, sp }: { facets: SearchFacets; sp: SearchParams }) {
   const facetDefs: Array<{
-    key: keyof SearchFacets;
+    key: string;
     param: string;
     label: string;
   }> = [

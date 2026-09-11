@@ -19,9 +19,9 @@
 //     plan says *respect*, not *refuse*), but only page + time + bot flag
 //     are stored: no geo, no UA, no referrer, no UTM, no fingerprint.
 //   * **Signed contact resolution** — `?v=` tokens let the owner share a
-//     personalized card link; the token is an HMAC under
-//     `NEXTAUTH_SECRET` with a 30-day cap, and the referenced contact must
-//     still exist. No auto-resolution from IP or email, ever.
+//     personalized card link; the token is an HMAC under a caller-supplied
+//     secret with a 30-day cap, and the referenced contact must still exist.
+//     No auto-resolution from IP or email, ever.
 import {
   createHmac,
   randomBytes,
@@ -456,8 +456,10 @@ function timingSafeEqualHex(a: string, b: string): boolean {
 }
 
 /**
- * Mint a `?v=` token for one contact. `secret` is `NEXTAUTH_SECRET`; an
- * empty secret produces a token no verification will accept (and callers
+ * Mint a `?v=` token for one contact. `secret` is a caller-supplied HMAC
+ * secret (the view beacon's caller chose `NETPRO_VIEW_SALT`/`NEXTAUTH_SECRET`
+ * historically; Phase 24 removed the Auth.js sign-in those names came from).
+ * An empty secret produces a token no verification will accept (and callers
  * should disable the feature instead).
  */
 export function createContactViewToken(

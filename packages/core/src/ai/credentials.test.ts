@@ -5,7 +5,7 @@ import { AiProviderError } from "./types";
 // A fetch that returns a minimal valid completion for whichever endpoint is
 // called, so we can exercise constructed providers without network access.
 function recordingFetch(expectedUrl: string): typeof fetch {
-  return (async (input: RequestInfo | URL) => {
+  return (async (input: string | URL) => {
     const url = String(input);
     expect(url).toBe(expectedUrl);
     return {

@@ -59,7 +59,15 @@ export function registerTeamCommand(program: Command): void {
     .action(async (opts) => {
       const conn = getConn();
       await ensureBootstrapWorkspace(conn);
-      const secret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || 'dev-secret-please-set-NEXTAUTH_SECRET';
+      // Phase 24 — invite tokens no longer piggyback on Auth.js' secret. Prefer
+      // the NetPro-named variable; the old names still work as a fallback so
+      // pre-existing invite flows keep verifying, and an unset secret degrades
+      // to a local-only default (the invite surface is loopback-only anyway).
+      const secret =
+        process.env.NETPRO_INVITE_SECRET ||
+        process.env.NEXTAUTH_SECRET ||
+        process.env.AUTH_SECRET ||
+        'netpro-local-invite-secret';
       const expiresInDays = Number(opts.expires);
       const { invite, rawToken } = await createInvite(conn, {
         workspaceId: 'default',

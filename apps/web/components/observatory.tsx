@@ -10,10 +10,11 @@
 //   * Server-fetched: /api/analytics, /api/graph, /api/jobs, /api/providers (via @/lib/netpro-server)
 //   * Live:          /api/events  (SSE — scan.progress, import.completed, …)
 //
-// The component is server-agnostic: when the server is unreachable it renders
-// the same shape from the direct-DB fallback, with a banner naming the server
-// URL. The Web UI never duplicates core logic — it visualizes what the
-// server's core already computed (Louvain, centrality, pathfinder, scoring).
+// The component is a pure server client: when the server is unreachable it
+// renders the empty shell plus a banner naming the server URL and pointing at
+// `netpro serve`. The Web UI never duplicates core logic — it visualizes what
+// the server's core already computed (Louvain, centrality, pathfinder,
+// scoring).
 
 import Link from 'next/link';
 

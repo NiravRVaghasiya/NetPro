@@ -16,7 +16,6 @@
 // the same server, so its job.* events appear here without a refresh.
 
 import Link from "next/link";
-import { requireScope } from "@/lib/authz";
 import { ActivityFeed } from "@/components/activity-feed";
 import { getServerUrl, serverFetchJson } from "@/lib/netpro-server";
 
@@ -105,7 +104,6 @@ export default async function ActivityPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireScope();
   const sp = await searchParams;
   const jobIdFilter = typeof sp.jobId === "string" ? sp.jobId : Array.isArray(sp.jobId) ? sp.jobId[0] : undefined;
   const typeFilter = typeof sp.type === "string" ? sp.type : undefined;
