@@ -140,12 +140,12 @@ export class JobRegistry {
   /** Create a new job in `queued` (or the requested status). */
   create(input: CreateJobInput): Job {
     if (!isJobType(input.type)) {
-      throw new Error(`Unknown job type \"${input.type}\". Expected one of: ${JOB_TYPES.join(', ')}.`);
+      throw new Error(`Unknown job type "${input.type}". Expected one of: ${JOB_TYPES.join(', ')}.`);
     }
     const status: JobStatus = input.status ?? 'queued';
-    if (!isJobStatus(status)) throw new Error(`Unknown job status \"${status}\".`);
+    if (!isJobStatus(status)) throw new Error(`Unknown job status "${status}".`);
     const id = input.id ?? randomUUID();
-    if (this.jobs.has(id)) throw new Error(`Job \"${id}\" already exists.`);
+    if (this.jobs.has(id)) throw new Error(`Job "${id}" already exists.`);
     const t = nowIso();
     const progress = status === 'completed' ? 100 : clampProgress(input.progress ?? 0);
     const startedAt = status === 'queued' ? null : t;

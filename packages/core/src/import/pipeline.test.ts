@@ -121,7 +121,7 @@ describe('runImport', () => {
     const csv = [
       'First Name,Last Name,Email Address,Company,Position,Connected On,URL',
       'Jane,Doe,jane@example.com,Stripe,Senior Engineer,,',
-      'John,Smith,john@example.com,Vercel,PM,not a date,',
+      'John,Smith,john@example.com,Acme,PM,not a date,',
     ].join('\n');
 
     const before = Date.now();
@@ -184,7 +184,7 @@ describe('runImport — search index production', () => {
   const CSV = [
     'First Name,Last Name,Email Address,Company,Position,Connected On,URL',
     'Jane,Doe,jane@stripe.com,Stripe,Senior Engineer,01 Jan 2024,',
-    'John,Smith,john@vercel.com,Vercel,Product Manager,02 Jan 2024,',
+    'John,Smith,john@acme.com,Acme,Product Manager,02 Jan 2024,',
   ].join('\n');
 
   it('indexes every imported contact and mirrors them into FTS5', async () => {

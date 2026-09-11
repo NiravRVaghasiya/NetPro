@@ -1,13 +1,16 @@
-// @ts-nocheck
+// End-to-end API smoke tests over real HTTP. They assert on loose JSON
+// envelopes whose field-level response types live with the route unit tests,
+// so `any` is confined to decoded response bodies in this file. tsc stays
+// fully active — this is an ESLint relaxation, not a compiler bypass.
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDb, runMigrations } from '@netpro/db';
+import { createDb, runMigrations, type SqliteConn } from '@netpro/db';
 import { createApp } from './app';
 import { startServer } from './server';
 import type { AuthPolicy } from './auth/index';
-import { runImport } from '@netpro/core/src/import';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -23,7 +26,9 @@ function scratchDb() {
   const path = join(dir, 'test.db');
   process.env.DB_DIALECT = 'sqlite';
   process.env.DB_PATH = path;
-  const conn = createDb();
+  // These smokes always run on a scratch SQLite file; pin the union so the
+  // synchronous better-sqlite3 builder methods type-check.
+  const conn = createDb() as SqliteConn;
   return { conn, path, dir };
 }
 
@@ -316,13 +321,14 @@ describe('Phase 6 Web API', () => {
         const { value, done } = await Promise.race([
           reader.read(),
           new Promise<{ value: undefined; done: true }>((_, reject) => setTimeout(() => reject(new Error('timeout')), 500)),
-        ]).catch(() => ({ value: undefined, done: true }) as any);
+        ]).catch(() => ({ value: undefined, done: true as const }));
         if (done) break;
         if (value) text += decoder.decode(value, { stream: true });
         if (text.includes('retry: 3000')) break;
       }
       controller.abort();
-      try { await reader.cancel(); } catch {}
+      // The abort may already have released the reader; cancel is best-effort.
+      try { await reader.cancel(); } catch { /* reader already released */ }
       expect(text).toContain('retry: 3000');
     } finally {
       await running.close();
@@ -570,10 +576,12 @@ describe('Phase 12 Search Experience', () => {
       const { status, body } = await getJson<SearchResponseJson>(`${running.url}/api/search?q=sarah`);
       expect(status).toBe(200);
       expect(body.total).toBe(1);
-      expect(body.contacts[0].id).toBe('c1');
-      expect(body.contacts[0].tags).toEqual(['founder', 'ai']);
-      expect(body.contacts[0].skills).toEqual(['python']);
-      const reasons = body.contacts[0].matchReasons;
+      const hit = body.contacts[0];
+      if (!hit) throw new Error('expected one search hit');
+      expect(hit.id).toBe('c1');
+      expect(hit.tags).toEqual(['founder', 'ai']);
+      expect(hit.skills).toEqual(['python']);
+      const reasons = hit.matchReasons;
       expect(reasons.length).toBeGreaterThan(0);
       expect(reasons.map((r) => r.text)).toContain('Name matches "sarah"');
     } finally {
@@ -599,7 +607,9 @@ describe('Phase 12 Search Experience', () => {
       // minScore still composes with the new filters.
       const strong = await getJson<SearchResponseJson>(`${running.url}/api/search?tags=founder&minScore=0.5`);
       expect(strong.body.contacts.map((c) => c.id)).toEqual(['c1']);
-      expect(strong.body.contacts[0].matchReasons.map((r) => r.text)).toContain(
+      const strongHit = strong.body.contacts[0];
+      if (!strongHit) throw new Error('expected the strong-tie hit');
+      expect(strongHit.matchReasons.map((r) => r.text)).toContain(
         'Relationship strength 0.85 (minimum 0.5)'
       );
     } finally {
@@ -641,6 +651,7 @@ describe('Phase 13 Pathfinder', () => {
       expect(plan.found).toBe(true);
       expect(plan.paths.length).toBeGreaterThanOrEqual(1);
       const top = plan.paths[0];
+      if (!top) throw new Error('expected at least one ranked path');
       expect(top.hops).toBe(1);
       expect(top.score.score).toBeGreaterThan(0);
       expect(top.score.avgHopStrength).toBeGreaterThan(0);

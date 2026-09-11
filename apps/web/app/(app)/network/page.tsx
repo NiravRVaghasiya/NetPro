@@ -1,4 +1,3 @@
-// @ts-nocheck
 // apps/web/app/(app)/network/page.tsx
 //
 // Phase 11 — Network visualization: the graph as the visual centerpiece.
@@ -31,6 +30,99 @@ function one(v: string | string[] | undefined): string | undefined {
   return s ? s : undefined;
 }
 
+/** Error bodies share an `error` string; declared alongside the payloads so
+ * a non-ok response can still be read without an unchecked cast. */
+type ErrorEnvelope = { error?: string };
+
+type PathChain = {
+  rank: number;
+  hops: number;
+  score: { score: number; weakestTie: number | null; avgHopStrength: number };
+  path: Array<{
+    contactId: string;
+    fullName: string;
+    relationshipScore: number | null;
+    lastInteraction: string | null;
+    via?: { relations: string[] };
+  }>;
+};
+type PathPlan = {
+  found?: boolean;
+  targetContact?: { id: string; fullName: string };
+  paths?: PathChain[];
+} & ErrorEnvelope;
+
+type GraphOverview = {
+  nodes?: number;
+  edges?: number;
+  components?: { count: number; largestSize: number };
+  communities?: {
+    count: number;
+    modularity: number;
+    top: Array<{
+      communityId: string;
+      label: string;
+      size: number;
+      share: number;
+      members: { fullName: string }[];
+      truncated?: boolean;
+    }>;
+  };
+  centrality?: {
+    top: Array<{ contactId: string; fullName: string; degree: number; betweenness: number | null }>;
+    betweennessComputed?: boolean;
+    skippedReason?: string;
+  };
+  warmIntros?: Array<{
+    contactId: string;
+    contactName: string;
+    targetId: string;
+    targetName: string;
+    viaId: string;
+    viaName: string;
+    hops: number;
+  }>;
+  totalContacts?: number;
+  pendingCandidates?: number;
+  degraded?: { reason: string };
+} & ErrorEnvelope;
+
+type GraphViz = {
+  nodes: Array<{
+    id: string;
+    fullName: string;
+    company: string | null;
+    role: string | null;
+    relationshipScore: number | null;
+    communityId: number;
+    communityLabel: string;
+    degree: number;
+    betweenness: number | null;
+  }>;
+  edges: Array<{
+    id: string;
+    source: string;
+    target: string;
+    relation: string;
+    strength: number;
+    confidence: number;
+    bidirectional: boolean;
+  }>;
+  meta: {
+    totalNodes: number;
+    totalEdges: number;
+    shownNodes: number;
+    shownEdges: number;
+    truncated: boolean;
+    truncatedReason: string | null;
+    communities: number;
+    modularity: number;
+    pendingCandidates?: number;
+    degraded?: { reason: string } | null;
+    coverage?: number;
+  };
+} & ErrorEnvelope;
+
 export default async function NetworkPage({
   searchParams,
 }: {
@@ -44,36 +136,31 @@ export default async function NetworkPage({
 
   // ── Pathfinder mode ───────────────────────────────────────────────
   if (target) {
-    let plan: {
-      found?: boolean;
-      targetContact?: { id: string; fullName: string };
-      paths?: Array<{ rank: number; hops: number; score: { score: number; weakestTie: number | null; avgHopStrength: number }; path: Array<{ contactId: string; fullName: string; relationshipScore: number | null; lastInteraction: string | null; via?: { relations: string[] } }> }>;
-      error?: string;
-    } | null = null;
+    let plan: PathPlan | null = null;
     let serverError: string | null = null;
     try {
       const qs = new URLSearchParams({ target, ...(from ? { from } : {}) });
-      const res = await serverFetchJson<typeof plan>(`/api/graph/path?${qs.toString()}`);
+      const res = await serverFetchJson<PathPlan>(`/api/graph/path?${qs.toString()}`);
       if (res.ok) plan = res.data;
-      else serverError = (res.data as { error?: string })?.error ?? `Server ${res.status}`;
+      else serverError = res.data?.error ?? `Server ${res.status}`;
     } catch (e) {
       serverError = e instanceof Error ? e.message : String(e);
     }
     if (!plan || serverError) {
       try {
         const fetched = await planIntroPaths(conn, { target, from, k: 3 }, {} as never);
-        plan = fetched as unknown as typeof plan;
+        plan = fetched as unknown as PathPlan;
         serverError = null;
       } catch (e) {
         plan = { error: e instanceof Error ? e.message : String(e) };
       }
     }
 
-    if ((plan as { error?: string })?.error) {
+    if (plan?.error) {
       return (
         <div>
           <h1>Network — Pathfinder</h1>
-          <p style={{ color: "#dc2626" }}>{(plan as { error: string }).error}</p>
+          <p style={{ color: "#dc2626" }}>{plan.error}</p>
           <p>
             <Link href="/network" style={{ color: "#2563eb" }}>
               ← Back to network overview
@@ -82,7 +169,15 @@ export default async function NetworkPage({
         </div>
       );
     }
-    const p = plan as NonNullable<typeof plan>;
+    if (!plan) {
+      return (
+        <div>
+          <h1>Network — Pathfinder</h1>
+          <p style={{ color: "#6b7280" }}>No path result.</p>
+        </div>
+      );
+    }
+    const p = plan;
     return (
       <div>
         <h1>Network — Pathfinder</h1>
@@ -158,42 +253,28 @@ export default async function NetworkPage({
   }
 
   // ── Overview ─────────────────────────────────────────────────────
-  let graph: {
-    nodes?: number;
-    edges?: number;
-    components?: { count: number; largestSize: number };
-    communities?: { count: number; modularity: number; top: Array<{ communityId: string; label: string; size: number; share: number; members: { fullName: string }[]; truncated?: boolean }> };
-    centrality?: { top: Array<{ contactId: string; fullName: string; degree: number; betweenness: number | null }>; betweennessComputed?: boolean; skippedReason?: string };
-    warmIntros?: Array<{ contactId: string; contactName: string; targetId: string; targetName: string; viaId: string; viaName: string; hops: number }>;
-    totalContacts?: number;
-    pendingCandidates?: number;
-    degraded?: { reason: string };
-  } | null = null;
+  let graph: GraphOverview | null = null;
   // Visualization payload (interactive)
-  let viz: {
-    nodes: Array<{ id: string; fullName: string; company: string | null; role: string | null; relationshipScore: number | null; communityId: number; communityLabel: string; degree: number; betweenness: number | null }>;
-    edges: Array<{ id: string; source: string; target: string; relation: string; strength: number; confidence: number; bidirectional: boolean }>;
-    meta: { totalNodes: number; totalEdges: number; shownNodes: number; shownEdges: number; truncated: boolean; truncatedReason: string | null; communities: number; modularity: number; pendingCandidates?: number; degraded?: { reason: string } | null; coverage?: number };
-  } | null = null;
+  let viz: GraphViz | null = null;
   let serverError: string | null = null;
 
   try {
     const [gRes, vRes] = await Promise.all([
-      serverFetchJson<typeof graph>("/api/graph"),
-      serverFetchJson<typeof viz>("/api/graph/visualization"),
+      serverFetchJson<GraphOverview>("/api/graph"),
+      serverFetchJson<GraphViz>("/api/graph/visualization"),
     ]);
     if (gRes.ok) graph = gRes.data;
-    else serverError = (gRes.data as { error?: string })?.error ?? `Server ${gRes.status}`;
+    else serverError = gRes.data?.error ?? `Server ${gRes.status}`;
     if (vRes.ok) viz = vRes.data;
-    else if (!graph) serverError = (vRes.data as { error?: string })?.error ?? `Server ${vRes.status}`;
+    else if (!graph) serverError = vRes.data?.error ?? `Server ${vRes.status}`;
   } catch (e) {
     serverError = e instanceof Error ? e.message : String(e);
   }
   if (!graph || serverError) {
     try {
       const [g, v] = await Promise.all([
-        getNetworkGraph(conn, {} as never) as unknown as typeof graph,
-        getNetworkVisualization(conn, {} as never) as unknown as typeof viz,
+        getNetworkGraph(conn, {} as never) as unknown as GraphOverview,
+        getNetworkVisualization(conn, {} as never) as unknown as GraphViz,
       ]);
       graph = g;
       viz = v;

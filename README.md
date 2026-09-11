@@ -69,11 +69,11 @@
   **zero warnings** (was six).
 
 - **Phase 4 (local-first) — No platform assumptions:** the hosted-platform
-  build path is gone (`vercel.json`, `scripts/vercel-build.mjs`, and both
-  `vercel-build` scripts removed), the database dialect is configured rather
+  build path is gone (platform-specific deploy config, build wrappers, and
+  deploy build scripts removed), the database dialect is configured rather
   than inferred, pooling is an explicit `NETPRO_SERVERLESS` switch, and the
   viewer beacon reads generic proxy geo headers. See
-  [docs/phase-4-vercel-removal.md](docs/phase-4-vercel-removal.md).
+  [docs/local-first.md](docs/local-first.md).
 
 - **Phase 5 (local-first) — Authentication without OAuth:** local NetPro needs
   no credentials. `netpro init` writes an installation identity to
@@ -397,8 +397,8 @@ reasoning behind its design decisions.
 
 ## Local-first quickstart
 
-Install the supported CLI globally and run NetPro on your machine — no Vercel,
-no cloud, no GitHub OAuth, no `DATABASE_URL`:
+Install the supported CLI globally and run NetPro on your machine — no hosted
+platform, no cloud account, no GitHub OAuth, no `DATABASE_URL`:
 
 ```bash
 npm install -g netpro

@@ -1,7 +1,7 @@
 // packages/server/src/server.ts
 //
 // HTTP lifecycle: listen, shutdown. Uses Node's built-in `node:http` only —
-// no Express/Fastify/Hono, no Vercel serverless adapters, no Next.js.
+// no Express/Fastify/Hono, no serverless-platform adapters, no Next.js.
 
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import type { NetProApp } from './app';

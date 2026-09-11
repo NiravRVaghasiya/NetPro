@@ -231,12 +231,12 @@ describe("hybrid search migration (v2.0 phase 4)", () => {
 
       sqlite
         .prepare("UPDATE search_index SET search_text = ? WHERE contact_id = ?")
-        .run("jane doe vercel edge", "c1");
+        .run("jane doe acme edge", "c1");
       expect(match("payments")).toEqual([]);
-      expect(match("vercel")).toEqual(["c1"]);
+      expect(match("acme")).toEqual(["c1"]);
 
       sqlite.prepare("DELETE FROM search_index WHERE contact_id = ?").run("c1");
-      expect(match("vercel")).toEqual([]);
+      expect(match("acme")).toEqual([]);
     } finally {
       sqlite.close();
     }

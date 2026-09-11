@@ -61,8 +61,8 @@ const SEED: Seed[] = [
   {
     id: "c2",
     fullName: "John Smith",
-    email: "john@vercel.com",
-    company: "Vercel",
+    email: "john@acme.com",
+    company: "Acme",
     role: "Product Manager",
     seniority: "mid",
     industry: "Software",
@@ -75,7 +75,7 @@ const SEED: Seed[] = [
     id: "c3",
     fullName: "Alice Wong",
     email: null,
-    company: "Vercel",
+    company: "Acme",
     role: "Designer",
     seniority: "junior",
     industry: "Software",
@@ -166,7 +166,7 @@ describe("searchContacts", () => {
   });
 
   it("matches free-text query across name/company/role case-insensitively", async () => {
-    const byCompany = await searchContacts(conn, { query: "vercel" });
+    const byCompany = await searchContacts(conn, { query: "acme" });
     expect(byCompany.contacts.map((c) => c.id).sort()).toEqual(["c2", "c3"]);
 
     const byName = await searchContacts(conn, { query: "JANE" });
@@ -294,7 +294,7 @@ describe("searchContacts", () => {
       res.facets.company.map((b) => [b.value, b.count]),
     );
     expect(companies["stripe"]).toBe(2);
-    expect(companies["vercel"]).toBe(2);
+    expect(companies["acme"]).toBe(2);
 
     const seniority = Object.fromEntries(
       res.facets.seniority.map((b) => [b.value, b.count]),

@@ -117,7 +117,7 @@ describe('createCampaign', () => {
 
   it('snapshots a search selection to concrete ids and dedupes', async () => {
     seedContact('c1', 'Jane Doe', { company: 'Stripe' });
-    seedContact('c2', 'John Smith', { company: 'Vercel' });
+    seedContact('c2', 'John Smith', { company: 'Acme' });
     const result = await createCampaign(
       conn(),
       {

@@ -7,7 +7,7 @@ netpro init      # once: create the install (~/.netpro) and database
 netpro serve     # start the local server + Web UI
 ```
 
-No cloud account, no Vercel, no GitHub OAuth, no `DATABASE_URL`. Your
+No cloud account, no hosted platform, no GitHub OAuth, no `DATABASE_URL`. Your
 professional network stays on your machine.
 
 ---
@@ -239,8 +239,7 @@ no surface — CLI, API, or UI — ever prints one.
 - [docs/getting-started.md](getting-started.md) — install and first import
 - [docs/deployment.md](deployment.md) — Docker / self-hosted PostgreSQL path
 - [docs/phase-2-serve.md](phase-2-serve.md),
-  [docs/phase-3-local-database.md](phase-3-local-database.md),
-  [docs/phase-4-vercel-removal.md](phase-4-vercel-removal.md), and
+  [docs/phase-3-local-database.md](phase-3-local-database.md), and
   [docs/phase-5-authentication.md](phase-5-authentication.md) — the
   implementation reports for the phases that introduced this behaviour
 - [docs/phase-16-cli-web-integration.md](phase-16-cli-web-integration.md) —

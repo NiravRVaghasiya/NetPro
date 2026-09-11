@@ -126,7 +126,7 @@ describe("analytics / metrics", () => {
     await seed(conn, [
       { id: "a", company: "Stripe", industry: null },
       { id: "b", company: "Stripe", industry: null },
-      { id: "c", company: "Vercel", industry: null },
+      { id: "c", company: "Acme", industry: null },
       { id: "d", company: "Google", industry: null },
       { id: "e", company: "Google", industry: null },
     ]);
@@ -143,7 +143,7 @@ describe("analytics / metrics", () => {
     const conn = createTestConn();
     await seed(conn, [
       { id: "a", company: "Stripe", industry: "Fintech" },
-      { id: "b", company: "Vercel", industry: "Software" },
+      { id: "b", company: "Acme", industry: "Software" },
       { id: "c", company: "Google", industry: "Software" },
     ]);
     const m = await computeNetworkMetrics(conn, OPTS);
@@ -272,7 +272,7 @@ describe("analytics / clusters", () => {
       { id: "a", company: "Stripe", role: "Engineer" },
       { id: "b", company: "stripe", role: "Engineer" },
       { id: "c", company: "  Stripe  ", role: "Designer" },
-      { id: "solo", company: "Vercel", role: "PM" },
+      { id: "solo", company: "Acme", role: "PM" },
       { id: "none", company: null },
       { id: "blank", company: "   " },
     ]);
@@ -286,7 +286,7 @@ describe("analytics / clusters", () => {
       { value: "engineer", count: 2, share: expect.closeTo(2 / 3) },
       { value: "designer", count: 1, share: expect.closeTo(1 / 3) },
     ]);
-    expect(clusters[1]!).toMatchObject({ key: "vercel", size: 1 });
+    expect(clusters[1]!).toMatchObject({ key: "acme", size: 1 });
   });
 
   it("orders clusters by size desc and respects the limit", async () => {
@@ -306,7 +306,7 @@ describe("analytics / dormant", () => {
     const conn = createTestConn();
     await seed(conn, [
       { id: "hi-score", company: "Stripe", role: "Eng", relationshipScore: 0.9, lastInteraction: iso(100) },
-      { id: "lo-score", company: "Vercel", relationshipScore: 0.1, lastInteraction: iso(100) },
+      { id: "lo-score", company: "Acme", relationshipScore: 0.1, lastInteraction: iso(100) },
       { id: "older", company: "Google", relationshipScore: 0.5, lastInteraction: iso(200) },
       { id: "recent", relationshipScore: 0.9, lastInteraction: iso(5) },
       { id: "never-recent", relationshipScore: 0.9, createdAt: iso(2) },
@@ -338,7 +338,7 @@ describe("analytics / overview", () => {
     await seed(conn, [
       { id: "a", company: "Stripe", industry: "Fintech", role: "Engineer", relationshipScore: 0.9, lastInteraction: iso(3), createdAt: iso(3) },
       { id: "b", company: "stripe", industry: "Fintech", role: "Engineer", createdAt: iso(40) },
-      { id: "c", company: "Vercel", industry: "Software", role: "PM", createdAt: iso(120) },
+      { id: "c", company: "Acme", industry: "Software", role: "PM", createdAt: iso(120) },
     ]);
     const o = await getNetworkOverview(conn, OPTS);
 
@@ -351,7 +351,7 @@ describe("analytics / overview", () => {
     expect(o.growth.last30).toBe(1);
     expect(o.topCompanies).toEqual([
       { value: "stripe", count: 2, share: expect.closeTo(2 / 3) },
-      { value: "vercel", count: 1, share: expect.closeTo(1 / 3) },
+      { value: "acme", count: 1, share: expect.closeTo(1 / 3) },
     ]);
     expect(o.topIndustries[0]!).toMatchObject({ value: "fintech", count: 2 });
     expect(o.clusters[0]!).toMatchObject({ key: "stripe", size: 2 });

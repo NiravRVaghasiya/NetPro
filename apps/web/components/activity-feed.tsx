@@ -176,7 +176,8 @@ export function ActivityFeed({
               const p = progressOf(e);
               return (
                 <li
-                  // eslint-disable-next-line react/no-array-index-key
+                  // Feed events carry seq when present; the reversed index
+                  // only disambiguates same-type events without one.
                   key={`${e.seq ?? e.type}-${idx}`}
                   style={{
                     display: 'flex',

@@ -173,12 +173,12 @@ describe('getCommunities / getCentrality entry points', () => {
   it('labels communities by dominant company, falling back to Community N', async () => {
     fixture.sqlite.exec(
       "UPDATE contacts SET company = 'Stripe' WHERE id IN ('a','b','c'); " +
-        "UPDATE contacts SET company = 'Vercel' WHERE id IN ('a','b');"
+        "UPDATE contacts SET company = 'Acme' WHERE id IN ('a','b');"
     );
     const c = await getCommunities(fixture.conn, { now: NOW });
     expect(c.count).toBe(2);
-    // {a,b,c}: Vercel×2 + Stripe×1 → dominant 'vercel'; {d,e,f} has no companies.
-    expect(c.top[0]!.label).toBe('vercel');
+    // {a,b,c}: Acme×2 + Stripe×1 → dominant 'acme'; {d,e,f} has no companies.
+    expect(c.top[0]!.label).toBe('acme');
     expect(c.top[1]!.label).toBe('Community 2');
   });
 

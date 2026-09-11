@@ -115,8 +115,10 @@ describe("header extraction (v2.5 phase 2)", () => {
     // A self-hosted deployment that has not configured its proxy records no
     // location — NetPro never infers one from platform-specific headers.
     expect(extractViewerGeo(headers({}))).toEqual({ country: null, city: null });
+    // Unknown platform-specific spellings are not guessed: only the generic
+    // pair, Cloudflare's pair, or caller-configured names are read.
     expect(
-      extractViewerGeo(headers({ "x-vercel-ip-country": "GB" })),
+      extractViewerGeo(headers({ "x-platform-ip-country": "GB" })),
     ).toEqual({ country: null, city: null });
   });
 

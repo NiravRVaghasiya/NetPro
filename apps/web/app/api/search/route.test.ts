@@ -41,8 +41,8 @@ vi.mock("@/lib/db", () => {
     {
       id: "c2",
       fullName: "John Smith",
-      email: "john@vercel.com",
-      company: "Vercel",
+      email: "john@acme.com",
+      company: "Acme",
       role: "Product Manager",
       seniority: "mid",
       location: "San Francisco",
@@ -54,7 +54,7 @@ vi.mock("@/lib/db", () => {
       id: "c3",
       fullName: "Alice Wong",
       email: null,
-      company: "Vercel",
+      company: "Acme",
       role: "Designer",
       seniority: "junior",
       location: "Berlin",
@@ -86,7 +86,7 @@ describe("GET /api/search", () => {
   });
 
   it("filters by free-text query", async () => {
-    const res = await GET(new Request("http://localhost/api/search?q=vercel"));
+    const res = await GET(new Request("http://localhost/api/search?q=acme"));
     const body = await res.json();
     expect(body.total).toBe(2);
     expect(body.contacts.map((c: { id: string }) => c.id).sort()).toEqual([
@@ -144,7 +144,7 @@ describe("GET /api/search — engine modes", () => {
     GET(new Request(`http://localhost/api/search${query}`));
 
   it("reports the portable engine by default and runs no arms", async () => {
-    const body = await (await call("?q=vercel")).json();
+    const body = await (await call("?q=acme")).json();
     expect(body.engine).toMatchObject({
       mode: "portable",
       requested: "portable",
@@ -162,12 +162,12 @@ describe("GET /api/search — engine modes", () => {
   it.each(["portable", "keyword", "hybrid"])(
     "accepts mode=%s",
     async (mode) => {
-      expect((await call(`?q=vercel&mode=${mode}`)).status).toBe(200);
+      expect((await call(`?q=acme&mode=${mode}`)).status).toBe(200);
     },
   );
 
   it("degrades to portable — with a reason — before the index is built", async () => {
-    const body = await (await call("?q=vercel&mode=keyword")).json();
+    const body = await (await call("?q=acme&mode=keyword")).json();
     expect(body.engine.arms.keyword).toMatchObject({
       used: false,
       reason: "index_empty",
@@ -180,7 +180,7 @@ describe("GET /api/search — engine modes", () => {
 
   it("serves the keyword engine once the index exists", async () => {
     await reindexSearchIndex(fixture.conn);
-    const body = await (await call("?q=vercel&mode=keyword")).json();
+    const body = await (await call("?q=acme&mode=keyword")).json();
     expect(body.engine.mode).toBe("keyword");
     expect(body.engine.arms.keyword.used).toBe(true);
     expect(body.contacts.map((c: { id: string }) => c.id).sort()).toEqual([
@@ -198,7 +198,7 @@ describe("GET /api/search — engine modes", () => {
 
   it("reports the semantic arm as unconfigured instead of failing", async () => {
     await reindexSearchIndex(fixture.conn);
-    const body = await (await call("?q=vercel&mode=hybrid")).json();
+    const body = await (await call("?q=acme&mode=hybrid")).json();
     // No EMBEDDINGS_* in the test environment.
     expect(body.engine.arms.semantic).toMatchObject({
       used: false,
@@ -210,18 +210,18 @@ describe("GET /api/search — engine modes", () => {
   it("keeps filters and pagination working in keyword mode", async () => {
     await reindexSearchIndex(fixture.conn);
     const filtered = await (
-      await call("?q=vercel&mode=keyword&seniority=junior")
+      await call("?q=acme&mode=keyword&seniority=junior")
     ).json();
     expect(filtered.contacts.map((c: { id: string }) => c.id)).toEqual(["c3"]);
 
-    const paged = await (await call("?q=vercel&mode=keyword&limit=1")).json();
+    const paged = await (await call("?q=acme&mode=keyword&limit=1")).json();
     expect(paged.contacts).toHaveLength(1);
     expect(paged.total).toBe(2);
   });
 
   it("never leaks a credential into the response", async () => {
     await reindexSearchIndex(fixture.conn);
-    const text = await (await call("?q=vercel&mode=hybrid")).text();
+    const text = await (await call("?q=acme&mode=hybrid")).text();
     expect(text).not.toMatch(/api[_-]?key|sk-|EMBEDDINGS_/i);
   });
 });

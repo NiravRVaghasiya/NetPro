@@ -1,4 +1,3 @@
-// @ts-nocheck
 // apps/web/components/observatory.tsx
 //
 // Phase 10 — Observatory: the primary dashboard for the local-first NetPro.
@@ -278,7 +277,7 @@ export function ObservatoryGrid({
             <div style={{ fontSize: '0.9rem', color: '#374151', marginTop: 6, lineHeight: 1.45 }}>
               <div>
                 {stats.graph!.nodes} nodes · {stats.graph!.edges} edges · {stats.graph!.components} components
-                {stats.graph!.largestComponent ? ` · largest ${stats.graph.largestComponent}` : ''}
+                {stats.graph!.largestComponent ? ` · largest ${stats.graph!.largestComponent}` : ''}
               </div>
               <div style={{ color: '#6b7280', fontSize: '0.82rem' }}>
                 {stats.graph!.avgPathLength !== undefined

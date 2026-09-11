@@ -371,8 +371,8 @@ describeIfPg('PostgreSQL integration', () => {
     async () => {
       // THE PHASE 6 REGRESSION TEST.
       //
-      // A Vercel deploy cold-starts many instances at once, and each one
-      // migrates on startup. Calling drizzle's migrate() directly here
+      // A hosted deployment can cold-start many instances at once, and each
+      // one migrates on startup. Calling drizzle's migrate() directly here
       // reproducibly failed 5 of 6 workers against real PostgreSQL 18:
       //   -> Failed query: CREATE TABLE "account" (...)
       //   -> Failed query: CREATE SCHEMA IF NOT EXISTS "drizzle"
@@ -449,8 +449,8 @@ describeIfPg('PostgreSQL integration', () => {
         {
           id: 's2',
           fullName: 'John Smith',
-          email: 'john@vercel.com',
-          company: 'Vercel',
+          email: 'john@acme.com',
+          company: 'Acme',
           role: 'Product Manager',
           headline: 'Building the web',
           location: 'San Francisco',
@@ -509,7 +509,7 @@ describeIfPg('PostgreSQL integration', () => {
         },
         {
           contactId: 's2',
-          searchText: 'john smith john@vercel.com building the web vercel product manager san francisco',
+          searchText: 'john smith john@acme.com building the web acme product manager san francisco',
           contentHash: 'hash-2',
           updatedAt: new Date().toISOString(),
         },
@@ -530,7 +530,7 @@ describeIfPg('PostgreSQL integration', () => {
 
     it('regenerates search_vector when the document changes', async () => {
       await searchConn.db.execute(
-        sql`UPDATE search_index SET search_text = 'jane doe vercel edge functions'
+        sql`UPDATE search_index SET search_text = 'jane doe acme edge functions'
             WHERE contact_id = 's1'`
       );
       const stale = await searchConn.db.execute<{ id: string }>(

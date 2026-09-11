@@ -29,7 +29,7 @@ const fixture = await vi.hoisted(async () => {
     {
       id: "c",
       fullName: "Cara",
-      company: "Vercel",
+      company: "Acme",
       role: "Designer",
       relationshipScore: 0.3,
       lastInteraction: null,

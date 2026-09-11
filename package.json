@@ -45,7 +45,11 @@
     "package:check": "node scripts/check-package.mjs",
     "prepack": "npm run build -w apps/cli && npm run package:check",
     "db:migrate": "npm run build -w @netpro/cli && node apps/cli/dist/index.js migrate",
-    "db:migrate:status": "node apps/cli/dist/index.js migrate --status"
+    "db:migrate:status": "node apps/cli/dist/index.js migrate --status",
+    "smoke:cli": "bash scripts/smoke/cli.sh",
+    "smoke:server": "bash scripts/smoke/local-stack.sh",
+    "smoke:web": "bash scripts/smoke/web-ui.sh",
+    "smoke": "npm run smoke:cli && npm run smoke:server && npm run smoke:web"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",

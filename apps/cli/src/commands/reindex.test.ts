@@ -105,7 +105,7 @@ describe("readEmbeddingsConfig", () => {
 describe("executeReindex", () => {
   it("indexes every contact and reports what it did", async () => {
     insertContact("c1", "Jane Doe", "Stripe");
-    insertContact("c2", "John Smith", "Vercel");
+    insertContact("c2", "John Smith", "Acme");
 
     const { output, failed } = await executeReindex({}, conn);
     expect(failed).toBe(false);

@@ -22,7 +22,7 @@ function rng(seed: number) {
   };
 }
 
-const COMPANIES = ["Stripe", "Vercel", "Monzo", "Linear", "Figma", "Ramp"];
+const COMPANIES = ["Stripe", "Acme", "Monzo", "Linear", "Figma", "Ramp"];
 const ROLES = [
   "Senior Engineer",
   "Product Manager",

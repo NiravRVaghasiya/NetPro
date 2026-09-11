@@ -5,7 +5,7 @@ import { parseLinkedInCSV } from './linkedin-csv';
 const CSV = [
   'First Name,Last Name,Email Address,Company,Position,Connected On,URL',
   'Jane,Doe,jane@example.com,Stripe,Senior Engineer,01 Jan 2024,',
-  'John,Smith,john@example.com,Vercel,PM,not a date,',
+  'John,Smith,john@example.com,Acme,PM,not a date,',
   ',,,,,,',
   'Ada,Lovelace,ada@example.com,Analytical Engines,Director,05 Mar 2023,',
 ].join('\n');

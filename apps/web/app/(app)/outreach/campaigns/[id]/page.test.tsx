@@ -64,7 +64,7 @@ beforeEach(() => {
     "DELETE FROM activity_log; DELETE FROM interactions; DELETE FROM campaign_recipients; DELETE FROM campaigns; DELETE FROM contacts;",
   );
   seedContact("c1", "Jane Doe", "Stripe");
-  seedContact("c2", "John Smith", "Vercel");
+  seedContact("c2", "John Smith", "Acme");
 });
 afterAll(() => fixture.sqlite.close());
 
@@ -97,7 +97,7 @@ describe("/outreach/campaigns/[id] detail page", () => {
     expect(html).toContain("Hi Jane");
     expect(html).toContain("Loved your work at Stripe.");
     expect(html).toContain("Hi John");
-    expect(html).toContain("Loved your work at Vercel.");
+    expect(html).toContain("Loved your work at Acme.");
     // status + recipient action stubs
     expect(html).toContain("status-active");
     expect(html).toContain("recipient-");

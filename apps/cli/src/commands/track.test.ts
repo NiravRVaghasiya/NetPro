@@ -112,7 +112,7 @@ describe('netpro track log', () => {
 
   it('rejects unknown contacts, ambiguous names, and bad types with actionable errors', async () => {
     seedContact('c1', 'Jane Doe', 'Stripe', 'jane@stripe.com');
-    seedContact('c2', 'Jane Doe', 'Vercel', 'jane@vercel.com');
+    seedContact('c2', 'Jane Doe', 'Acme', 'jane@acme.com');
     await expect(
       executeTrackLog('Nobody Here', { note: 'hi' }, fixture.conn, NOW)
     ).rejects.toThrowError(/No contact matches "Nobody Here"/);
@@ -188,7 +188,7 @@ describe('netpro track add', () => {
 describe('netpro track list', () => {
   async function seedFollowUps() {
     seedContact('c1', 'Jane Doe', 'Stripe', 'jane@stripe.com');
-    seedContact('c2', 'John Smith', 'Vercel');
+    seedContact('c2', 'John Smith', 'Acme');
     await executeTrackLog(
       'jane@stripe.com',
       { type: 'meeting', followUp: '1d', reason: 'Old promise' },

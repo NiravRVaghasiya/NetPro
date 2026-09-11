@@ -152,7 +152,7 @@ describe("buildSearchDocument", () => {
 describe("reindexSearchIndex", () => {
   it("writes one row per live contact and mirrors it into FTS5", async () => {
     insertContact("c1", { fullName: "Jane Doe", company: "Stripe" });
-    insertContact("c2", { fullName: "John Smith", company: "Vercel" });
+    insertContact("c2", { fullName: "John Smith", company: "Acme" });
 
     const summary = await reindexSearchIndex(conn);
     expect(summary).toMatchObject({
@@ -185,7 +185,7 @@ describe("reindexSearchIndex", () => {
     insertContact("c1", { fullName: "Jane Doe", company: "Stripe" });
     await reindexSearchIndex(conn);
     sqlite
-      .prepare("UPDATE contacts SET company = 'Vercel' WHERE id = 'c1'")
+      .prepare("UPDATE contacts SET company = 'Acme' WHERE id = 'c1'")
       .run();
 
     const summary = await reindexSearchIndex(conn);
@@ -202,7 +202,7 @@ describe("reindexSearchIndex", () => {
         .prepare(
           "SELECT contact_id FROM contacts_fts WHERE contacts_fts MATCH ?",
         )
-        .all("vercel"),
+        .all("acme"),
     ).toEqual([{ contact_id: "c1" }]);
   });
 

@@ -96,8 +96,8 @@ describeIfPg('hybrid search against live PostgreSQL', () => {
       {
         id: 'p2',
         fullName: 'John Smith',
-        email: 'john@vercel.com',
-        company: 'Vercel',
+        email: 'john@acme.com',
+        company: 'Acme',
         role: 'Product Manager',
         seniority: 'mid',
         industry: 'Software',
@@ -109,7 +109,7 @@ describeIfPg('hybrid search against live PostgreSQL', () => {
       {
         id: 'p3',
         fullName: 'Alice Wong',
-        company: 'Vercel',
+        company: 'Acme',
         role: 'Designer',
         seniority: 'junior',
         industry: 'Software',
@@ -193,7 +193,7 @@ describeIfPg('hybrid search against live PostgreSQL', () => {
 
   it('keeps filter/sort/pagination parity with the portable engine', async () => {
     for (const filters of [
-      { company: 'vercel' },
+      { company: 'acme' },
       { seniority: 'junior' },
       { minScore: 0.6 },
       { hasEmail: true },

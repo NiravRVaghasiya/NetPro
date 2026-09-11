@@ -75,7 +75,7 @@ beforeEach(() => {
     {
       id: "c2",
       fullName: "John Smith",
-      company: "Vercel",
+      company: "Acme",
       role: "Product Manager",
       location: "San Francisco",
       notes: null,

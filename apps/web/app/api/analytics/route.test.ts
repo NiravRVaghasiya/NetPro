@@ -22,7 +22,7 @@ const fixture = await vi.hoisted(async () => {
     {
       id: "c2",
       fullName: "John Smith",
-      email: "john@vercel.com",
+      email: "john@acme.com",
       company: "Stripe",
       role: "Engineer",
       industry: "Fintech",
@@ -34,7 +34,7 @@ const fixture = await vi.hoisted(async () => {
       id: "c3",
       fullName: "Alice Wong",
       email: null,
-      company: "Vercel",
+      company: "Acme",
       role: "Designer",
       industry: "Software",
       relationshipScore: 0.2,

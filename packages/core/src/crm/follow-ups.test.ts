@@ -116,7 +116,7 @@ describe('createFollowUp', () => {
 describe('listFollowUps views and counts', () => {
   async function seedBuckets() {
     seedContact('c1', 'Jane Doe');
-    seedContact('c2', 'John Smith', 'Vercel');
+    seedContact('c2', 'John Smith', 'Acme');
     const overdue = await createFollowUp(
       fixture.conn,
       { contactId: 'c1', dueAt: new Date(NOW.getTime() - DAY_MS), reason: 'Old promise' },

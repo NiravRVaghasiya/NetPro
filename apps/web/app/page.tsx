@@ -88,8 +88,8 @@ export default function LandingPage() {
         <p style={{ color: "#6b7280", margin: 0, lineHeight: 1.6 }}>
           NetPro runs on this machine. The CLI, the local server at{" "}
           <code>http://127.0.0.1:3777</code>, and the Web UI are three interfaces to the same application. Your contacts, the
-          graph, and the search index live in <code>~/.netpro/netpro.db</code> (SQLite) by default — no Vercel, no cloud
-          database, no mandatory GitHub OAuth. PostgreSQL remains for Docker/self-hosted.
+          graph, and the search index live in <code>~/.netpro/netpro.db</code> (SQLite) by default — no hosted
+          platform, no cloud database, no mandatory GitHub OAuth. PostgreSQL remains for Docker/self-hosted.
         </p>
         <ul style={{ margin: "0.75rem 0 0", paddingLeft: "1.2rem", color: "#374151", lineHeight: 1.6 }}>
           <li>

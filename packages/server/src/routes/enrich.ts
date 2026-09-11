@@ -1,4 +1,3 @@
-// @ts-nocheck
 // packages/server/src/routes/enrich.ts
 //
 // POST /api/enrich
@@ -231,16 +230,19 @@ async function fetchContactById(
   conn: SqliteConn | PgConn,
   id: string
 ): Promise<{ id: string; fullName: string } | null> {
-  const c = conn.schema.contacts;
   try {
     const { eq } = await import('drizzle-orm');
     if (conn.dialect === 'sqlite') {
+      // Access the table through the narrowed conn so the SQLite table type
+      // lines up with the SQLite drizzle instance.
+      const c = conn.schema.contacts;
       const rows = await conn.db.select().from(c).where(eq(c.id, id)).limit(1);
-      const r = rows[0] as typeof c.$inferSelect | undefined;
+      const r = rows[0];
       return r ? { id: r.id, fullName: r.fullName } : null;
     }
+    const c = conn.schema.contacts;
     const rows = await conn.db.select().from(c).where(eq(c.id, id)).limit(1);
-    const r = rows[0] as typeof c.$inferSelect | undefined;
+    const r = rows[0];
     return r ? { id: r.id, fullName: r.fullName } : null;
   } catch {
     return null;
@@ -251,20 +253,15 @@ async function fetchNextEnrichable(
   conn: SqliteConn | PgConn,
   limit: number
 ): Promise<Array<{ id: string; fullName: string }>> {
-  const c = conn.schema.contacts;
   try {
     if (conn.dialect === 'sqlite') {
+      const c = conn.schema.contacts;
       const rows = await conn.db.select().from(c).limit(limit);
-      return (rows as Array<typeof c.$inferSelect>).map((r) => ({
-        id: r.id,
-        fullName: r.fullName,
-      }));
+      return rows.map((r) => ({ id: r.id, fullName: r.fullName }));
     }
+    const c = conn.schema.contacts;
     const rows = await conn.db.select().from(c).limit(limit);
-    return (rows as Array<typeof c.$inferSelect>).map((r) => ({
-      id: r.id,
-      fullName: r.fullName,
-    }));
+    return rows.map((r) => ({ id: r.id, fullName: r.fullName }));
   } catch {
     return [];
   }

@@ -127,7 +127,7 @@ describe('executeCampaignCreate', () => {
 
   it('snapshots recipients from a search filter', async () => {
     seedContact('c1', 'Jane Doe', 'Stripe');
-    seedContact('c2', 'John Smith', 'Vercel');
+    seedContact('c2', 'John Smith', 'Acme');
     const json = await executeCampaignCreate(
       { name: 'Stripe', subject: 'Hi', body: 'x', company: 'Stripe', json: true },
       conn(),

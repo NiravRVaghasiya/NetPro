@@ -380,7 +380,8 @@ export function NetworkGraphView({
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
     setDraggingNode(null);
     setPanning(null);
-    try { (e.currentTarget as Element).releasePointerCapture(e.pointerId); } catch {}
+    // Pointer capture may already be released by the browser; harmless.
+    try { (e.currentTarget as Element).releasePointerCapture(e.pointerId); } catch { /* not captured */ }
   }, []);
 
   const handleBackgroundPointerDown = useCallback((e: React.PointerEvent) => {

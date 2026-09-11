@@ -41,8 +41,8 @@ function seed(conn: SqliteConn): void {
     {
       id: "c2",
       fullName: "John Smith",
-      email: "john@vercel.com",
-      company: "Vercel",
+      email: "john@acme.com",
+      company: "Acme",
       role: "Product Manager",
       seniority: "mid",
       location: "San Francisco",
@@ -52,7 +52,7 @@ function seed(conn: SqliteConn): void {
       id: "c3",
       fullName: "Alice Wong",
       email: null,
-      company: "Vercel",
+      company: "Acme",
       role: "Designer",
       seniority: "junior",
       location: "Berlin",
@@ -125,7 +125,7 @@ describe("executeSearch", () => {
   });
 
   it("returns matching contacts and a summary line", async () => {
-    const output = await executeSearch({ query: "vercel" }, conn);
+    const output = await executeSearch({ query: "acme" }, conn);
     expect(output).toContain("John Smith");
     expect(output).toContain("Alice Wong");
     expect(output).not.toContain("Jane Doe");
@@ -144,7 +144,7 @@ describe("executeSearch", () => {
   });
 
   it("emits JSON when --json is set", async () => {
-    const output = await executeSearch({ json: true, company: "vercel" }, conn);
+    const output = await executeSearch({ json: true, company: "acme" }, conn);
     const parsed = JSON.parse(output);
     expect(parsed.total).toBe(2);
     expect(Array.isArray(parsed.contacts)).toBe(true);
