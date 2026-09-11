@@ -587,9 +587,11 @@ Your provider signs with its own CA. Append `?sslmode=require` to
 **`/api/health` reports `degraded`.** The schema is missing. Run
 `npm run db:migrate` (or `docker compose up migrate`).
 
-**Sign-in immediately returns to the login page with "not authorized".**
-`NETPRO_OWNER_GITHUB_ID` does not match the account you signed in with.
-Confirm it with `gh api users/YOUR_USERNAME --jq .id` — it is a number.
+**API calls return `401 unauthorized`.** The server is in `token` mode but
+the request is missing (or has a stale) bearer token. Confirm the client's
+`NETPRO_AUTH_TOKEN` matches the server's, and that the `Authorization: Bearer
+<token>` header is attached. In `local` mode, only loopback requests are
+trusted as the operator.
 
 **`too many connections` on a free Postgres tier.** Switch `DATABASE_URL` to
 your provider's pooled connection string.
@@ -646,7 +648,7 @@ or external vault service is required.
 Migration `0009_key_vault` is additive on SQLite and PostgreSQL. Two partial
 unique indexes enforce one key per personal slot and one per workspace slot
 (SQL `UNIQUE` on a nullable user alone would allow duplicate shared keys).
-Deleting a workspace or Auth.js user cascades to its vault rows. Deleting a
+Deleting a workspace or user cascades to its vault rows. Deleting a
 workspace membership alone retains that user's encrypted personal rows for
 possible rejoining; revoked users cannot access the authenticated vault API.
 
