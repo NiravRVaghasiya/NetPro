@@ -186,11 +186,15 @@ export function registerInitCommand(program: Command): void {
             : `${result.applied}/${result.total} migrations applied, ${pending} pending`;
         console.log('NetPro initialized');
         console.log('');
-        console.log(`Install:  ${result.home}`);
+        console.log(`${result.configCreated ? 'Created' : 'Using'} ${result.home}`);
+        console.log(
+          `Database: ${result.dialect === 'sqlite' ? 'SQLite' : 'PostgreSQL'} — ` +
+            `${result.databaseDisplay} (${dbState})`
+        );
+        console.log('Server:   127.0.0.1:3777');
         console.log(
           `Config:   ${result.configPath} ${result.configCreated ? '(created)' : '(kept existing)'}`
         );
-        console.log(`Database: ${result.databaseDisplay} (${dbState})`);
         console.log(
           `Identity: ${result.installation.id}${result.installation.owner ? ` (${result.installation.owner})` : ''}` +
             `${result.installationCreated ? ' — created' : ' — existing'}`

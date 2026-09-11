@@ -7,6 +7,15 @@
 
 ## Install
 
+For normal use, install the published CLI globally:
+
+```bash
+npm install -g netpro
+netpro --version
+```
+
+For repository development, install the workspace instead:
+
 ```bash
 npm install
 ```
@@ -16,10 +25,12 @@ npm install
 No cloud account, no GitHub OAuth, no `DATABASE_URL`:
 
 ```bash
-npm run build -w apps/cli
-node apps/cli/dist/index.js init     # ~/.netpro: config.toml, identity, SQLite db, logs, keys
-node apps/cli/dist/index.js serve    # NetPro at http://127.0.0.1:3777
+netpro init     # ~/.netpro: config.toml, identity, SQLite db, logs, keys
+netpro serve    # NetPro at http://127.0.0.1:3777
 ```
+
+When running from a source checkout, the equivalent commands are
+`npm run build -w apps/cli` and `node apps/cli/dist/index.js <command>`.
 
 `init` also writes this installation's identity (`[installation] id/created_at`)
 and a `0600` access token at `~/.netpro/keys/access-token`. The identity is what

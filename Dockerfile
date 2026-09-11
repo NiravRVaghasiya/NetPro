@@ -37,6 +37,7 @@ COPY apps/cli/package.json ./apps/cli/
 COPY packages/core/package.json ./packages/core/
 COPY packages/db/package.json ./packages/db/
 COPY packages/config/package.json ./packages/config/
+COPY packages/server/package.json ./packages/server/
 RUN npm ci
 
 # ── Stage 2: Build ──
@@ -63,16 +64,25 @@ COPY --from=deps /app/apps ./apps
 COPY --from=deps /app/packages ./packages
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# Browser-side server requests need a host-reachable origin. It is a build
+# argument because Next.js inlines NEXT_PUBLIC_* values into client bundles.
+ARG NEXT_PUBLIC_NETPRO_SERVER_URL=http://127.0.0.1:3777
+ENV NEXT_PUBLIC_NETPRO_SERVER_URL=$NEXT_PUBLIC_NETPRO_SERVER_URL
 # Build the CLI too: the compose stack runs `netpro migrate` as a one-shot
 # migration job before the web service starts, so the deploy path uses the
-# exact same command an operator runs by hand.
-RUN npm run build -w apps/web && npm run build -w apps/cli
+# exact same command an operator runs by hand. Build the standalone API server
+# as well; Compose runs it beside the Web UI so server-driven Observatory,
+# Network, Search, People, and Activity pages use the same API as `netpro serve`.
+RUN npm run build -w apps/web \
+  && npm run build -w apps/cli \
+  && npm run build -w @netpro/server
 # Fail the build, not the container, if the bundled CLI is broken. Both bugs
 # fixed here (a missing external, then a bundled commander@4) produced an
 # image that built cleanly and only died when `netpro migrate` ran. `--help`
 # exercises module resolution and the full command tree without a database.
 RUN node apps/cli/dist/index.js --help > /dev/null \
-  && node apps/cli/dist/index.js config --help > /dev/null
+  && node apps/cli/dist/index.js config --help > /dev/null \
+  && node packages/server/dist/bin.js --help > /dev/null
 
 # ── Stage 3: Production runner ──
 FROM node:20-alpine AS runner
@@ -88,18 +98,19 @@ RUN addgroup --system --gid 1001 netpro && adduser --system --uid 1001 netpro
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
-# The bundled CLI plus the native drivers it needs at runtime. tsup inlines
-# every pure-JS dependency (commander, drizzle-orm, @netpro/*) into
-# dist/index.js and marks only better-sqlite3 and pg as external, because
-# those two cannot be bundled: better-sqlite3 is a native addon, and pg is
-# CommonJS that resolves its backends dynamically. Only they need to exist in
-# node_modules for `netpro migrate` to run in this image.
+# The bundled CLI, standalone API server, and the native drivers they need at
+# runtime. tsup inlines every pure-JS dependency (commander, drizzle-orm,
+# @netpro/*) into their dist files and marks only better-sqlite3 and pg as
+# external, because better-sqlite3 is a native addon and pg is CommonJS that
+# resolves its backends dynamically. Only those drivers need to exist in
+# node_modules for `netpro migrate` and `netpro serve` to run in this image.
 #
 # Keep this list in sync with `external` in apps/cli/tsup.config.ts. An earlier
 # revision left commander and drizzle-orm unbundled but never copied them here,
 # so the image built fine and then died at runtime with ERR_MODULE_NOT_FOUND.
 # apps/cli/src/bundle.test.ts now asserts both ends of that contract.
 COPY --from=builder /app/apps/cli/dist ./apps/cli/dist
+COPY --from=builder /app/packages/server/dist ./packages/server/dist
 COPY --from=builder /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
 # bindings and file-uri-to-path are better-sqlite3's own runtime requires.
 COPY --from=builder /app/node_modules/bindings ./node_modules/bindings
@@ -114,9 +125,21 @@ COPY --from=builder /app/node_modules/pg ./node_modules/pg
 # NETPRO_PLUGIN_DIR at a writable volume for web installs.)
 COPY --from=builder /app/plugins ./plugins
 COPY --from=builder /app/marketplace ./marketplace
+# Keep migrations explicit rather than relying on Next standalone tracing. The
+# bundled `netpro migrate` command also runs in the compose init job, and the
+# published CLI uses the same directory layout.
+COPY --from=builder /app/packages/db/migrations ./packages/db/migrations
+
+# Marketplace installs and plugin-generated files need a writable, persistent
+# location. The compose file mounts a named volume here; copying the reference
+# plugin gives a newly-created volume useful contents on its first start.
+RUN mkdir -p /data/plugins \
+  && cp -a ./plugins/. /data/plugins/ \
+  && chown -R netpro:netpro /data /app/plugins /app/marketplace /app/packages/db/migrations
+ENV NETPRO_PLUGIN_DIR=/data/plugins
 
 USER netpro
-EXPOSE 3000
+EXPOSE 3000 3777
 
 # 127.0.0.1, not localhost: inside this Alpine container "localhost" resolves
 # to ::1 (IPv6) first, but Next.js's standalone server only binds the IPv4

@@ -1,6 +1,53 @@
 services:
+  # The standalone HTTP/API process is the same server started by
+  # `netpro serve`. It is kept separate from Next.js so the Web UI remains a
+  # client of the server rather than becoming the business-logic layer again.
+  server:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_NETPRO_SERVER_URL: ${NEXT_PUBLIC_NETPRO_SERVER_URL:-http://127.0.0.1:3777}
+    command: ["node", "/app/packages/server/dist/bin.js"]
+    ports:
+      # The default is local-only. If this port is exposed publicly, choose a
+      # non-open NETPRO_SERVER_AUTH_MODE and put TLS/auth in front of it.
+      - "127.0.0.1:${NETPRO_SERVER_PORT:-3777}:3777"
+    environment:
+      - DB_DIALECT=postgresql
+      - DATABASE_URL=postgresql://netpro:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/netpro?sslmode=disable
+      - NETPRO_HOST=0.0.0.0
+      - NETPRO_PORT=3777
+      # A container cannot see the host browser as loopback. `open` is safe
+      # here only because the port is published on host loopback by default;
+      # use token/auth at the reverse proxy before changing that binding.
+      - NETPRO_AUTH_MODE=${NETPRO_SERVER_AUTH_MODE:-open}
+      - NETPRO_AUTO_MIGRATE=false
+      - NETPRO_PLUGIN_DIR=${NETPRO_PLUGIN_DIR:-/data/plugins}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - netpro_plugins:/data/plugins
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3777/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   web:
-    build: .
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_NETPRO_SERVER_URL: ${NEXT_PUBLIC_NETPRO_SERVER_URL:-http://127.0.0.1:3777}
     # Published on the loopback interface only. Phase 5's local mode decides
     # who is the operator from the request's Host header, so the default
     # deployment must not be reachable from another machine: to expose the Web
@@ -9,10 +56,20 @@ services:
     ports:
       - "127.0.0.1:${NETPRO_WEB_PORT:-3000}:3000"
     environment:
+      # Server-rendered UI pages reach the standalone API over the private
+      # Compose network. Browser-side code uses the build-time public URL
+      # (default: http://127.0.0.1:3777).
+      - NETPRO_SERVER_URL=http://server:3777
       - DB_DIALECT=postgresql
       # The compose network is private and this Postgres has no TLS, so
       # sslmode=disable is explicit rather than left to driver defaults.
-      - DATABASE_URL=postgresql://netpro:${POSTGRES_PASSWORD}@db:5432/netpro?sslmode=disable
+      - DATABASE_URL=postgresql://netpro:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/netpro?sslmode=disable
+      # The migration service owns DDL. Keeping startup read-only makes a
+      # failed migration visible as a failed dependency instead of a request
+      # path that happens to be applying schema changes.
+      - NETPRO_AUTO_MIGRATE=false
+      # Plugin installs and marketplace updates survive image replacement.
+      - NETPRO_PLUGIN_DIR=${NETPRO_PLUGIN_DIR:-/data/plugins}
       # local (default) | github | open. GitHub credentials are an optional
       # integration, needed only when this instance is exposed beyond loopback.
       - NETPRO_AUTH_MODE=${NETPRO_AUTH_MODE:-local}
@@ -50,28 +107,44 @@ services:
       # starts, so the web service never performs DDL on a request path.
       migrate:
         condition: service_completed_successfully
+      # Server-driven pages wait for the API to be ready before rendering.
+      server:
+        condition: service_healthy
+    volumes:
+      - netpro_plugins:/data/plugins
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # One-shot migration job. Uses the same image and the same `netpro migrate`
   # command an operator runs by hand, so the deploy path cannot drift from the
-  # documented one. `docker compose up` re-runs it on each start; it is
-  # idempotent and exits 0 when there is nothing to do.
+  # documented one. Compose recreates it when the image/config changes; it is
+  # idempotent and exits 0 when there is nothing to do. Operators can force a
+  # run with `docker compose run --rm migrate`.
   migrate:
     build: .
     command: ["node", "/app/apps/cli/dist/index.js", "migrate"]
     environment:
       - DB_DIALECT=postgresql
-      - DATABASE_URL=postgresql://netpro:${POSTGRES_PASSWORD}@db:5432/netpro?sslmode=disable
+      - DATABASE_URL=postgresql://netpro:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/netpro?sslmode=disable
     depends_on:
       db:
         condition: service_healthy
     restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   db:
     image: postgres:16-alpine
     environment:
       - POSTGRES_USER=netpro
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       - POSTGRES_DB=netpro
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -90,6 +163,12 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres_data:
+  netpro_plugins:

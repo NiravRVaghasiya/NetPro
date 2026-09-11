@@ -397,18 +397,30 @@ reasoning behind its design decisions.
 
 ## Local-first quickstart
 
-Run the whole application on your machine — no Vercel, no cloud, no GitHub
-OAuth, no `DATABASE_URL`:
+Install the supported CLI globally and run NetPro on your machine — no Vercel,
+no cloud, no GitHub OAuth, no `DATABASE_URL`:
 
 ```bash
-npm install && npm run build -w apps/cli
-node apps/cli/dist/index.js init     # creates ~/.netpro (config, SQLite db, logs, keys)
-node apps/cli/dist/index.js serve    # http://127.0.0.1:3777
-node apps/cli/dist/index.js status   # install, database, and server health
+npm install -g netpro
+netpro init       # creates ~/.netpro (config, SQLite db, logs, keys)
+netpro serve      # http://127.0.0.1:3777
+netpro status     # install, database, and server health
 ```
 
-SQLite at `~/.netpro/netpro.db` is the default; PostgreSQL stays available
-for Docker/team deployments via `~/.netpro/config.toml` or environment. See
+Then use the same local database from the terminal:
+
+```bash
+netpro import linkedin.csv
+netpro scan
+netpro search "AI founders"
+```
+
+Contributors can run the equivalent source checkout flow with
+`npm install && npm run build -w apps/cli && node apps/cli/dist/index.js ...`.
+SQLite at `~/.netpro/netpro.db` is the default; PostgreSQL stays available for
+Docker/team deployments via `~/.netpro/config.toml` or environment. See
+[`docs/phase-18-packaging.md`](docs/phase-18-packaging.md),
+[`docs/phase-19-docker.md`](docs/phase-19-docker.md), and
 [`docs/local-first.md`](docs/local-first.md).
 
 ## Structure

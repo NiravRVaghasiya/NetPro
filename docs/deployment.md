@@ -10,7 +10,9 @@ reachable from somewhere else. Two supported targets:
 
 Any Node host works: `npm run build` + `netpro migrate` + start the server.
 NetPro has no platform-specific build step, no serverless requirement, and no
-configuration that only applies to one provider.
+configuration that only applies to one provider. For the supported global CLI
+package and the Docker release path, see [Phase 18 — Packaging](phase-18-packaging.md)
+and [Phase 19 — Docker](phase-19-docker.md).
 
 > **SQLite needs a filesystem that survives a restart.** It is the local
 > default (and is fine on a VPS or in a container with a volume); a
@@ -143,12 +145,15 @@ cp .env.example .env
 # and the GitHub variables (see step 2 above) — local mode is loopback-only.
 docker compose build
 docker compose up -d
-curl http://localhost:3000/api/health
+curl http://localhost:3000/api/health   # Web UI process
+curl http://localhost:3777/api/health   # standalone NetPro API
 ```
 
-The stack runs three services: `db` (Postgres 16), a one-shot `migrate` job,
-and `web`. The web service waits for migrations to complete, so it never
-performs schema changes on a request path.
+The stack runs four services: `db` (Postgres 16), a one-shot `migrate` job,
+`server` (`@netpro/server`, the stable API/jobs/SSE process), and `web` (the
+Next.js UI). The web service waits for both migrations and the API health check,
+so it never performs schema changes on a request path. The API is published on
+`127.0.0.1:3777` and the UI on `127.0.0.1:3000` by default.
 
 Notes on the defaults:
 
@@ -173,7 +178,7 @@ Upgrades:
 ```bash
 git pull
 docker compose build
-docker compose up -d   # the migrate job re-runs; it is idempotent
+docker compose up -d   # recreate the migrate job when the image changes; it is idempotent
 ```
 
 ---
