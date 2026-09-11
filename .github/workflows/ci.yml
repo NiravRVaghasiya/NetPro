@@ -12,6 +12,10 @@ name: CI
 # build exercise the shipped artifacts as real OS processes:
 #
 #   scripts/smoke/cli.sh         netpro init / migrate / serve / status
+#   scripts/smoke/installed-package.sh
+#                                the release tarball installed into a scratch
+#                                global prefix and run from a neutral cwd —
+#                                the published layout, not the checkout
 #   scripts/smoke/local-stack.sh netpro serve, /api/health, API calls, SSE,
 #                                the loopback auth boundary, standalone bin
 #                                (runs once per database dialect)
@@ -221,6 +225,16 @@ jobs:
 
       - name: Bundled CLI is self-contained
         run: npm run package:check
+
+      # The published shape, installed: the release tarball is installed into a
+      # scratch global prefix and its CLI has to find its own migrations and
+      # create a real database from there. An in-repo smoke cannot see this —
+      # it runs from a checkout, where @netpro/db resolves through node_modules
+      # and packages/db/migrations is just where the repo keeps it. The v3.0.0
+      # tarball passed every in-repo check and still failed `netpro init` once
+      # installed; this step is the one that fails instead.
+      - name: Installed package smoke
+        run: scripts/smoke/installed-package.sh
 
   # ── 6. CLI smoke — netpro init / migrate / serve / status as processes ─
   cli-smoke:

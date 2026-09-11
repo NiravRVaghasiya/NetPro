@@ -140,6 +140,14 @@ jobs:
             console.log(`netpro@${pkg.version} tarball verified: bundled CLI, both migration sets, bin metadata.`);
           '
 
+      # The artifact as the operator gets it: install *this* tarball into a
+      # scratch global prefix and run the shipped CLI from there — version,
+      # init, migrate --status, status. This is the step that would have caught
+      # v3.0.0 shipping a package whose installed CLI could not find its own
+      # migrations, which no in-repo smoke and no file-presence check can see.
+      - name: Install the release tarball and run the shipped CLI
+        run: scripts/smoke/installed-package.sh "dist-assets/netpro-${{ steps.version.outputs.version }}.tgz"
+
       - name: Write checksums
         run: |
           cd dist-assets

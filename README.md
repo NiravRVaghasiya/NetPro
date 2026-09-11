@@ -799,12 +799,12 @@ npm run lint         # ESLint across the monorepo
 npm run typecheck    # tsc --noEmit everywhere
 npm test             # hermetic vitest suites (real scratch SQLite files, not mock SQL)
 npm run test:pg      # PostgreSQL integration suites (needs a live database)
-npm run smoke        # CLI + server + web UI smoke tests against shipped artifacts
+npm run smoke        # CLI + installed package + server + web UI smokes against shipped artifacts
 npm run dev          # workspace dev scripts
 ```
 
-Current local run (Node 22.22.3): **1,647 tests passing** in 135 test files —
-CLI 363, core 998, db 120, server 136, web 30 — with **60 PostgreSQL-backed tests skipped** because
+Current local run (Node 22.22.3): **1,650 tests passing** in 136 test files —
+CLI 363, core 998, db 123, server 136, web 30 — with **60 PostgreSQL-backed tests skipped** because
 no `NETPRO_TEST_DATABASE_URL` was present; those run in CI against a real
 Postgres server. Measured performance budgets also ship as tests (graph analytics
 at 3,000 nodes / 8,000 edges, skills extraction at 5,000 contacts, search and
@@ -818,7 +818,7 @@ flowchart LR
   B --> C["Unit tests<br/>(hermetic, SQLite)"]
   C --> D["SQLite integration<br/>+ marketplace e2e"]
   D --> E["PostgreSQL integration<br/>+ performance pass"]
-  E --> F["Build all workspaces<br/>+ package check"]
+  E --> F["Build all workspaces<br/>+ package checks<br/>(bundled + installed)"]
   F --> G["CLI smoke"]
   G --> H["Server smoke<br/>SQLite + PostgreSQL"]
   H --> I["Web UI smoke<br/>(standalone build)"]

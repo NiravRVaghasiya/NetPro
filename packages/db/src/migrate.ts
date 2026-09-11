@@ -68,11 +68,51 @@ export type RunMigrationsOptions = {
 const localRequire = createRequire(import.meta.url);
 
 /**
+ * Package-relative and cwd-relative places the migrations can live, given the
+ * directory this module was loaded from.
+ *
+ * Exported because the *published* layout is an invariant worth pinning with a
+ * test: `npm install -g netpro-<version>.tgz` unpacks
+ *
+ *   <prefix>/lib/node_modules/netpro/
+ *   ├── apps/cli/dist/index.js     ← the bundled CLI (import.meta.url)
+ *   └── packages/db/migrations/    ← both dialects, from package.json "files"
+ *
+ * so `packages/db` has to be reachable from the bundle's own location — on a
+ * user's machine nothing else knows where the package was unpacked.
+ */
+export function migrationCandidates(
+  moduleDir: string | undefined,
+  cwd: string
+): string[] {
+  const candidates: string[] = [];
+
+  if (moduleDir) {
+    // Unbundled layouts, where this file sits in packages/db/src or
+    // packages/db/dist: the package directory itself is one level up.
+    candidates.push(resolve(moduleDir, '..'));
+    // The workspace root, for the repo, the Docker image and any build that
+    // keeps workspace packages side by side.
+    candidates.push(resolve(moduleDir, '..', '..', '..'));
+    // The published root package: apps/cli/dist/index.js next to packages/db.
+    candidates.push(resolve(moduleDir, '..', '..', '..', 'packages', 'db'));
+  }
+
+  candidates.push(join(cwd, 'node_modules', '@netpro/db'));
+  // Next.js standalone output copies workspace packages to <cwd>/packages/*,
+  // and the Docker image runs with cwd=/app.
+  candidates.push(join(cwd, 'packages', 'db'));
+  candidates.push(resolve(cwd, '..', '..', 'packages', 'db'));
+
+  return candidates;
+}
+
+/**
  * Locate the committed migrations folder for a dialect.
  *
  * Resolution by package spec works from the repo and from an installed
- * dependency; the cwd-based candidates cover the standalone Docker layout
- * (cwd = /app) and a monorepo dev server started inside apps/web.
+ * dependency; the layout candidates cover the published tarball, the standalone
+ * Docker layout (cwd = /app) and a monorepo dev server started inside apps/web.
  */
 export function resolveMigrationsFolder(dialect: MigrationDialect): string {
   const folderName = dialect === 'sqlite' ? 'sqlite' : 'postgres';
@@ -87,26 +127,20 @@ export function resolveMigrationsFolder(dialect: MigrationDialect): string {
   try {
     candidates.push(dirname(localRequire.resolve('@netpro/db/package.json')));
   } catch {
-    // Not resolvable from this bundle context — fall through to cwd/package
+    // Not resolvable from this bundle context — fall through to the layout
     // candidates below. The published root package does not contain a private
     // @netpro/db dependency because the CLI is bundled.
   }
 
-  // This file's own package directory, for bundlers that rewrite specs but
-  // keep import.meta.url meaningful. The extra ancestors cover the published
-  // root package layout: apps/cli/dist/index.js alongside packages/db.
+  let moduleDir: string | undefined;
   try {
-    const moduleDir = dirname(fileURLToPath(import.meta.url));
-    candidates.push(resolve(moduleDir, '..'));
-    candidates.push(resolve(moduleDir, '..', '..', '..'));
+    moduleDir = dirname(fileURLToPath(import.meta.url));
   } catch {
-    // import.meta.url is not a file URL — skip.
+    // import.meta.url is not a file URL (a bundler that rewrites it) — the
+    // cwd-relative candidates still apply.
+    moduleDir = undefined;
   }
-  candidates.push(join(process.cwd(), 'node_modules', '@netpro/db'));
-  // Next.js standalone output copies workspace packages to <cwd>/packages/*,
-  // and the Docker image runs with cwd=/app.
-  candidates.push(join(process.cwd(), 'packages', 'db'));
-  candidates.push(resolve(process.cwd(), '..', '..', 'packages', 'db'));
+  candidates.push(...migrationCandidates(moduleDir, process.cwd()));
 
   for (const dir of candidates) {
     const folder = join(dir, 'migrations', folderName);
