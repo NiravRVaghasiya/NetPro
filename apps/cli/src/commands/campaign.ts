@@ -75,7 +75,20 @@ export interface CampaignMarkOptions {
 // Selectors — resolve a friendly reference to a concrete id.
 // ---------------------------------------------------------------------------
 
-/** Resolve a campaign by exact id, unique id-prefix, or unique name. */
+/**
+ * Shortest reference treated as an id prefix.
+ *
+ * Campaign and recipient ids are UUIDs, and both resolvers accept human refs
+ * (a campaign name, a contact id/name/email) in the *same* argument. A short
+ * string like `c2` is therefore a legitimate contact id, while it is also — by
+ * pure chance, at 1-in-256 per recipient — the leading fragment of somebody
+ * else's UUID. Requiring a prefix to be long enough to be deliberate stops a
+ * handful of characters from silently selecting a different recipient; exact
+ * references are matched first regardless (see below).
+ */
+const MIN_ID_PREFIX_LENGTH = 6;
+
+/** Resolve a campaign by exact id, unique name, or unique id-prefix. */
 export async function resolveCampaignId(
   conn: SqliteConn | PgConn,
   ref: string,
@@ -93,15 +106,8 @@ export async function resolveCampaignId(
   const exact = campaigns.find((c) => c.id === trimmed);
   if (exact) return exact.id;
 
-  const byPrefix = campaigns.filter((c) => c.id.startsWith(trimmed));
-  if (byPrefix.length === 1) return byPrefix[0]!.id;
-  if (byPrefix.length > 1) {
-    throw new CrmError(
-      "invalid_input",
-      `Campaign prefix "${trimmed}" is ambiguous (${byPrefix.length} matches). Use more characters.`,
-    );
-  }
-
+  // An exact name beats a speculative id prefix: a campaign genuinely named
+  // after a hex fragment ("Cafe", "Beef") must not lose to a UUID.
   const byName = campaigns.filter(
     (c) => c.name.toLowerCase() === trimmed.toLowerCase(),
   );
@@ -113,13 +119,29 @@ export async function resolveCampaignId(
     );
   }
 
+  const byPrefix =
+    trimmed.length >= MIN_ID_PREFIX_LENGTH
+      ? campaigns.filter((c) => c.id.startsWith(trimmed))
+      : [];
+  if (byPrefix.length === 1) return byPrefix[0]!.id;
+  if (byPrefix.length > 1) {
+    throw new CrmError(
+      "invalid_input",
+      `Campaign prefix "${trimmed}" is ambiguous (${byPrefix.length} matches). Use more characters.`,
+    );
+  }
+
   throw new CrmError("not_found", `No campaign matches "${trimmed}".`);
 }
 
 /**
- * Resolve a recipient within a campaign by exact recipient id, unique
- * recipient-id prefix, or a contact reference (email / id / name) among the
- * campaign's recipients.
+ * Resolve a recipient within a campaign by exact recipient id, a contact
+ * reference (email / id / name) among the campaign's recipients, or a unique
+ * recipient-id prefix of at least {@link MIN_ID_PREFIX_LENGTH} characters.
+ *
+ * Exact references are matched before prefixes on purpose: a contact id that
+ * happens to be the leading fragment of another recipient's UUID must resolve
+ * to that contact's recipient, never to the coincidence.
  */
 export async function resolveRecipientId(
   conn: SqliteConn | PgConn,
@@ -142,16 +164,8 @@ export async function resolveRecipientId(
   const exact = recipients.find((r) => r.id === trimmed);
   if (exact) return exact.id;
 
-  const byPrefix = recipients.filter((r) => r.id.startsWith(trimmed));
-  if (byPrefix.length === 1) return byPrefix[0]!.id;
-  if (byPrefix.length > 1) {
-    throw new CrmError(
-      "invalid_input",
-      `Recipient prefix "${trimmed}" is ambiguous (${byPrefix.length} matches).`,
-    );
-  }
-
-  // Fall back to a contact reference among this campaign's recipients.
+  // A contact reference among this campaign's recipients — exact matches only,
+  // and checked before any prefix guess.
   const lower = trimmed.toLowerCase();
   const byContact = recipients.filter(
     (r) =>
@@ -164,6 +178,18 @@ export async function resolveRecipientId(
     throw new CrmError(
       "invalid_input",
       `Recipient "${trimmed}" matches ${byContact.length} contacts. Use the recipient id.`,
+    );
+  }
+
+  const byPrefix =
+    trimmed.length >= MIN_ID_PREFIX_LENGTH
+      ? recipients.filter((r) => r.id.startsWith(trimmed))
+      : [];
+  if (byPrefix.length === 1) return byPrefix[0]!.id;
+  if (byPrefix.length > 1) {
+    throw new CrmError(
+      "invalid_input",
+      `Recipient prefix "${trimmed}" is ambiguous (${byPrefix.length} matches).`,
     );
   }
 

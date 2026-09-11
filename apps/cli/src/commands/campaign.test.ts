@@ -76,6 +76,78 @@ describe('resolveCampaignId / resolveRecipientId', () => {
     await expect(resolveCampaignId(conn(), 'nope')).rejects.toThrowError(/No campaign matches/);
   });
 
+  it('prefers an exact campaign name over an id prefix', async () => {
+    // A campaign genuinely named after a hex fragment ("cafe") and another
+    // whose id starts with that same fragment: the name must win.
+    const insert = (id: string, name: string) =>
+      fixture.conn.db
+        .insert(fixture.conn.schema.campaigns)
+        .values({
+          id,
+          name,
+          createdAt: NOW.toISOString(),
+          updatedAt: NOW.toISOString(),
+        })
+        .run();
+    insert('cafe0000-0000-4000-8000-000000000001', 'Unrelated');
+    insert('beef0000-0000-4000-8000-000000000002', 'cafe');
+
+    expect(await resolveCampaignId(conn(), 'cafe')).toBe(
+      'beef0000-0000-4000-8000-000000000002'
+    );
+    // Name matching stays case-insensitive, and still beats the id prefix.
+    expect(await resolveCampaignId(conn(), 'CAFE')).toBe(
+      'beef0000-0000-4000-8000-000000000002'
+    );
+  });
+
+  it('does not read a short reference as an id prefix', async () => {
+    seedContact('c1', 'Jane Doe');
+    const json = await executeCampaignCreate(
+      { name: 'Short', subject: 'Hi', body: 'x', contact: ['c1'], json: true },
+      conn(),
+      NOW
+    );
+    const campaignId = (JSON.parse(json) as { campaign: { id: string } }).campaign.id;
+    // No contact is named "zz", so a 2-character reference must not be allowed
+    // to guess a recipient whose UUID happens to start with it.
+    fixture.sqlite
+      .prepare("UPDATE campaign_recipients SET id = 'zz' || substr(id, 3) WHERE campaign_id = ?")
+      .run(campaignId);
+    await expect(resolveRecipientId(conn(), campaignId, 'zz')).rejects.toThrowError(
+      /No recipient matches/
+    );
+  });
+
+  it('prefers a contact reference over a recipient-id prefix', async () => {
+    // The regression: recipient ids are UUIDs, so a 2-character contact id is
+    // also — 1-in-256 of the time — the leading fragment of another
+    // recipient's id. The contact reference must win.
+    seedContact('c1', 'Jane Doe');
+    seedContact('c2', 'John Smith');
+    const json = await executeCampaignCreate(
+      { name: 'Ref', subject: 'Hi', body: 'x', dailyLimit: '1', contact: ['c1', 'c2'], json: true },
+      conn(),
+      NOW
+    );
+    const campaignId = (JSON.parse(json) as { campaign: { id: string } }).campaign.id;
+
+    const rows = fixture.sqlite
+      .prepare('SELECT id, contact_id FROM campaign_recipients WHERE campaign_id = ?')
+      .all(campaignId) as Array<{ id: string; contact_id: string }>;
+    const jane = rows.find((r) => r.contact_id === 'c1')!;
+    const john = rows.find((r) => r.contact_id === 'c2')!;
+    // c1's recipient now starts with "c2"; c2's must resolve to itself anyway.
+    fixture.sqlite
+      .prepare('UPDATE campaign_recipients SET id = ? WHERE id = ?')
+      .run(`c2${jane.id.slice(2)}`, jane.id);
+
+    expect(await resolveRecipientId(conn(), campaignId, 'c2')).toBe(john.id);
+
+    // The id-prefix ergonomic still works for a deliberate prefix.
+    expect(await resolveRecipientId(conn(), campaignId, john.id.slice(0, 8))).toBe(john.id);
+  });
+
   it('resolves a recipient by contact name, email, and id', async () => {
     seedContact('c1', 'Jane Doe', 'Stripe', 'jane@stripe.com');
     const json = await executeCampaignCreate(
