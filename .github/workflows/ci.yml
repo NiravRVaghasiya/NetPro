@@ -452,7 +452,7 @@ jobs:
           grep -q '<title>NetPro' /tmp/landing.html || { echo "::error::landing page is not NetPro"; exit 1; }
           grep -q 'Private\. Local\. Searchable\.' /tmp/landing.html || {
             echo "::error::landing page is not the local-first on-ramp"; exit 1; }
-          asset="$(grep -oE '/_next/static/[^"]+\\.js' /tmp/landing.html | head -1)"
+          asset="$(grep -oE '/_next/static/[^"]+\.js' /tmp/landing.html | head -1)"
           [ -n "$asset" ] || { echo "::error::no static asset referenced by the landing page"; exit 1; }
           curl -fsS "http://127.0.0.1:3000$asset" -o /dev/null || {
             echo "::error::static asset $asset failed"; exit 1; }
