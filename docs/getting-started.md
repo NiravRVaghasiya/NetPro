@@ -80,8 +80,7 @@ own since Phase 24):
 To expose a server beyond loopback, use `token` (or `open` behind your own
 auth). To expose the Web UI itself, put your own auth/TLS reverse proxy in
 front of port 3000 — it has no sign-in of its own. The full model is in
-[phase-5-authentication.md](phase-5-authentication.md) and
-[phase-24-deprecate-old-web.md](phase-24-deprecate-old-web.md).
+[local-first.md](local-first.md).
 
 ## Run the CLI
 

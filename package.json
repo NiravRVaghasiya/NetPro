@@ -13,8 +13,6 @@
     "packages/db/migrations/**",
     "docs/getting-started.md",
     "docs/local-first.md",
-    "docs/phase-18-packaging.md",
-    "docs/phase-19-docker.md",
     "README.md",
     "LICENSE"
   ],

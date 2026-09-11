@@ -282,8 +282,7 @@ export default async function ObservatoryPage() {
           <code>packages/core</code> is the business logic (Louvain, Brandes, hybrid search, growth).{" "}
           <code>packages/server</code> is HTTP/API/jobs/SSE/auth/config (<code>GET /api/graph</code>, <code>/api/providers</code>,{" "}
           <code>/api/events</code>). <code>apps/web</code> is the observatory — it visualizes <code>core</code>{" "}
-          <em>through</em> the server: one operation, one job system, one event stream, multiple interfaces (CLI, Web UI). See{" "}
-          <code>netpro-local-first-implementation-plan.md</code> Phases 9–11.{" "}
+          <em>through</em> the server: one operation, one job system, one event stream, multiple interfaces (CLI, Web UI).{" "}
           <Link href="/network" style={{ color: "#2563eb" }}>
             Network visualization →
           </Link>

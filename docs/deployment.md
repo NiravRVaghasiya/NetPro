@@ -11,8 +11,9 @@ reachable from somewhere else. Two supported targets:
 Any Node host works: `npm run build` + `netpro migrate` + start the server.
 NetPro has no platform-specific build step, no serverless requirement, and no
 configuration that only applies to one provider. For the supported global CLI
-package and the Docker release path, see [Phase 18 — Packaging](phase-18-packaging.md)
-and [Phase 19 — Docker](phase-19-docker.md).
+package and the Docker release path, see
+[getting-started.md](getting-started.md) and the
+[Docker Compose](#docker-compose-self-hosting) section below.
 
 > **SQLite needs a filesystem that survives a restart.** It is the local
 > default (and is fine on a VPS or in a container with a volume); a
@@ -23,10 +24,9 @@ and [Phase 19 — Docker](phase-19-docker.md).
 > **Authentication, in one paragraph.** Local NetPro needs no credentials at
 > all: requests from `127.0.0.1` are the operator, identified by the
 > installation identity in `~/.netpro/config.toml` (see
-> [phase-5-authentication.md](phase-5-authentication.md)). Phase 24 removed the
-> Web UI's Auth.js flows, so the Web UI performs no authentication of its own —
-> it is a pure client of the server, and *all* authentication is the server's
-> job. A deployed server picks a mode: `NETPRO_AUTH_MODE=token` (every caller
+> [local-first.md](local-first.md)). The Web UI's Auth.js flows were removed,
+> so the Web UI performs no authentication of its own — it is a pure client of
+> the server, and *all* authentication is the server's job. A deployed server picks a mode: `NETPRO_AUTH_MODE=token` (every caller
 > presents the access token) or `NETPRO_AUTH_MODE=open` when a reverse proxy,
 > VPN, or private network already authenticates callers. To expose the Web UI
 > itself beyond this machine, put your own auth/TLS reverse proxy in front of
@@ -74,7 +74,7 @@ one-connection pool (see [Connection pooling](#connection-pooling)).
 
 | Mode | Set | Who gets in |
 | --- | --- | --- |
-| `local` (default) | nothing | Requests from the machine the server runs on. **Only** valid when the process is reachable on loopback (see the caveat in [phase-5-authentication.md](phase-5-authentication.md)). |
+| `local` (default) | nothing | Requests from the machine the server runs on. **Only** valid when the process is reachable on loopback (see the caveat in [local-first.md](local-first.md)). |
 | `token` | `NETPRO_AUTH_MODE=token` | Every caller, loopback included, presents the access token (`netpro token`, `Authorization: Bearer`). |
 | `open` | `NETPRO_AUTH_MODE=open` | Nobody is authenticated by NetPro — only correct behind your own auth (reverse proxy with sign-in, VPN, private network). |
 
@@ -265,8 +265,7 @@ start so the console always shows what you chose.
 > content`, `netpro plugin`, …). Their old Web UI pages and their Next.js API
 > routes (`/api/skills/*`, `/api/card/*`, `/api/content/*`,
 > `/api/interactions`, `/api/follow-ups`, `/api/webhooks/*`, …) were removed in
-> Phase 24 — the standalone server's route table is the only API; see
-> [phase-24-deprecate-old-web.md](phase-24-deprecate-old-web.md).
+> Phase 24 — the standalone server's route table is the only API.
 
 ### Host trust
 
@@ -419,9 +418,7 @@ and not incremental — that is a deliberate simplicity/size trade.
 - Measured rather than assumed (Phase 7): **5k contacts / 20k edges against a
   real PostgreSQL server** gave ~330 ms for the dashboard overview, ~210 ms for
   `GET /api/graph/overview`, ~10 ms per pathfinder plan, and ~30 ms for a
-  keyword or hybrid search. Numbers are in the
-  [Phase 7 progress doc](superpowers/plans/2026-09-08-v2.0-phase7-release-progress.md);
-  re-measure against your own database with
+  keyword or hybrid search. Re-measure against your own database with
   `NETPRO_TEST_DATABASE_URL=… npm run test -w @netpro/core -- src/postgres.perf.test.ts`.
 - Re-measured with the v2.5 Observer fixture (v2.5 Phase 7): the same
   database carrying **10k profile views + 1k content items + 5k engagement
@@ -430,8 +427,7 @@ and not incremental — that is a deliberate simplicity/size trade.
   sections off, ~16 ms for the views overview behind `GET /api/card/views`,
   ~5 ms for the content list behind `GET /api/content` and ~41 ms for its
   overview query — all inside the plan's 500/100/100 ms budgets, no new
-  indexes needed. Medians of 3 runs from the same perf pass; see the
-  [v2.5 Phase 7 progress doc](superpowers/plans/2026-09-09-v2.5-phase7-release-progress.md).
+  indexes needed. Medians of 3 runs from the same perf pass.
 
 ### Profile view tracking (v2.5 Phase 2)
 
@@ -574,8 +570,7 @@ additionally marked no-store so no shared cache or CDN retains private data.
 mode every caller needs the access token — `netpro token` prints it, and
 `Authorization: Bearer <token>` (or `?token=` for the EventSource) admits the
 caller. In `local` mode a 401 from a non-loopback caller is expected: present
-the token instead. See [Host trust](#host-trust) and
-[phase-5-authentication.md](phase-5-authentication.md).
+the token instead. See [Host trust](#host-trust).
 
 **`SELF_SIGNED_CERT_IN_CHAIN` / `unable to verify the first certificate`.**
 Your provider signs with its own CA. Append `?sslmode=require` to
