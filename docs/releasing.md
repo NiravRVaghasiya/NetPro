@@ -154,13 +154,24 @@ new commit on `master`, and then by a **new version** — not by moving the tag.
 
 3. **Anyone may have it** — cut the patch release (above) and *withdraw* the
    broken asset, so the same broken bytes stop being served. This is what v3.0.0
-   did: the published tarball installed but could not run `netpro init`, it had
-   two downloads, and v3.0.1 shipped the fix.
+   needed: the published tarball installed but could not run `netpro init`, and
+   v3.0.1 shipped the fix.
 
    ```bash
    gh release delete-asset v3.0.0 netpro-3.0.0.tgz --yes
    gh release delete-asset v3.0.0 SHA256SUMS --yes
    gh release edit v3.0.0 --notes-file docs/releases/v3.0.0.md   # keep the record, point forwards
+   ```
+
+   **Run the commands — do not write them down and move on.** v3.0.1 recorded in
+   `docs/releases/v3.0.0.md` that this withdrawal had already happened, and it
+   had not: the broken tarball stayed attached to the release and served 17
+   downloads before it was actually deleted on 2026-09-11. Documenting a
+   withdrawal is not a withdrawal, and the only thing that proves one is the
+   release having no assets left:
+
+   ```bash
+   gh release view v3.0.0 --json assets -q '.assets | length'   # 0, or it is still being served
    ```
 
    The edit is not optional: the published body is a copy taken from
