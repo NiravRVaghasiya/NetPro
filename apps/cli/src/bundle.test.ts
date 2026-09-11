@@ -92,6 +92,40 @@ describe('CLI bundle runtime dependencies', () => {
     }
   });
 
+  it('keeps the Dockerfile copying pg\'s full runtime closure', () => {
+    // pg is external because it resolves its backends dynamically, so every
+    // package it requires at runtime must be copied into the image too. This
+    // used to happen by accident — the Web UI imported @netpro/db, so Next's
+    // standalone trace dragged pg + its deps in. Phase 24 removed that import;
+    // without this copy the image builds but `netpro migrate` dies with
+    // "Cannot find module 'pg-types'". Walk pg's `dependencies` recursively so
+    // a pg upgrade that gains a transitive dep fails here instead of in CI's
+    // docker job.
+    const pgPkg = JSON.parse(
+      readFileSync(resolve(here, '../../../node_modules/pg/package.json'), 'utf8'),
+    );
+    const closure = new Set<string>();
+    const queue = [...Object.keys(pgPkg.dependencies ?? {})];
+    while (queue.length) {
+      const name = queue.shift();
+      if (!name || closure.has(name)) continue;
+      closure.add(name);
+      const pkgPath = resolve(here, `../../../node_modules/${name}/package.json`);
+      if (!existsSync(pkgPath)) {
+        throw new Error(
+          `pg depends on "${name}" but it is not hoisted to the root node_modules — the Dockerfile COPY would miss it`,
+        );
+      }
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+      queue.push(...Object.keys(pkg.dependencies ?? {}));
+    }
+    expect(closure.size).toBeGreaterThan(0);
+    const dockerfile = readFileSync(resolve(here, '../../../Dockerfile'), 'utf8');
+    for (const dep of closure) {
+      expect(dockerfile).toMatch(new RegExp(`COPY[^\\n]*node_modules/${dep}\\s`));
+    }
+  });
+
   it('resolves a commander new enough to provide .argument()', async () => {
     // npm nests commander@14 under apps/cli/node_modules because tsup's own
     // sucrase dependency takes the root slot with commander@4. The Docker
