@@ -101,8 +101,8 @@ const GEO_FIELD_MAX_LENGTH = 64;
  * NetPro never runs a geo lookup itself — an edge platform that already
  * resolved the IP is the only source, per the plan. `x-geo-country` /
  * `x-geo-city` are the generic spellings; `cf-ipcountry` / `cf-ipcity` are
- * Cloudflare's. Phase 4 dropped the platform-specific `x-vercel-ip-*`
- * spelling: a self-hosted deployment configures its proxy to send the generic
+ * Cloudflare's. Platform-specific spellings from any particular host are not
+ * read: a self-hosted deployment configures its proxy to send the generic
  * pair, and callers can pass their own names (see below).
  */
 export const DEFAULT_GEO_COUNTRY_HEADERS = ["x-geo-country", "cf-ipcountry"] as const;

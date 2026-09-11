@@ -43,8 +43,8 @@ const SEED: Seed[] = [
   {
     id: "uuid-2",
     fullName: "John Smith",
-    email: "john@vercel.com",
-    company: "Vercel",
+    email: "john@acme.com",
+    company: "Acme",
     role: "Designer",
   },
   {
@@ -86,14 +86,14 @@ describe("resolveContactRef", () => {
   });
 
   it("resolves by exact email", async () => {
-    const ref = await resolveContactRef(conn, "john@vercel.com");
+    const ref = await resolveContactRef(conn, "john@acme.com");
     expect(ref.id).toBe("uuid-2");
     expect(ref.fullName).toBe("John Smith");
   });
 
   it("resolves by id", async () => {
     const ref = await resolveContactRef(conn, "uuid-2");
-    expect(ref.email).toBe("john@vercel.com");
+    expect(ref.email).toBe("john@acme.com");
   });
 
   it("resolves by unique full name (case-insensitive, trimmed)", async () => {
@@ -129,8 +129,8 @@ describe("resolveContactRef", () => {
     const input = contactToRecipientInput({
       id: "uuid-2",
       fullName: "John Smith",
-      email: "john@vercel.com",
-      company: "Vercel",
+      email: "john@acme.com",
+      company: "Acme",
       role: "Designer",
       headline: null,
       location: null,
@@ -141,8 +141,8 @@ describe("resolveContactRef", () => {
     });
     expect(input).toEqual({
       name: "John Smith",
-      email: "john@vercel.com",
-      company: "Vercel",
+      email: "john@acme.com",
+      company: "Acme",
       role: "Designer",
       headline: undefined,
       location: undefined,

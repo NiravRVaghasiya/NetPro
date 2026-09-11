@@ -19,9 +19,10 @@ const trustHost = resolveTrustHost();
 
 export const authConfig = {
   // Auth.js v5 does NOT infer host trust from NEXTAUTH_URL — only from
-  // AUTH_URL/AUTH_TRUST_HOST/VERCEL/CF_PAGES/non-production NODE_ENV. Without
-  // this, a self-hosted production deploy configured exactly as NetPro's docs
-  // describe fails every request with UntrustedHost. See ./trust-host.ts.
+  // AUTH_URL/AUTH_TRUST_HOST, a hosting-platform marker (e.g. CF_PAGES), or
+  // non-production NODE_ENV. Without this, a self-hosted production deploy
+  // configured exactly as NetPro's docs describe fails every request with
+  // UntrustedHost. See ./trust-host.ts.
   ...(trustHost === undefined ? {} : { trustHost }),
   pages: {
     signIn: "/login",

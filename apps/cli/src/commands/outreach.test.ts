@@ -49,8 +49,8 @@ async function seed(conn: SqliteConn): Promise<void> {
     {
       id: "c2",
       fullName: "John Smith",
-      email: "john@vercel.com",
-      company: "Vercel",
+      email: "john@acme.com",
+      company: "Acme",
       role: "Designer",
       source: "test",
       createdAt: now,

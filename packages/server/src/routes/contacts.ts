@@ -79,7 +79,7 @@ export async function handleGetContact(
   try {
     const timeline = await getContactTimeline(deps.conn, id, {});
     if (!timeline) {
-      sendJson(res, 404, { error: `No contact with id \"${id}\".`, code: 'not_found' });
+      sendJson(res, 404, { error: `No contact with id "${id}".`, code: 'not_found' });
       return;
     }
     sendJson(res, 200, timeline);

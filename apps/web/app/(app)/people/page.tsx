@@ -1,4 +1,3 @@
-// @ts-nocheck
 // apps/web/app/(app)/people/page.tsx
 //
 // Phase 9 — People: the server-backed contacts list.

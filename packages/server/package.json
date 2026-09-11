@@ -2,7 +2,7 @@
   "name": "@netpro/server",
   "version": "3.0.0",
   "private": true,
-  "description": "NetPro local HTTP server \u2014 API, auth, jobs, SSE (no Vercel, no Web UI dependency)",
+  "description": "NetPro local HTTP server \u2014 API, auth, jobs, SSE (local-first; no hosted-platform or Web UI dependency)",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

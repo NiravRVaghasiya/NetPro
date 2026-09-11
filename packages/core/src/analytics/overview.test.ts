@@ -16,7 +16,7 @@ beforeAll(async () => {
   const people: Array<[string, string, string, number | null]> = [
     ['a', 'Ada Lovelace', 'Stripe', 0.7],
     ['b', 'Bob Builder', 'Stripe', 0.9],
-    ['c', 'Cara Chen', 'Vercel', 0.5],
+    ['c', 'Cara Chen', 'Acme', 0.5],
   ];
   for (const [id, fullName, company, score] of people) {
     await fixture.conn.db

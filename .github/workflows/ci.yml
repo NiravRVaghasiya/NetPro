@@ -1,5 +1,25 @@
 name: CI
 
+# Phase 21 — CI validates the actual local-first architecture, in order:
+#
+#   Install → Lint → Typecheck → Unit tests → SQLite integration tests
+#          → PostgreSQL integration tests → Build
+#          → CLI smoke → Server smoke (SQLite + PostgreSQL) → Web UI smoke
+#          → Docker image e2e
+#
+# Every job provisions from the same `npm ci` step (Install), and the
+# `needs:` chain below is the ordered gate list. The smoke stages after the
+# build exercise the shipped artifacts as real OS processes:
+#
+#   scripts/smoke/cli.sh         netpro init / migrate / serve / status
+#   scripts/smoke/local-stack.sh netpro serve, /api/health, API calls, SSE,
+#                                the loopback auth boundary, standalone bin
+#                                (runs once per database dialect)
+#   scripts/smoke/web-ui.sh      the production standalone Next.js output
+#
+# The Docker job additionally proves the published image serves the Web UI
+# and every auth boundary against PostgreSQL.
+
 on:
   push:
     branches: [main, master]
@@ -11,15 +31,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Lint, Typecheck, Test, Build
+  # ── 1. Lint + typecheck ────────────────────────────────────────────────
+  lint-typecheck:
+    name: Lint & typecheck (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         # 20 is the workspace-wide `engines` floor; 22 is what contributors
-        # run. A native addon (better-sqlite3) and Next.js 16 make the
+        # run. The native addon (better-sqlite3) and Next.js 16 make the
         # difference worth covering.
         node-version: ['20', '22']
     steps:
@@ -39,23 +60,68 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test
+  # ── 2. Unit tests (hermetic; real scratch SQLite files) ────────────────
+  unit:
+    name: Unit tests
+    needs: lint-typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The vitest suite is hermetic (Postgres-specific suites self-skip
+      # without NETPRO_TEST_DATABASE_URL) and exercises SQL behaviour against
+      # real scratch SQLite files, not mocks.
+      - name: Run unit tests
         run: npm run test
 
-      - name: Build
-        run: npm run build
+  # ── 3. SQLite integration — package suites over real SQLite + marketplace
+  sqlite-integration:
+    name: SQLite integration (real database + marketplace)
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DB_DIALECT: sqlite
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+        node-version: '22'
+        cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Integration-flavoured suites that open real SQLite databases on disk:
+      # migration application/FTS (db) and the CLI command executor wiring
+      # (cli). The broader unit run happened in the previous stage.
+      - name: Run SQLite integration suites
+        run: npm run test -w @netpro/db -w @netpro/cli
+
+      - name: Build the CLI for the marketplace smoke
+        run: npm run build -w @netpro/cli
 
       # v3.0 Phase 6: the reference plugin installs from the shipped index
       # end-to-end — index fetch, checksum verify, extract, register
       # disabled, permissions-gated enable — over a scratch sqlite database.
       # file:// URLs keep the smoke hermetic (no network beyond npm).
       - name: Marketplace end-to-end smoke
+        env:
+          MARKETPLACE_INDEX_URL: "file://$PWD/marketplace/index.json"
+          MARKETPLACE_NO_CACHE: 'true'
+          NETPRO_PLUGIN_DIR: "$RUNNER_TEMP/netpro-plugins"
+          DB_PATH: "$RUNNER_TEMP/netpro-marketplace.db"
         run: |
-          export MARKETPLACE_INDEX_URL="file://$PWD/marketplace/index.json"
-          export MARKETPLACE_NO_CACHE=true
-          export NETPRO_PLUGIN_DIR="$RUNNER_TEMP/netpro-plugins"
-          export DB_DIALECT=sqlite
-          export DB_PATH="$RUNNER_TEMP/netpro-marketplace.db"
           node apps/cli/dist/index.js plugin search example
           node apps/cli/dist/index.js plugin install example-event-discovery
           node apps/cli/dist/index.js plugin update example-event-discovery
@@ -63,15 +129,12 @@ jobs:
           node apps/cli/dist/index.js plugin list
           test -f "$NETPRO_PLUGIN_DIR/example-event-discovery/manifest.json"
 
-  postgres:
-    # Phases 1–5 shipped Postgres support that compiled but was never executed
-    # against a real server. That gap hid a migration race that failed 5 of 6
-    # concurrent cold starts — exactly what a deploy that starts several
-    # instances at once does. This job exists so that can never regress
-    # unnoticed again.
+  # ── 4. PostgreSQL integration — real database server ───────────────────
+  postgres-integration:
     name: PostgreSQL integration
+    needs: sqlite-integration
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16-alpine
@@ -93,8 +156,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
+        node-version: '22'
+        cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
@@ -106,61 +169,167 @@ jobs:
       # dialect-specific SQL in packages/core. SQLite covers it in-memory;
       # this runs the same `searchContacts` entry point against a real server
       # so tsvector/GIN/to_tsquery are proven, not just typechecked.
-      - name: Run vault integration tests against PostgreSQL
-        run: npm run test -w @netpro/core -- src/crypto/postgres.integration.test.ts
+      - name: Run core PostgreSQL suites
+        run: |
+          npm run test -w @netpro/core -- src/crypto/postgres.integration.test.ts
+          npm run test -w @netpro/core -- src/search/postgres.integration.test.ts
+          npm run test -w @netpro/core -- src/events/postgres.integration.test.ts
+          npm run test -w @netpro/core -- src/content/postgres.integration.test.ts
+          npm run test -w @netpro/core -- src/views/postgres.integration.test.ts
 
-      - name: Run core search integration tests against PostgreSQL
-        run: npm run test -w @netpro/core -- src/search/postgres.integration.test.ts
-
-      # v2.0 Phase 6: the event matcher reads through raw ANSI SQL (LIKE
-      # ESCAPE, correlated counts, `ORDER BY (col IS NULL)`) and parks
-      # unresolved attendees as JSON in `activity_log` — text on Postgres,
-      # JSON-mode on SQLite. Skip the SQL and the bucket round-trip is only
-      # ever proven on one dialect.
-      - name: Run core events integration tests against PostgreSQL
-        run: npm run test -w @netpro/core -- src/events/postgres.integration.test.ts
-
-      # v2.5 Phase 4: the content tracker reads through raw ANSI SQL
-      # (row-value latest-snapshot comparison, LOWER() tag matching over a
-      # JSON text column) and stores tags/payloads as JSON-mode on SQLite but
-      # plain text on Postgres. This proves the same entry points on a real
-      # server, including the url_norm UNIQUE backstop.
-      - name: Run core content integration tests against PostgreSQL
-        run: npm run test -w @netpro/core -- src/content/postgres.integration.test.ts
-
-      # v2.5 Phase 7: the view-beacon ingest path against a real server. The
-      # dedup probe's nullable parameters are only used inside IS NOT NULL,
-      # which Postgres cannot type — the Docker smoke caught the resulting
-      # 500 at the release gate after every hermetic test had passed on
-      # SQLite. This suite runs recordView (dedup, privacy, owner/bot
-      # labeling, token resolution) on live Postgres so that can't regress.
-      - name: Run core views integration tests against PostgreSQL
-        run: npm run test -w @netpro/core -- src/views/postgres.integration.test.ts
-
-      # v2.0 Phase 7: the release-cut performance pass, extended in v2.5
-      # Phase 7. 5k contacts / 20k edges plus the Observer fixture — 10k
-      # profile views, 1k content items, 5k metric snapshots — timing the
-      # core entry points behind the dashboard (views + content blocks
-      # included), /api/search, /api/graph, /api/card/views and /api/content.
+      # v2.0 Phase 7: the release-cut performance pass against PostgreSQL.
       # Skipped locally (no NETPRO_TEST_DATABASE_URL), so `npm test` stays
       # hermetic.
       - name: Run the release performance pass against PostgreSQL
         run: npm run test -w @netpro/core -- src/postgres.perf.test.ts
 
+      - name: Build the CLI for the migration checks
+        run: npm run build -w @netpro/cli
+
+      # The deploy step (docker-compose migration job) against a real server,
+      # including the advisory-lock idempotency every redeploy relies on.
       - name: Verify the migration CLI against a real database
         env:
           DB_DIALECT: postgresql
           DATABASE_URL: postgresql://netpro:netpro@127.0.0.1:5432/netpro?sslmode=disable
         run: |
-          npm run build -w @netpro/cli
           node apps/cli/dist/index.js migrate --status
           node apps/cli/dist/index.js migrate
           # Applying twice must be a no-op, not an error: every redeploy and
           # every extra container repeats this.
           node apps/cli/dist/index.js migrate
 
+  # ── 5. Build — every workspace, including the standalone Web UI ────────
+  build:
+    name: Build all workspaces
+    needs: postgres-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+        node-version: '22'
+        cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Bundled CLI is self-contained
+        run: npm run package:check
+
+  # ── 6. CLI smoke — netpro init / migrate / serve / status as processes ─
+  cli-smoke:
+    name: CLI smoke (SQLite)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+        node-version: '22'
+        cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the CLI and standalone server
+        run: npm run build -w @netpro/cli -w @netpro/server
+
+      # Scratch NETPRO_HOME: --help surface, init (identity/config/0600
+      # token/15 migrations), idempotent re-init, migrate --status + no-op
+      # migrate, serve from the CLI, status observes it, graceful SIGTERM.
+      - name: CLI process smoke
+        run: scripts/smoke/cli.sh
+
+  # ── 7. Server smoke — health, API calls, SSE, auth boundary ────────────
+  # One leg per database dialect. The PostgreSQL leg shares the 16-alpine
+  # service definition with the integration stage; the SQLite leg ignores it.
+  server-smoke:
+    name: Server smoke (${{ matrix.dialect }})
+    needs: cli-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        dialect: ['sqlite', 'postgresql']
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: netpro
+          POSTGRES_PASSWORD: netpro
+          POSTGRES_DB: netpro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U netpro"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+        node-version: '22'
+        cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the CLI and standalone server
+        run: npm run build -w @netpro/cli -w @netpro/server
+
+      # netpro init → netpro serve → /api/health (dialect startup) →
+      # contacts/jobs/settings/providers/search/graph API calls → observable
+      # scan job → SSE search.started/search.completed → console page →
+      # proxied 401 vs bearer 200 boundary → netpro status → standalone
+      # netpro-server bin → graceful SIGTERM.
+      - name: Server process smoke (${{ matrix.dialect }})
+        env:
+          SMOKE_DIALECT: ${{ matrix.dialect }}
+          DATABASE_URL: ${{ matrix.dialect == 'postgresql' && 'postgresql://netpro:netpro@127.0.0.1:5432/netpro?sslmode=disable' || '' }}
+        run: scripts/smoke/local-stack.sh
+
+  # ── 8. Web UI smoke — production standalone output really serves ───────
+  web-ui-smoke:
+    name: Web UI smoke (standalone production build)
+    needs: server-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+        node-version: '22'
+        cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the Web UI and CLI
+        run: npm run build -w apps/web -w @netpro/cli
+
+      # Stages apps/web/.next/standalone like the Docker runner, starts it on
+      # loopback with a scratch SQLite install, and asserts: landing page +
+      # security headers, /login, /api/health on SQLite, the private
+      # Observatory trusted from loopback, a /_next/static asset, clean exit.
+      - name: Web UI loading smoke
+        run: scripts/smoke/web-ui.sh
+
+  # ── 9. Docker self-hosted e2e — the published deployment shape ─────────
   docker:
-    name: Docker image builds
+    name: Docker image e2e (PostgreSQL + Web UI)
+    needs: web-ui-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -216,7 +385,7 @@ jobs:
           fi
           cat /tmp/migrate.log
 
-      - name: Start the web container (phase 5: no credentials at all)
+      - name: "Start the web container (phase 5: no credentials at all)"
         run: |
           # The Phase 5 exit criterion, exercised in CI: the production image
           # starts and serves with DB_DIALECT/DATABASE_URL alone. No
@@ -243,7 +412,7 @@ jobs:
             exit 1
           fi
 
-      - name: Check health, auth boundaries and logs
+      - name: Check health, Web UI loading, auth boundaries and logs
         run: |
           echo "--- health ---"
           curl -fsS http://127.0.0.1:3000/api/health | tee /tmp/health.json
@@ -251,6 +420,19 @@ jobs:
             echo "::error::health not healthy: $(cat /tmp/health.json)"; exit 1; }
           grep -q '"dialect":"postgresql"' /tmp/health.json || {
             echo "::error::health dialect not postgresql: $(cat /tmp/health.json)"; exit 1; }
+
+          echo "--- Web UI loading (Phase 21) ---"
+          curl -fsS http://127.0.0.1:3000/ -D /tmp/landing.headers -o /tmp/landing.html
+          grep -qi 'HTTP/.*200' /tmp/landing.headers || { echo "::error::landing page not 200"; exit 1; }
+          grep -q '<title>NetPro' /tmp/landing.html || { echo "::error::landing page is not NetPro"; exit 1; }
+          grep -q 'Private\. Local\. Searchable\.' /tmp/landing.html || {
+            echo "::error::landing page is not the local-first on-ramp"; exit 1; }
+          login_code="$(curl -s -o /tmp/login.html -w '%{http_code}' http://127.0.0.1:3000/login)"
+          [ "$login_code" = "200" ] || { echo "::error::/login expected 200, got $login_code"; exit 1; }
+          asset="$(grep -oE '/_next/static/[^"]+\.js' /tmp/landing.html | head -1)"
+          [ -n "$asset" ] || { echo "::error::no static asset referenced by the landing page"; exit 1; }
+          curl -fsS "http://127.0.0.1:3000$asset" -o /dev/null || {
+            echo "::error::static asset $asset failed"; exit 1; }
 
           echo "--- local mode trusts this machine (phase 5) ---"
           # A request whose Host is loopback comes from the operator, so the
@@ -330,6 +512,10 @@ jobs:
             code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3000${path}")"
             [ "$code" = "401" ] || { echo "::error::github-mode ${path} expected 401 even from loopback, got $code"; exit 1; }
           done
+          # Web UI loading still works in GitHub mode — it redirects to the
+          # sign-in page instead of rendering the app, but it must not crash.
+          login_code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/login)"
+          [ "$login_code" = "200" ] || { echo "::error::github-mode /login expected 200, got $login_code"; exit 1; }
           docker logs web 2>&1 | tee /tmp/web-github.log
           if grep -qi "UntrustedHost" /tmp/web-github.log; then
             echo "::error::UntrustedHost present in GitHub-mode web logs"

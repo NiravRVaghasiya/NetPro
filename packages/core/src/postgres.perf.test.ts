@@ -70,7 +70,7 @@ function rng(seed: number): () => number {
   };
 }
 
-const COMPANIES = ['Stripe', 'Figma', 'Vercel', 'Monzo', 'Klarna', 'Shopify', 'Linear', 'Ramp'];
+const COMPANIES = ['Stripe', 'Figma', 'Acme', 'Monzo', 'Klarna', 'Shopify', 'Linear', 'Ramp'];
 const INDUSTRIES = ['fintech', 'devtools', 'design', 'commerce', 'health', 'logistics'];
 const ROLES = ['Engineer', 'Designer', 'Founder', 'Product Manager', 'Data Scientist', 'Recruiter'];
 const TOPICS = [

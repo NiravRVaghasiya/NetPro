@@ -42,11 +42,11 @@ export async function handleListJobs(
   const typeParam = p.get('type')?.trim();
   const statusParam = p.get('status')?.trim();
   if (typeParam && !isJobType(typeParam)) {
-    sendJson(res, 400, { error: `Unknown job type \"${typeParam}\". Expected one of: ${JOB_TYPES.join(', ')}.` });
+    sendJson(res, 400, { error: `Unknown job type "${typeParam}". Expected one of: ${JOB_TYPES.join(', ')}.` });
     return;
   }
   if (statusParam && !isJobStatus(statusParam)) {
-    sendJson(res, 400, { error: `Unknown job status \"${statusParam}\".` });
+    sendJson(res, 400, { error: `Unknown job status "${statusParam}".` });
     return;
   }
   const limit = num(p.get('limit'), 25);
@@ -70,7 +70,7 @@ export async function handleGetJob(
   }
   const job = deps.jobs.get(id);
   if (!job) {
-    sendJson(res, 404, { error: `No job with id \"${id}\".`, code: 'not_found' });
+    sendJson(res, 404, { error: `No job with id "${id}".`, code: 'not_found' });
     return;
   }
   sendJson(res, 200, { job });
@@ -91,7 +91,7 @@ export async function handleCreateJob(
   }
   const type = typeof body.type === 'string' ? body.type.trim() : '';
   if (!isJobType(type)) {
-    sendJson(res, 400, { error: `Unknown job type \"${type}\". Expected one of: ${JOB_TYPES.join(', ')}.` });
+    sendJson(res, 400, { error: `Unknown job type "${type}". Expected one of: ${JOB_TYPES.join(', ')}.` });
     return;
   }
   const metadata = body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata)
@@ -118,11 +118,11 @@ export async function handleCancelJob(
   }
   const job = deps.jobs.get(id);
   if (!job) {
-    sendJson(res, 404, { error: `No job with id \"${id}\".`, code: 'not_found' });
+    sendJson(res, 404, { error: `No job with id "${id}".`, code: 'not_found' });
     return;
   }
   if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
-    sendJson(res, 409, { error: `Job \"${id}\" is already ${job.status}.`, job });
+    sendJson(res, 409, { error: `Job "${id}" is already ${job.status}.`, job });
     return;
   }
   const cancelled = deps.jobs.cancel(id)!;

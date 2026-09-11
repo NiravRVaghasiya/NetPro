@@ -1,4 +1,3 @@
-// @ts-nocheck
 // apps/web/app/(app)/observatory/page.tsx
 //
 // Phase 10 — Observatory: the primary dashboard.
@@ -161,7 +160,7 @@ export default async function ObservatoryPage() {
               total: jobsData.total,
               running: jobsData.jobs.filter((j) => j.status === "running").length,
               queued: jobsData.jobs.filter((j) => j.status === "queued").length,
-              list: jobsData.jobs as unknown as ObservatoryStats["jobs"]["list"],
+              list: jobsData.jobs as unknown as NonNullable<ObservatoryStats["jobs"]>["list"],
             }
           : undefined,
         graph: graphBlock,

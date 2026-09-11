@@ -88,7 +88,7 @@ function tableFor(columns: string): string {
   return "contacts";
 }
 
-const COMPANIES = ["Stripe", "Figma", "Vercel", "Monzo", "Klarna", "Linear"];
+const COMPANIES = ["Stripe", "Figma", "Acme", "Monzo", "Klarna", "Linear"];
 const INDUSTRIES = ["fintech", "devtools", "design", "commerce"];
 const REFERRERS = [
   "https://blog.example/post/1",

@@ -43,8 +43,8 @@ const SEED: Seed[] = [
   {
     id: "c2",
     fullName: "John Smith",
-    email: "john@vercel.com",
-    company: "Vercel",
+    email: "john@acme.com",
+    company: "Acme",
     role: "Product Manager",
     seniority: "mid",
     industry: "Software",
@@ -56,7 +56,7 @@ const SEED: Seed[] = [
   {
     id: "c3",
     fullName: "Alice Wong",
-    company: "Vercel",
+    company: "Acme",
     role: "Designer",
     seniority: "junior",
     industry: "Software",
@@ -182,7 +182,7 @@ describe("keyword query builders", () => {
 describe("searchContacts — portable stays the default", () => {
   it("reports the portable engine and runs no arms when mode is omitted", async () => {
     seed();
-    const res = await searchContacts(conn, { query: "vercel" });
+    const res = await searchContacts(conn, { query: "acme" });
     expect(res.engine.mode).toBe("portable");
     expect(res.engine.requested).toBe("portable");
     expect(res.engine.arms.keyword.used).toBe(false);
@@ -193,7 +193,7 @@ describe("searchContacts — portable stays the default", () => {
     seed();
     const res = await searchContacts(conn, {
       mode: "hybrid",
-      company: "vercel",
+      company: "acme",
     });
     expect(res.engine.mode).toBe("portable");
     expect(res.engine.requested).toBe("hybrid");
@@ -246,11 +246,11 @@ describe("searchContacts — keyword mode", () => {
   });
 
   it("is never worse than portable — the substring arm still contributes", async () => {
-    // "erce" matches "Vercel" as a substring but not as a token prefix, so
+    // "cme" matches "Acme" as a substring but not as a token prefix, so
     // only the portable arm can find it. Hybrid must still return it.
-    const portable = await searchContacts(conn, { query: "erce" });
+    const portable = await searchContacts(conn, { query: "cme" });
     const keyword = await searchContacts(conn, {
-      query: "erce",
+      query: "cme",
       mode: "keyword",
     });
     expect(portable.contacts.map((c) => c.id).sort()).toEqual(["c2", "c3"]);

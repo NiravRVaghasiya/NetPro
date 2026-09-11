@@ -64,9 +64,11 @@ describe('resolvePoolConfig', () => {
     expect(resolvePoolConfig({ FUNCTION_TARGET: 'handler' } as NodeJS.ProcessEnv).max).toBe(1);
   });
 
-  it('uses a roomier pool for long-lived servers, even where a platform is present', () => {
+  it('uses a roomier pool for long-lived servers, even where a platform marker is present', () => {
     expect(resolvePoolConfig({} as NodeJS.ProcessEnv).max).toBe(10);
-    expect(resolvePoolConfig({ VERCEL: '1' } as NodeJS.ProcessEnv).max).toBe(10);
+    // NetPro does not sniff hosting-platform environment variables; an
+    // arbitrary foreign marker must never shrink the pool.
+    expect(resolvePoolConfig({ SOME_CLOUD_PLATFORM: '1' } as NodeJS.ProcessEnv).max).toBe(10);
   });
 
   it('lets an operator override the pool size and opt out of small pools', () => {
@@ -110,8 +112,8 @@ describe('createDb guard rails', () => {
     // Phase 4 removed the hosted-platform refusal: whether SQLite is
     // appropriate is the operator's call (it needs a persistent filesystem),
     // documented rather than inferred from environment variables NetPro does
-    // not own.
-    process.env.VERCEL = '1';
+    // not own. An arbitrary foreign platform marker changes nothing.
+    process.env.SOME_CLOUD_PLATFORM = '1';
     process.env.DB_DIALECT = 'sqlite';
     process.env.DB_PATH = ':memory:';
     const conn = createDb();

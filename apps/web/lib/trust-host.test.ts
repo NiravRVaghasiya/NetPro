@@ -6,7 +6,8 @@ const env = (values: Record<string, string>) => values as NodeJS.ProcessEnv;
 describe("resolveTrustHost", () => {
   it("trusts the host when NEXTAUTH_URL names the app origin", () => {
     // THE REGRESSION THIS GUARDS: Auth.js v5 derives trustHost from
-    // AUTH_URL/AUTH_TRUST_HOST/VERCEL/CF_PAGES/NODE_ENV — never NEXTAUTH_URL.
+    // AUTH_URL/AUTH_TRUST_HOST/hosting-platform markers/NODE_ENV — never
+    // NEXTAUTH_URL.
     // A self-hosted production deploy configured exactly as NetPro's docs and
     // docker-compose.yml describe therefore failed every authenticated
     // request with UntrustedHost, while working fine in development.

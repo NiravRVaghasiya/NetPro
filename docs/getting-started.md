@@ -155,7 +155,7 @@ Free-text search plus faceted filters (all flags optional; combine freely):
 
 ```bash
 # Free-text across name, email, company, role, headline, location
-node apps/cli/dist/index.js search vercel engineer
+node apps/cli/dist/index.js search acme engineer
 
 # Filter by company / role / location / seniority
 node apps/cli/dist/index.js search --company stripe --role engineer

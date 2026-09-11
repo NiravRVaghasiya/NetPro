@@ -42,7 +42,7 @@ function seed(conn: SqliteConn): void {
     {
       id: "c3",
       fullName: "Alice Wong",
-      company: "Vercel",
+      company: "Acme",
       industry: "Software",
       role: "Designer",
       relationshipScore: 0.2,
@@ -155,7 +155,7 @@ describe("executeAnalyze", () => {
   it("--clusters prints only the clusters section", async () => {
     const out = await executeAnalyze({ clusters: true }, conn);
     expect(out).toMatch(/Clusters \(contacts grouped by company\):/);
-    expect(out).toMatch(/Vercel — 1 contact/);
+    expect(out).toMatch(/Acme — 1 contact/);
     expect(out).not.toMatch(/Network score/);
     expect(out).not.toMatch(/Dormant ties/);
   });

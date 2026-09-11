@@ -1,7 +1,7 @@
 // packages/server — NetPro local-first HTTP server
 //
 // Phase 1: standalone package that builds independently, imports @netpro/core
-// and @netpro/db, and does not depend on Vercel or apps/web.
+// and @netpro/db, and does not depend on any hosting platform or apps/web.
 //
 // Phase 2: `runServe` powers `netpro serve` (and this package's standalone
 // bin). Phase 5: authentication is a local installation identity plus optional

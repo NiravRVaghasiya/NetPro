@@ -50,7 +50,7 @@ function seedCrm() {
       {
         id: "c2",
         fullName: "John Smith",
-        company: "Vercel",
+        company: "Acme",
         source: "test",
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,

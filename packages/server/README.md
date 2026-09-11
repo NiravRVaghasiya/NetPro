@@ -8,7 +8,7 @@ This package is the application backend. The Web UI (`apps/web`) is a client.
 
 - Builds independently via `tsup`
 - Imports `@netpro/core` and `@netpro/db` for domain work and persistence
-- Does **not** depend on Vercel APIs, `next`, or `apps/web`
+- Does **not** depend on hosted-platform APIs, `next`, or `apps/web`
 - Default bind: `127.0.0.1:3777` (remote bind is opt-in and warns)
 - Ships `GET /api/health`, the built-in console page at `/`, and scaffold
   modules for auth, jobs, and SSE events

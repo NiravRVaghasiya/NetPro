@@ -59,7 +59,7 @@ export async function readBody(
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
-    const buf = Buffer.isBuffer(chunk as unknown as string) ? (chunk as Buffer) : Buffer.from(chunk as string);
+    const buf = ensureBufferChunk(chunk);
     size += buf.length;
     if (size > maxBytes) {
       // Drain the rest so the socket can be reused.
@@ -93,7 +93,8 @@ export async function readJsonBody(req: IncomingMessage, opts: { maxBytes?: numb
   return parsed as Record<string, unknown>;
 }
 
-function _ensureBufferChunk(chunk: unknown): Buffer {
+/** Normalize whatever Node streams yield per chunk into a Buffer. */
+function ensureBufferChunk(chunk: unknown): Buffer {
   if (Buffer.isBuffer(chunk)) return chunk;
   if (chunk instanceof Uint8Array) return Buffer.from(chunk);
   return Buffer.from(String(chunk ?? ''));

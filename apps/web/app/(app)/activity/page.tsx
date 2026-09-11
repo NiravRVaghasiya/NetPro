@@ -1,4 +1,3 @@
-// @ts-nocheck
 // apps/web/app/(app)/activity/page.tsx
 //
 // Phase 8/14 — Activity: make NetPro's work observable.

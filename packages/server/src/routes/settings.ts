@@ -69,7 +69,7 @@ export async function handleGetSettings(
           owner: deps.auth.installation.owner ?? null,
         }
       : null,
-    configFile: rawConfig,
+    configFile: serializeLocalConfig(rawConfig),
     version: '3.0.0',
   });
 }

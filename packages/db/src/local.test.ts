@@ -346,11 +346,12 @@ describe('resolveDatabaseConfig', () => {
   });
 
   it('never infers postgresql from DATABASE_URL alone (phase 4)', () => {
-    // A set DATABASE_URL used to flip the dialect on a hosted platform. Now
-    // the dialect is what the user configured, and nothing else: local use
-    // stays on SQLite even when an unrelated DATABASE_URL is exported.
+    // A set DATABASE_URL used to flip the dialect when a hosting-platform
+    // marker was present. Now the dialect is what the user configured, and
+    // nothing else: local use stays on SQLite even when an unrelated
+    // DATABASE_URL and an arbitrary foreign platform marker are exported.
     scratchHome();
-    process.env.VERCEL = '1';
+    process.env.SOME_CLOUD_PLATFORM = '1';
     process.env.DATABASE_URL = 'postgresql://v@example/x';
     const config = resolveDatabaseConfig();
     expect(config.dialect).toBe('sqlite');
