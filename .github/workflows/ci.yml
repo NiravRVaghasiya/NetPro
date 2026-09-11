@@ -115,10 +115,12 @@ jobs:
       # file:// URLs keep the smoke hermetic (no network beyond npm).
       - name: Marketplace end-to-end smoke
         env:
-          MARKETPLACE_INDEX_URL: "file://$PWD/marketplace/index.json"
+          # GitHub expressions (not $PWD/$RUNNER_TEMP): env: values are set
+          # verbatim and never shell-expanded.
+          MARKETPLACE_INDEX_URL: "file://${{ github.workspace }}/marketplace/index.json"
           MARKETPLACE_NO_CACHE: 'true'
-          NETPRO_PLUGIN_DIR: "$RUNNER_TEMP/netpro-plugins"
-          DB_PATH: "$RUNNER_TEMP/netpro-marketplace.db"
+          NETPRO_PLUGIN_DIR: "${{ runner.temp }}/netpro-plugins"
+          DB_PATH: "${{ runner.temp }}/netpro-marketplace.db"
         run: |
           node apps/cli/dist/index.js plugin search example
           node apps/cli/dist/index.js plugin install example-event-discovery
