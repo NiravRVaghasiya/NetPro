@@ -89,8 +89,6 @@ jobs:
     needs: unit
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      DB_DIALECT: sqlite
     steps:
       - uses: actions/checkout@v4
 
