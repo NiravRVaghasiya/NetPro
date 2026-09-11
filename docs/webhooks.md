@@ -11,10 +11,13 @@ NetPro can emit outbound webhooks with HMAC-SHA256 signatures, retry with backof
 
 ## Security
 
-- URL validation: absolute http/https, no credentials, max 2048 chars. Private-network URLs (`localhost`, `10.*`, `192.168.*`, `172.16-31.*`, `*.local`, `*.internal`, `0.0.0.0`) are rejected in production? The validator `isPrivateNetworkUrl` exists and can be enforced by operator policy; core currently allows but logs? Default allows http for testing, but docs recommend https.
-- Secret: generated via `crypto.randomBytes(32)`, hex. Rotation creates new secret, old signature invalid immediately.
-- Payload size capped 256KB, envelope: `{ schema:1, event, workspace_id, actor, timestamp, data }`.
+- URL validation: absolute http/https, no embedded credentials, max 2048 chars. Plain `http` is allowed (local receivers, tests) but `https` is recommended for anything crossing a network.
+- SSRF guard (Phase 23, enforced): private-network targets — `localhost`/`*.localhost`, all of `127/8`, RFC 1918 (`10/8`, `172.16/12`, `192.168/16`), link-local `169.254/16` (the cloud metadata address), `0.0.0.0`/`::`, IPv6 unique-local `fc00::/7` and link-local `fe80::/10`, IPv4-mapped IPv6, `*.local`, `*.internal` — are **refused** when a webhook is created or updated (`forbidden`), and re-checked on **every delivery attempt**, so a row written before this phase or edited by hand cannot bypass it. Deliberate self-hosted receivers opt in with `NETPRO_WEBHOOKS_ALLOW_PRIVATE=1`.
+- Redirects are followed manually (same POST, max 3 hops) with every hop re-validated: a public URL answering `302 → http://169.254.169.254/` fails instead of leaking the payload. Unparseable locations and excess hops fail closed.
+- Delivery guardrails: 10s per-attempt timeout, payload capped at 256KB (`{ schema:1, event, workspace_id, actor, timestamp, data }`), max 8 attempts with exponential backoff (60s base, doubling, 32min cap), then dead-letter.
+- Secret: generated via `crypto.randomBytes(32)`, hex. Rotation creates new secret, old signature invalid immediately. Responses are truncated (5KB) in logs; errors in delivery rows (1KB).
 - Retention: deliveries purge after 30 days (configurable `NETPRO_WEBHOOK_DELIVERY_RETENTION_DAYS`, default 30) via the daily retention job.
+- Known limit: hostname-to-IP rebinding between validation and delivery (a DNS name that resolves public, then private) is not pinned — webhook authors are authenticated operators, not remote attackers, so static validation plus redirect re-checks cover the practical threat. Treat webhook URLs as privileged configuration in team workspaces.
 
 ## CLI
 

@@ -18,6 +18,12 @@ import { loadConfig } from './config';
 import { createEventBus, type EventBus } from './events/index';
 import { createJobRegistry, type JobRegistry } from './jobs/index';
 import { sendJson } from './middleware/json';
+import {
+  createRateLimiter,
+  DEFAULT_RATE_LIMIT_MAX,
+  DEFAULT_RATE_LIMIT_WINDOW_MS,
+  type RateLimiter,
+} from './middleware/rate-limit';
 import { dispatch } from './routes/index';
 
 export type NetProApp = {
@@ -27,6 +33,10 @@ export type NetProApp = {
   events: EventBus;
   /** Phase 5 authentication policy (mode, access token, installation). */
   auth: AuthPolicy;
+  /** Phase 23 per-IP rate limiter (one window set per app instance). */
+  rateLimit: RateLimiter;
+  /** Phase 23 origin allow-list (`null` = loopback-only) and HSTS switch. */
+  security: { allowedOrigins: string[] | null; hsts: boolean };
   /** Node `http.createServer` request listener. */
   handler: (req: IncomingMessage, res: ServerResponse) => void;
   /** Release DB resources (Postgres pool). */
@@ -74,8 +84,24 @@ export async function createApp(options: CreateAppOptions = {}): Promise<NetProA
     if (shouldMigrate) await runMigrations(conn);
   }
 
+  // Phase 23 — the limiter lives on the app so every request in this
+  // process shares one window set, while tests (one app each) stay isolated.
+  // Configs that predate the new fields (or come from tests) get the safe
+  // defaults: loopback-only origins, 600 requests/minute/peer, no HSTS.
+  const rateLimit = createRateLimiter(
+    config.rateLimit ?? {
+      enabled: true,
+      max: DEFAULT_RATE_LIMIT_MAX,
+      windowMs: DEFAULT_RATE_LIMIT_WINDOW_MS,
+    }
+  );
+  const security = {
+    allowedOrigins: config.allowedOrigins ?? null,
+    hsts: config.hsts ?? false,
+  };
+
   const handler = (req: IncomingMessage, res: ServerResponse): void => {
-    void dispatch(req, res, { conn, jobs, events, auth, config }).then((handled) => {
+    void dispatch(req, res, { conn, jobs, events, auth, config, rateLimit, security }).then((handled) => {
       if (!handled && !res.headersSent) {
         sendJson(res, 404, { error: 'Not found' });
       }
@@ -95,5 +121,5 @@ export async function createApp(options: CreateAppOptions = {}): Promise<NetProA
     }
   };
 
-  return { config, conn, jobs, events, auth, handler, close };
+  return { config, conn, jobs, events, auth, rateLimit, security, handler, close };
 }

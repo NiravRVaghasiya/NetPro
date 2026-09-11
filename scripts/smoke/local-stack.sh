@@ -180,6 +180,40 @@ assert_contains "$WORKDIR/home.html" '<title>NetPro'
 assert_contains "$WORKDIR/home.html" '<!doctype html>'
 ok 'the built-in local console renders'
 
+# ── 6b. Phase 23 response hardening + install file modes ─────────────────
+step 'security headers, console CSP, and the loopback-only CORS default (Phase 23)'
+# Header field names are case-insensitive on the wire (HTTP/1 keeps the
+# server's case, HTTP/2 lowercases), so match them case-insensitively.
+assert_header() {
+  local file="$1" pattern="$2"
+  local message="${3:-expected header /$pattern/ in $file}"
+  grep -qiE "$pattern" "$file" || die "$message"
+}
+curl -s -D "$WORKDIR/health.hdr" -o /dev/null "$BASE/api/health"
+assert_header "$WORKDIR/health.hdr" 'x-content-type-options: nosniff'
+assert_header "$WORKDIR/health.hdr" 'x-frame-options: DENY'
+assert_header "$WORKDIR/health.hdr" 'referrer-policy: no-referrer'
+grep -qi 'strict-transport-security' "$WORKDIR/health.hdr" && die 'HSTS must stay off without NETPRO_HSTS'
+curl -s -D "$WORKDIR/home.hdr" -o /dev/null "$BASE/"
+assert_header "$WORKDIR/home.hdr" "content-security-policy: default-src 'none'"
+# Authenticated loopback browser origin is granted; an internet origin is not.
+curl -s -D "$WORKDIR/cors-ok.hdr" -o /dev/null -H 'Origin: http://localhost:3000' "$BASE/api/contacts"
+assert_header "$WORKDIR/cors-ok.hdr" 'access-control-allow-origin: http://localhost:3000'
+curl -s -D "$WORKDIR/cors-evil.hdr" -o /dev/null -H 'Origin: https://evil.example.com' "$BASE/api/contacts"
+grep -qi 'access-control-allow-origin' "$WORKDIR/cors-evil.hdr" && die 'internet origin must get no CORS grant by default'
+ok 'hardening headers, CSP, and CORS default hold over real HTTP'
+
+step 'install directory and secrets are owner-only (Phase 23)'
+home_mode="$(stat -c '%a' "$NETPRO_HOME" 2>/dev/null || stat -f '%Lp' "$NETPRO_HOME")"
+[ "$home_mode" = '700' ] || die "NETPRO_HOME must be mode 0700, got $home_mode"
+token_mode="$(stat -c '%a' "$NETPRO_HOME/keys/access-token" 2>/dev/null || stat -f '%Lp' "$NETPRO_HOME/keys/access-token")"
+[ "$token_mode" = '600' ] || die "access token must be mode 0600, got $token_mode"
+if [ "$DIALECT" = 'sqlite' ]; then
+  db_mode="$(stat -c '%a' "$NETPRO_HOME/netpro.db" 2>/dev/null || stat -f '%Lp' "$NETPRO_HOME/netpro.db")"
+  [ "$db_mode" = '600' ] || die "SQLite database must be mode 0600, got $db_mode"
+fi
+ok 'install directory is 0700 and secrets are 0600'
+
 # ── 7. Phase 5 auth boundary ─────────────────────────────────────────────
 step 'non-loopback / proxied caller is rejected in local auth mode'
 # A proxied request is never "direct loopback" even when the socket peer is,

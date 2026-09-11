@@ -1,3 +1,4 @@
+import { chmodSync, existsSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { drizzle as drizzleSqlite, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { drizzle as drizzlePg, type NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -80,6 +81,31 @@ export {
   type MigrationDialect,
   type RunMigrationsOptions,
 } from './migrate';
+
+// Phase 22 (local-first): file-level backup & restore behind `netpro backup`,
+// `netpro restore`, and the pre-migration safety copy in `netpro migrate`.
+export {
+  BackupError,
+  assertValidSqliteBackup,
+  backupDir,
+  backupPostgres,
+  backupSqlite,
+  defaultBackupFilename,
+  ensureBackupDir,
+  listBackups,
+  pgBackupKind,
+  pgDumpArgs,
+  pgRestoreArgs,
+  psqlRestoreArgs,
+  restorePostgres,
+  restoreSqlite,
+  sqliteFileOf,
+  type BackupDialect,
+  type BackupEntry,
+  type BackupResult,
+  type ExecFn,
+  type RestoreSqliteResult,
+} from './backup';
 
 export type SqliteConn = {
   dialect: 'sqlite';
@@ -223,6 +249,15 @@ export function createDb(env: NodeJS.ProcessEnv = process.env): SqliteConn | PgC
     sqlite.pragma('journal_mode = WAL');
     sqlite.pragma('busy_timeout = 5000');
     sqlite.pragma('foreign_keys = ON');
+    // Phase 23 — the database file holds the whole professional network, so
+    // it is owner-only like the access token and backups. Applied on every
+    // open so databases created before this phase tighten up too; the WAL
+    // siblings carry the same bytes and get the same treatment.
+    if (path !== ':memory:') {
+      chmodSync(path, 0o600);
+      if (existsSync(`${path}-wal`)) chmodSync(`${path}-wal`, 0o600);
+      if (existsSync(`${path}-shm`)) chmodSync(`${path}-shm`, 0o600);
+    }
     return { dialect: config.dialect, db: drizzleSqlite(sqlite, { schema: sqliteSchema }), schema: sqliteSchema };
   }
 

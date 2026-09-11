@@ -3,6 +3,12 @@ import type { PgConn, SqliteConn } from '@netpro/db';
 
 export interface MigrateCommandOptions {
   status?: boolean;
+  /**
+   * Skip the automatic pre-migration backup. SQLite only — set by
+   * `--no-backup`. The default backup is the recoverability half of Phase 22:
+   * a migration that goes wrong is one `netpro restore` away from fixed.
+   */
+  backup?: boolean;
 }
 
 export interface MigrateResult {
@@ -10,6 +16,8 @@ export interface MigrateResult {
   applied: number;
   total: number;
   changed: number;
+  /** Pre-migration safety copy, or null when none was taken. */
+  backupPath: string | null;
   output: string;
 }
 
@@ -30,7 +38,8 @@ export interface MigrateResult {
  */
 export async function executeMigrate(
   options: MigrateCommandOptions,
-  conn: SqliteConn | PgConn
+  conn: SqliteConn | PgConn,
+  env: NodeJS.ProcessEnv = process.env
 ): Promise<MigrateResult> {
   const { appliedMigrationCount, pendingMigrationTotal, runMigrations } = await import(
     '@netpro/db'
@@ -46,6 +55,7 @@ export async function executeMigrate(
       dialect,
       applied: before,
       total,
+      backupPath: null,
       changed: 0,
       output:
         `Dialect:  ${dialect}\n` +
@@ -53,6 +63,41 @@ export async function executeMigrate(
         `Pending:  ${pending}` +
         (pending > 0 ? '\n\nRun `netpro migrate` to apply them.' : ''),
     };
+  }
+
+  // Phase 22 — back up before mutating. Only SQLite file databases qualify:
+  // :memory: has nothing to preserve, PostgreSQL dumps belong to `netpro
+  // backup` (pg_dump to a custom archive takes minutes on large teams, which
+  // is not something a deploy step should do unasked), and a no-op run takes
+  // no backup at all. A failed backup fails the migration loudly — migrating
+  // without the safety net is exactly what this step exists to prevent.
+  let backupPath: string | null = null;
+  const pending = Math.max(0, total - before);
+  if (options.backup !== false && pending > 0 && conn.dialect === 'sqlite') {
+    const {
+      backupDir,
+      backupSqlite,
+      defaultBackupFilename,
+      ensureBackupDir,
+      sqliteFileOf,
+    } = await import('@netpro/db');
+    if (sqliteFileOf(conn) !== null) {
+      const { join } = await import('node:path');
+      const dest = join(
+        ensureBackupDir(env),
+        defaultBackupFilename('sqlite', new Date(), 'pre-migrate')
+      );
+      try {
+        backupPath = (await backupSqlite(conn, dest)).path;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Refusing to migrate without a backup: ${detail} ` +
+            `(backups live in ${backupDir(env)}; pass --no-backup to override).`,
+          { cause: error }
+        );
+      }
+    }
   }
 
   // `force` bypasses the per-process cache: this command's whole job is to do
@@ -73,10 +118,12 @@ export async function executeMigrate(
     applied,
     total,
     changed,
+    backupPath,
     output:
-      changed === 0
+      (changed === 0
         ? `✓ Database is already up to date (${applied}/${total} migrations, ${dialect}).`
-        : `✓ Applied ${changed} migration${changed === 1 ? '' : 's'} (${applied}/${total}, ${dialect}).`,
+        : `✓ Applied ${changed} migration${changed === 1 ? '' : 's'} (${applied}/${total}, ${dialect}).`) +
+      (backupPath ? `\n  Pre-migration backup: ${backupPath}` : ''),
   };
 }
 
@@ -108,6 +155,7 @@ export function registerMigrateCommand(program: Command): void {
     .command('migrate')
     .description('Apply pending database migrations (deploy step)')
     .option('--status', 'Report applied/pending migrations without changing anything')
+    .option('--no-backup', 'Skip the automatic pre-migration backup (SQLite)')
     .action(async (options: MigrateCommandOptions) => {
       // Imported lazily so `--help` never loads the native database drivers.
       const { createDb } = await import('@netpro/db');

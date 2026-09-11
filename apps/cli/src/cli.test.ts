@@ -8,10 +8,10 @@ describe('CLI root program', () => {
     expect(program.version()).toBe('3.0.0');
   });
 
-  it('registers all twenty-five top-level commands (v3.0 Phase 1 adds team, Phase 5 adds plugin, Phase 7 adds webhook; local-first adds serve + status + token, Phase 16 adds scan)', () => {
+  it('registers all twenty-seven top-level commands (v3.0 Phase 1 adds team, Phase 5 adds plugin, Phase 7 adds webhook; local-first adds serve + status + token, Phase 16 adds scan, Phase 22 adds backup + restore)', () => {
     const program = createProgram();
     const names = program.commands.map((c) => c.name());
-    expect(names).toEqual(['init', 'serve', 'status', 'token', 'config', 'import', 'scan', 'enrich', 'search', 'reindex', 'outreach', 'analyze', 'path', 'track', 'edge', 'campaign', 'export', 'card', 'migrate', 'skills', 'events', 'content', 'team', 'plugin', 'webhook']);
+    expect(names).toEqual(['init', 'serve', 'status', 'token', 'config', 'import', 'scan', 'enrich', 'search', 'reindex', 'outreach', 'analyze', 'path', 'track', 'edge', 'campaign', 'export', 'card', 'migrate', 'backup', 'restore', 'skills', 'events', 'content', 'team', 'plugin', 'webhook']);
   });
 
   it('wires netpro scan with source/no-enrich/local/server/json flags (local-first Phase 16)', () => {

@@ -160,6 +160,7 @@ export async function runServe(options: RunServeOptions = {}): Promise<ServeHand
     log(`⚠ ${warning.message}`);
     log('');
   }
+  printRemoteExposureSummary(config.host, app, log);
 
   let resolveStopped: (reason: ServeStopReason) => void = () => {};
   const stopped = new Promise<ServeStopReason>((resolve) => {
@@ -233,6 +234,32 @@ function printBanner(
     log('  Show it any time with `netpro token`; the full value is in ~/.netpro/keys/access-token.');
     log('');
   }
+}
+
+/**
+ * Phase 23 — a non-loopback bind is a deliberate exposure: name the policy
+ * guarding it on every start, not just in the docs. Loopback starts stay
+ * quiet (there is nothing to review).
+ */
+function printRemoteExposureSummary(
+  host: string,
+  app: NetProApp,
+  log: (line: string) => void
+): void {
+  if (isLoopbackHost(host)) return;
+  const origins = app.security.allowedOrigins
+    ? app.security.allowedOrigins.join(', ')
+    : 'loopback origins only (default; set NETPRO_ALLOWED_ORIGINS for a remote UI)';
+  const rl = app.config.rateLimit;
+  const limit =
+    rl && rl.enabled
+      ? `${rl.max} req/${Math.max(1, Math.round(rl.windowMs / 1000))}s per IP`
+      : 'disabled (NETPRO_RATE_LIMIT_ENABLED=0)';
+  log(`Remote bind (${host}): browser origins: ${origins}; rate limit: ${limit}; HSTS: ${app.security.hsts ? 'on' : 'off'}.`);
+  if (!app.security.hsts) {
+    log('  No TLS here — terminate HTTPS at a reverse proxy (nginx/Caddy) for anything beyond a trusted LAN. See docs/deployment.md.');
+  }
+  log('');
 }
 
 /**

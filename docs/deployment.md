@@ -94,6 +94,11 @@ navigation.
 | `GITHUB_CLIENT_SECRET` | For `github` | From your GitHub OAuth app |
 | `NETPRO_OWNER_GITHUB_ID` | For `github` | Your **numeric** GitHub ID — `gh api users/YOUR_USERNAME --jq .id` |
 | `NETPRO_AUTO_MIGRATE` | Recommended | `false` when you migrate as a release step — see [Migrations](#migrations) |
+| `NETPRO_HOST` | For remote API | Bind address — `127.0.0.1` (default) or `0.0.0.0` to expose deliberately |
+| `NETPRO_ALLOWED_ORIGINS` | For remote UI | CSV origin allow-list for a browser UI on another origin — see [checklist](#remote-exposure-checklist) |
+| `NETPRO_RATE_LIMIT_MAX` / `_WINDOW_MS` / `_ENABLED` | Optional | Per-IP rate limit (default 600/min, on) |
+| `NETPRO_HSTS` | Behind TLS | `true` to send `Strict-Transport-Security` (reverse proxy terminates HTTPS) |
+| `NETPRO_WEBHOOKS_ALLOW_PRIVATE` | Optional | `1` to let webhooks deliver to localhost/LAN receivers deliberately |
 | `NETPRO_SERVERLESS` | Optional | `1` when many short-lived instances share one database |
 | `HUNTER_API_KEY`, `PDL_API_KEY`, `CLEARBIT_API_KEY` | Optional | Enrichment providers (BYO key) |
 | `AI_PROVIDER`, `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Optional | AI outreach drafting (BYO key) |
@@ -226,6 +231,50 @@ execute DDL.
 > build step own migrations.
 
 ---
+
+## Remote exposure checklist
+
+`netpro serve` is safe by default: it binds `127.0.0.1`, trusts only the local
+machine, answers browsers only from loopback origins, and rate-limits every
+peer. Each step below is one deliberate decision away from that default — make
+them in order, and `netpro serve` names the resulting policy on every remote
+start so the console always shows what you chose.
+
+1. **Bind.** `--host 0.0.0.0` (or `NETPRO_HOST`, or `[server] host` in
+   `config.toml`) is the only way off loopback. A remote bind with no access
+   token mints one rather than serve strangers.
+2. **Authenticate.** `local` mode: remote callers present the access token
+   (`netpro token`, `Authorization: Bearer`). `open` mode answers anyone —
+   correct only behind a proxy/VPN that authenticates first; the server warns
+   on every start. Web UI sessions (`github` mode) need `NEXTAUTH_SECRET` plus
+   the OAuth variables in §3, and `APP_URL` must be the final HTTPS origin or
+   Auth.js fails with `UntrustedHost`.
+3. **Terminate TLS.** The server speaks plain HTTP; put nginx/Caddy/Traefik in
+   front for anything beyond a trusted LAN, forward `X-Forwarded-Host` and
+   `X-Forwarded-Proto`, and set `NETPRO_HSTS=true` so browsers remember the
+   secure origin.
+4. **Name browser origins.** With no allow-list, only loopback pages
+   (`http://localhost:3000`, …) get CORS grants. A UI on another origin needs
+   `NETPRO_ALLOWED_ORIGINS=https://ui.example.com` (or `allowed_origins` in
+   `[server]`) — exact matches, no wildcards; naming a list replaces the
+   loopback default, so include loopback too if local dev must keep working.
+5. **Keep the rate limit on.** 600 requests/minute per IP by default; probes
+   (`/api/health`, `/api/server-info`) and CORS preflights are exempt so
+   monitors and browsers never trip it. Tune with `NETPRO_RATE_LIMIT_MAX` /
+   `_WINDOW_MS`; `NETPRO_RATE_LIMIT_ENABLED=0` disables it (prefer raising the
+   budget).
+6. **Guard the database.** `DATABASE_URL` credentials never appear in `netpro
+   status`, `/api/settings`, or logs (displays are redacted). For a managed
+   Postgres, append `?sslmode=require` (or stricter — see [Database
+   TLS](#database-tls)); in-Docker Postgres on a private network needs no TLS.
+7. **Keep files owner-only.** The install directory (`~/.netpro`), database,
+   access token, backups, exports, and the vault master key are `0700`/`0600`
+   by default — verify with `ls -la ~/.netpro` after moving data between
+   machines, and never commit `.env` or `config.toml` to git.
+8. **Treat webhooks and plugins as privileged.** Webhook URLs cannot point at
+   private networks unless `NETPRO_WEBHOOKS_ALLOW_PRIVATE=1` (see
+   [webhooks.md](webhooks.md)); plugins run in-process with full data access,
+   so `plugin enable` warns every time — enable only code you trust.
 
 ## Configuration reference
 

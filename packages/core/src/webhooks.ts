@@ -43,6 +43,7 @@ const EVENT_SET = new Set<string>(WEBHOOK_EVENTS);
 
 export const WEBHOOK_MAX_ATTEMPTS = 8;
 export const WEBHOOK_TIMEOUT_MS = 10_000;
+export const WEBHOOK_MAX_REDIRECTS = 3;
 export const WEBHOOK_RETRY_BASE_MS = 60_000;
 export const WEBHOOK_RETRY_MAX_MS = 32 * 60_000;
 export const WEBHOOK_SIGNATURE_TOLERANCE_MS = 5 * 60_000;
@@ -187,20 +188,78 @@ export function validateWebhookUrl(urlStr: string): { ok: true; url: URL } | { o
 }
 
 export function isPrivateNetworkUrl(urlStr: string): boolean {
+  let hostname: string;
   try {
-    const u = new URL(urlStr);
-    const h = u.hostname.toLowerCase();
-    if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true;
-    if (h.startsWith('10.') || h.startsWith('192.168.') || h === '0.0.0.0') return true;
-    if (h.startsWith('172.')) {
-      const second = parseInt(h.split('.')[1] ?? '0', 10);
-      if (second >= 16 && second <= 31) return true;
-    }
-    if (h.endsWith('.local') || h.endsWith('.internal')) return true;
-    return false;
+    hostname = new URL(urlStr).hostname.toLowerCase();
   } catch {
     return false;
   }
+  const h = hostname.replace(/^\[|\]$/g, '');
+  // Loopback in every spelling the URL parser can emit — it normalizes
+  // 0x7f.0.0.1, 2130706433, and 127.1 to dotted quads before we see them.
+  if (h === 'localhost' || h.endsWith('.localhost')) return true;
+  if (h === '::1' || h === '::' || h === '0.0.0.0') return true;
+  if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  // RFC 1918. Strict quad matches — a bare startsWith would admit
+  // 10.evil.com the same way it once admitted 127.0.0.1.evil.com.
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  // Link-local — the cloud metadata endpoints live here (169.254.169.254),
+  // the classic webhook SSRF prize.
+  if (/^169\.254\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  // IPv6 unique-local (fc00::/7) and link-local (fe80::/10).
+  if (/^f[cd][0-9a-f]{0,2}:/.test(h)) return true;
+  if (/^fe[89ab][0-9a-f]:/i.test(h)) return true;
+  // IPv4-mapped IPv6: judge the embedded tail. The URL parser normalizes
+  // ::ffff:127.0.0.1 to ::ffff:7f00:1, so decode the last 32 bits as a quad.
+  if (h.includes('.') && h.startsWith('::ffff:')) {
+    return isPrivateNetworkUrl(`http://${h.slice('::ffff:'.length)}`);
+  }
+  const mapped = h.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mapped?.[1] && mapped?.[2]) {
+    const hi = parseInt(mapped[1], 16);
+    const lo = parseInt(mapped[2], 16);
+    const quad = `${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`;
+    return isPrivateNetworkUrl(`http://${quad}/`);
+  }
+  if (h.endsWith('.local') || h.endsWith('.internal')) return true;
+  return false;
+}
+
+/**
+ * Phase 23 — the deliberate escape hatch for private webhook targets.
+ * Self-hosted receivers (localhost n8n, a LAN Zapier runner) are legitimate,
+ * but allowing them must be a conscious choice, not the default:
+ * `NETPRO_WEBHOOKS_ALLOW_PRIVATE=1`.
+ */
+export function isWebhookPrivateTargetAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = (env.NETPRO_WEBHOOKS_ALLOW_PRIVATE ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+/**
+ * Phase 23 — SSRF guard. Format/protocol checks first, then the
+ * private-network refusal unless the escape hatch is open. Applied when a
+ * webhook is created/updated AND on every delivery attempt (a row written
+ * before this phase, or edited by hand, must not bypass it).
+ */
+export function checkWebhookTarget(
+  urlStr: string,
+  opts: { allowPrivate?: boolean } = {}
+): { ok: true; url: URL } | { ok: false; error: string } {
+  const basic = validateWebhookUrl(urlStr);
+  if (!basic.ok) return basic;
+  const allowPrivate = opts.allowPrivate ?? isWebhookPrivateTargetAllowed();
+  if (!allowPrivate && isPrivateNetworkUrl(urlStr)) {
+    return {
+      ok: false,
+      error:
+        `Refusing private-network webhook target "${basic.url.hostname}". ` +
+        'Set NETPRO_WEBHOOKS_ALLOW_PRIVATE=1 to deliver to localhost/LAN receivers deliberately.',
+    };
+  }
+  return { ok: true, url: basic.url };
 }
 
 function validateEvents(events: string[]): WebhookEvent[] {
@@ -304,6 +363,8 @@ export async function createWebhook(
   const resolved = resolveScope(scope);
   const urlCheck = validateWebhookUrl(input.url);
   if (!urlCheck.ok) throw new WebhookError('validation', urlCheck.error);
+  const target = checkWebhookTarget(input.url);
+  if (!target.ok) throw new WebhookError('forbidden', target.error);
   const events = validateEvents(input.events);
   const status = input.status ?? 'enabled';
   if (!(WEBHOOK_STATUS as readonly string[]).includes(status)) {
@@ -375,6 +436,8 @@ export async function updateWebhook(
   if (patch.url !== undefined) {
     const check = validateWebhookUrl(patch.url);
     if (!check.ok) throw new WebhookError('validation', check.error);
+    const target = checkWebhookTarget(patch.url);
+    if (!target.ok) throw new WebhookError('forbidden', target.error);
     updates.url = patch.url;
   }
   if (patch.events !== undefined) {
@@ -585,22 +648,52 @@ async function createDeliveryRow(conn: Conn, webhookId: string, event: WebhookEv
   };
 }
 
-async function fetchWithTimeout(
+async function fetchOnce(
   url: string,
   init: RequestInit,
-  timeoutMs = WEBHOOK_TIMEOUT_MS,
-): Promise<{ ok: boolean; status: number; text: string }> {
+  timeoutMs: number,
+): Promise<Response> {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...init, signal: controller.signal });
-    const text = await res.text().catch(() => '');
-    return { ok: res.ok, status: res.status, text: text.slice(0, 5000) };
+    // redirect: 'manual' — hops are followed by fetchWithTimeout below so
+    // every Location re-passes the SSRF guard.
+    return await fetch(url, { ...init, redirect: 'manual', signal: controller.signal });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(msg, { cause: e });
   } finally {
     clearTimeout(t);
+  }
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = WEBHOOK_TIMEOUT_MS,
+): Promise<{ ok: boolean; status: number; text: string }> {
+  // Phase 23 — redirects are followed manually (same POST, up to
+  // WEBHOOK_MAX_REDIRECTS hops) with every hop re-validated: a public URL
+  // answering 302 → http://169.254.169.254/ is the classic webhook SSRF
+  // bypass, and fetch's automatic following would walk straight into it.
+  // Each hop gets its own timeout; anything unexpected fails closed.
+  let current = url;
+  for (let hop = 0; ; hop++) {
+    const target = checkWebhookTarget(current);
+    if (!target.ok) throw new WebhookError('forbidden', target.error);
+    const res = await fetchOnce(current, init, timeoutMs);
+    const location = res.headers.get('location');
+    if (res.status >= 300 && res.status < 400 && location && hop < WEBHOOK_MAX_REDIRECTS) {
+      try {
+        current = new URL(location, current).toString();
+        await res.body?.cancel().catch(() => undefined);
+        continue;
+      } catch {
+        // Unparseable Location — fall through and record the 3xx as a failure.
+      }
+    }
+    const text = await res.text().catch(() => '');
+    return { ok: res.ok, status: res.status, text: text.slice(0, 5000) };
   }
 }
 

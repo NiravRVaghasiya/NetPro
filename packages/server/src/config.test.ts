@@ -29,6 +29,9 @@ describe('loadConfig', () => {
       port: DEFAULT_SERVER_PORT,
       autoMigrate: true,
       auth: { mode: 'local' },
+      allowedOrigins: null,
+      rateLimit: { enabled: true, max: 600, windowMs: 60_000 },
+      hsts: false,
     });
     expect(cfg.host).toBe('127.0.0.1');
     expect(cfg.port).toBe(3777);
@@ -62,6 +65,35 @@ describe('loadConfig', () => {
   });
 });
 
+describe('loadConfig remote-exposure settings (phase 23)', () => {
+  it('resolves the CORS allow-list: env wins over the config file, null by default', () => {
+    expect(loadConfig({}).allowedOrigins).toBeNull();
+
+    const home = homeWithConfig('[server]\nallowed_origins = "https://ui.example.com"\n');
+    expect(loadConfig().allowedOrigins).toEqual(['https://ui.example.com']);
+    expect(
+      loadConfig({ NETPRO_HOME: home, NETPRO_ALLOWED_ORIGINS: 'https://env.example.com' })
+        .allowedOrigins
+    ).toEqual(['https://env.example.com']);
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('resolves the rate limiter on by default with env overrides', () => {
+    expect(loadConfig({}).rateLimit).toEqual({ enabled: true, max: 600, windowMs: 60_000 });
+    expect(
+      loadConfig({ NETPRO_RATE_LIMIT_MAX: '10', NETPRO_RATE_LIMIT_WINDOW_MS: '5000' }).rateLimit
+    ).toEqual({ enabled: true, max: 10, windowMs: 5000 });
+    expect(loadConfig({ NETPRO_RATE_LIMIT_ENABLED: '0' }).rateLimit?.enabled).toBe(false);
+  });
+
+  it('keeps HSTS off unless explicitly enabled', () => {
+    expect(loadConfig({}).hsts).toBe(false);
+    expect(loadConfig({ NETPRO_HSTS: 'true' }).hsts).toBe(true);
+    expect(loadConfig({ NETPRO_HSTS: '1' }).hsts).toBe(true);
+    expect(loadConfig({ NETPRO_HSTS: '0' }).hsts).toBe(false);
+  });
+});
+
 describe('loadConfig with ~/.netpro/config.toml', () => {
   it('reads [server] host and port from the config file', () => {
     homeWithConfig('[server]\nhost = "127.0.0.1"\nport = 4001\n');
@@ -70,6 +102,9 @@ describe('loadConfig with ~/.netpro/config.toml', () => {
       port: 4001,
       autoMigrate: true,
       auth: { mode: 'local' },
+      allowedOrigins: null,
+      rateLimit: { enabled: true, max: 600, windowMs: 60_000 },
+      hsts: false,
     });
   });
 
@@ -97,6 +132,9 @@ describe('loadConfig with ~/.netpro/config.toml', () => {
       port: 5000,
       autoMigrate: true,
       auth: { mode: 'local' },
+      allowedOrigins: null,
+      rateLimit: { enabled: true, max: 600, windowMs: 60_000 },
+      hsts: false,
     });
   });
 
@@ -107,6 +145,9 @@ describe('loadConfig with ~/.netpro/config.toml', () => {
       port: DEFAULT_SERVER_PORT,
       autoMigrate: true,
       auth: { mode: 'local' },
+      allowedOrigins: null,
+      rateLimit: { enabled: true, max: 600, windowMs: 60_000 },
+      hsts: false,
     });
   });
 
@@ -118,6 +159,9 @@ describe('loadConfig with ~/.netpro/config.toml', () => {
       port: 5000,
       autoMigrate: true,
       auth: { mode: 'local' },
+      allowedOrigins: null,
+      rateLimit: { enabled: true, max: 600, windowMs: 60_000 },
+      hsts: false,
     });
   });
 

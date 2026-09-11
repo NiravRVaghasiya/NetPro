@@ -25,6 +25,14 @@ import type { EventBus } from '../events/index';
 import type { JobRegistry } from '../jobs/index';
 import { assignRequestId } from '../middleware/request-id';
 import { sendJson } from '../middleware/json';
+import { applySecurityHeaders, isOriginAllowed } from '../middleware/security';
+import {
+  createRateLimiter,
+  DEFAULT_RATE_LIMIT_MAX,
+  DEFAULT_RATE_LIMIT_WINDOW_MS,
+  rateLimitKey,
+  type RateLimiter,
+} from '../middleware/rate-limit';
 import { handleHealth } from './health';
 import { handleHome, handleLocked } from './home';
 import { handleListContacts, handleGetContact } from './contacts';
@@ -51,7 +59,24 @@ export type RouteContext = {
   auth: AuthPolicy;
   /** App config for settings route. */
   config?: { host: string; port: number; autoMigrate: boolean; auth: { mode: string } };
+  /**
+   * Phase 23 — per-IP rate limiter. `createApp` always provides one; direct
+   * dispatch callers fall back to a shared default limiter (still limited).
+   */
+  rateLimit?: RateLimiter;
+  /**
+   * Phase 23 — origin allow-list (`null` = loopback-only default) and the
+   * HSTS switch. `createApp` resolves both from the server config.
+   */
+  security?: { allowedOrigins: string[] | null; hsts: boolean };
 };
+
+/** Fallback limiter for direct dispatch callers; `createApp` builds a per-app one. */
+const sharedRateLimiter = createRateLimiter({
+  enabled: true,
+  max: DEFAULT_RATE_LIMIT_MAX,
+  windowMs: DEFAULT_RATE_LIMIT_WINDOW_MS,
+});
 
 /**
  * Paths that answer without any credential.
@@ -87,15 +112,26 @@ function requestInfo(req: IncomingMessage): AuthRequestInfo {
  * The Web UI on `http://localhost:3000` calling the API on
  * `http://127.0.0.1:3777` is a genuine cross-origin request, but it carries a
  * credential — the caller's session token or the access token — so the origin
- * is echoed only when the request authenticated. An unauthenticated request
+ * is granted only when the request authenticated. An unauthenticated request
  * gets no CORS grant at all, which keeps a random page in the user's browser
  * from reading API responses off the local port.
+ *
+ * Phase 23 — authentication alone is no longer enough: the origin must also
+ * be allowed (loopback by default, or a member of the explicit
+ * `NETPRO_ALLOWED_ORIGINS` / `allowed_origins` list). A bearer token in the
+ * wrong browser tab must not become a cross-origin API grant.
  */
-function applyCors(req: IncomingMessage, res: ServerResponse, authenticated: boolean): void {
+function applyCors(
+  req: IncomingMessage,
+  res: ServerResponse,
+  authenticated: boolean,
+  allowedOrigins: string[] | null
+): void {
   const origin = req.headers.origin;
   res.setHeader('Vary', 'Origin');
   if (!authenticated || typeof origin !== 'string' || origin.trim() === '') return;
-  res.setHeader('Access-Control-Allow-Origin', origin);
+  if (!isOriginAllowed(origin, allowedOrigins)) return;
+  res.setHeader('Access-Control-Allow-Origin', origin.trim());
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-NetPro-Token, X-Request-Id');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Max-Age', '600');
@@ -132,17 +168,43 @@ export async function dispatch(
   ctx: RouteContext
 ): Promise<boolean> {
   assignRequestId(req, res);
+  // Phase 23 — hardening headers on every response (probes, errors, and the
+  // 404 below all flow through here). HSTS stays opt-in: it is only true
+  // behind a TLS-terminating proxy.
+  applySecurityHeaders(res, { hsts: ctx.security?.hsts ?? false });
 
   const method = (req.method ?? 'GET').toUpperCase();
   const path = pathnameOf(req);
   const auth = resolveAuthContext(requestInfo(req), ctx.auth);
 
-  applyCors(req, res, auth.authenticated);
+  applyCors(req, res, auth.authenticated, ctx.security?.allowedOrigins ?? null);
 
   if (method === 'OPTIONS') {
     res.writeHead(204, { 'Cache-Control': 'no-store, max-age=0' });
     res.end();
     return true;
+  }
+
+  // Phase 23 — per-IP rate limit. Cheap and unconditional (it runs before
+  // auth so token-guessing collapses into 429s), except for the readiness
+  // probes: an orchestrator must never read a limit as an outage. OPTIONS
+  // preflights are exempt too — they do no work and must not consume budget.
+  if (!(method === 'GET' && isPublicApiPath(path))) {
+    const limiter = ctx.rateLimit ?? sharedRateLimiter;
+    const decision = limiter.check(rateLimitKey(req.socket.remoteAddress));
+    if (!decision.allowed) {
+      sendJson(
+        res,
+        429,
+        {
+          error: 'Too many requests',
+          code: 'rate_limited',
+          retryAfterMs: decision.retryAfterMs,
+        },
+        { 'Retry-After': String(Math.max(1, Math.ceil(decision.retryAfterMs / 1000))) }
+      );
+      return true;
+    }
   }
 
   // ── Public probes ──────────────────────────────────────────────────

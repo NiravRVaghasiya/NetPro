@@ -68,6 +68,26 @@ assert_contains "$WORK/status-db.txt" 'Pending:  0'
 cli migrate >"$WORK/migrate.txt"
 assert_contains "$WORK/migrate.txt" 'already up to date'
 
+step 'netpro backup snapshots the database and --list inventories it (Phase 22)'
+cli backup >"$WORK/backup.txt"
+cat "$WORK/backup.txt" | sed 's/^/    /'
+assert_contains "$WORK/backup.txt" 'Backed up SQLite' 'netpro backup did not snapshot SQLite'
+BACKUP_FILE="$(ls -t "$NETPRO_HOME/backups"/netpro-*.db | head -1)"
+[ -f "$BACKUP_FILE" ] || die 'timestamped backup file missing'
+perms="$(stat -c '%a' "$BACKUP_FILE" 2>/dev/null || stat -f '%Lp' "$BACKUP_FILE")"
+[ "$perms" = '600' ] || die "backup must be mode 0600, got $perms"
+cli backup --list >"$WORK/backups.txt"
+assert_contains "$WORK/backups.txt" "$(basename "$BACKUP_FILE")" 'backup --list does not inventory the snapshot'
+
+step 'netpro restore round-trips with a pre-restore safety copy (Phase 22)'
+cli restore "$BACKUP_FILE" >"$WORK/restore.txt"
+cat "$WORK/restore.txt" | sed 's/^/    /'
+assert_contains "$WORK/restore.txt" 'Restored SQLite'
+assert_contains "$WORK/restore.txt" '15/15 migrations applied'
+ls "$NETPRO_HOME/backups"/pre-restore-*.db >/dev/null || die 'pre-restore safety copy missing'
+cli migrate --status >"$WORK/status-db2.txt"
+assert_contains "$WORK/status-db2.txt" 'Applied:  15/15'
+
 step 'netpro serve starts the server from the CLI'
 PORT="$(get_free_port)"
 node "$CLI" serve --host 127.0.0.1 --port "$PORT" >"$WORK/serve.log" 2>&1 &

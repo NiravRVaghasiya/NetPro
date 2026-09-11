@@ -24,6 +24,8 @@
 
 import { readLocalConfig } from '@netpro/db';
 import { resolveAuthMode, type AuthMode } from './auth/index';
+import { resolveAllowedOrigins } from './middleware/security';
+import { resolveRateLimitConfig, type RateLimitConfig } from './middleware/rate-limit';
 
 export type ServerConfig = {
   /** Bind address. Default 127.0.0.1 (local-only). */
@@ -42,6 +44,18 @@ export type ServerConfig = {
    * configuration an operator edits by hand.
    */
   auth: { mode: AuthMode };
+  /**
+   * Phase 23 — explicit CORS allow-list. `null` (or absent) selects the
+   * loopback-only default: browsers on the machine keep working, random
+   * internet pages cannot call the API. `loadConfig()` always resolves this
+   * from `NETPRO_ALLOWED_ORIGINS` (winning) or the config-file
+   * `allowed_origins`; other constructors may omit it for the default.
+   */
+  allowedOrigins?: string[] | null;
+  /** Phase 23 — per-IP rate limiting. `loadConfig()` resolves it; absent means the default 600/min. */
+  rateLimit?: RateLimitConfig;
+  /** Phase 23 — send HSTS. Opt-in, and only meaningful behind a TLS-terminating proxy. */
+  hsts?: boolean;
 };
 
 const DEFAULT_HOST = '127.0.0.1';
@@ -63,6 +77,9 @@ function positivePort(value: string | undefined, fallback: number): number {
  * - `NETPRO_AUTO_MIGRATE` — same semantics as @netpro/db
  * - `NETPRO_AUTH_MODE` — `local` (default) | `token` | `open`
  * - `NETPRO_HOME` — relocate the install directory (see @netpro/db)
+ * - `NETPRO_ALLOWED_ORIGINS` — CSV CORS allow-list (default: loopback only)
+ * - `NETPRO_RATE_LIMIT_ENABLED` / `NETPRO_RATE_LIMIT_MAX` / `NETPRO_RATE_LIMIT_WINDOW_MS`
+ * - `NETPRO_HSTS` — send Strict-Transport-Security (behind TLS only)
  *
  * No cloud-platform, AUTH_URL, or GitHub OAuth variables are required.
  *
@@ -94,6 +111,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     port,
     autoMigrate,
     auth: { mode: resolveAuthMode(env) },
+    // Phase 23 — remote exposure is explicit: the origin allow-list, the rate
+    // limiter, and HSTS resolve here so `netpro serve` is safe by default.
+    allowedOrigins: resolveAllowedOrigins(env, file.server?.allowedOrigins),
+    rateLimit: resolveRateLimitConfig(env),
+    hsts: ['1', 'true', 'yes', 'on'].includes((env.NETPRO_HSTS ?? '').trim().toLowerCase()),
   };
 }
 
