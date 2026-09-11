@@ -5,9 +5,11 @@
 //
 // The page is a client of the local NetPro server (`GET /api/graph/path`,
 // which orchestrates core's `planIntroPaths` — BFS chains ranked by the
-// existing path-ranking model) and degrades to the same core call when the
-// server is not running. Ranking, scoring, and the first-ask suggestion all
-// come from `packages/core/graph/pathfinder.ts`; React only visualizes.
+// existing path-ranking model). Ranking, scoring, and the first-ask
+// suggestion all come from `packages/core/graph/pathfinder.ts`; React only
+// visualizes. Phase 24 removed the direct-DB fallback, so the page is a pure
+// client: when the server is unreachable it says so instead of running the
+// pathfinder locally.
 //
 // Each ranked chain shows the plan's five facts — path strength, weakest
 // relationship, average relationship, number of hops, intermediate contacts —
@@ -15,24 +17,24 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { requireScope } from "@/lib/authz";
-import { conn } from "@/lib/db";
 import { getServerUrl, serverFetchJson } from "@/lib/netpro-server";
-import {
-  getNetworkGraph,
-  introAskText,
-  planIntroPaths,
-  EDGE_RELATIONS,
-  GraphError,
-  PATHFINDER_LIMITS,
-  type IntroPathPlan,
-  type RankedIntroPath,
-} from "@netpro/core/src/graph";
-import { searchContacts } from "@netpro/core/src/search";
-import { graphAnalysisParams } from "@/lib/graph-request";
 import { scoreLabel } from "@/lib/format";
 
 export const metadata = { title: "Pathfinder — NetPro" };
+
+// Phase 24 — the *form* constants are presentation mirrors of
+// packages/core/graph (PATHFINDER_LIMITS, EDGE_RELATIONS). The server enforces
+// the real caps on /api/graph/path; the page only renders the option ranges.
+const API_MAX_DEPTH = 6;
+const MAX_ALTERNATIVES = 5;
+const DEFAULT_ALTERNATIVES = 3;
+const EDGE_RELATIONS = [
+  "mutual_network",
+  "colleague",
+  "met_at_event",
+  "mutual_intro",
+  "manual",
+] as const;
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -41,22 +43,44 @@ function one(value: string | string[] | undefined): string | undefined {
   return s ? s : undefined;
 }
 
-function draftHref(plan: IntroPathPlan, path: RankedIntroPath): string {
-  const text = introAskText(plan, path);
-  const p = new URLSearchParams({
-    contactId: path.ask.contactId,
-    context: text.context,
-    purpose: text.purpose,
-  });
-  return `/outreach?${p.toString()}`;
-}
+type PathNode = {
+  contactId: string;
+  fullName: string;
+  role?: string | null;
+  company?: string | null;
+  relationshipScore: number | null;
+  lastInteraction: string | null;
+  via?: {
+    relations: string[];
+    minConfidence: number;
+    oneWay?: boolean;
+  };
+};
+
+type RankedIntroPath = {
+  rank: number;
+  hops: number;
+  score: { score: number; weakestTie: number | null; avgHopStrength: number };
+  path: PathNode[];
+  intermediaries: Array<{ fullName: string }>;
+  ask: { contactId: string; fullName: string; suggestion: string };
+};
+
+type IntroPathPlan = {
+  found: boolean;
+  target: { fullName: string };
+  origin: { contactId: string; fullName: string; selectedBy?: string };
+  maxDepth: number;
+  paths: RankedIntroPath[];
+};
+
+type ErrorEnvelope = { error?: string };
 
 export default async function PathfinderPage({
   searchParams,
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const scope = await requireScope();
   const q = await searchParams;
   const serverUrl = getServerUrl();
 
@@ -73,26 +97,8 @@ export default async function PathfinderPage({
         ? "pending only"
         : "confirmed";
 
-  const analysisInput = new URLSearchParams();
-  if (depth) analysisInput.set("depth", depth);
-  if (relation) analysisInput.set("relation", relation);
-  if (status) analysisInput.set("status", status);
-  // Hand-typed URLs must not 500 the page: bad params fall back to defaults.
-  let analysis;
-  try {
-    analysis = graphAnalysisParams(analysisInput);
-  } catch {
-    analysis = { maxDepth: 4, limit: 10 };
-  }
-  const altNum = alt === undefined ? NaN : Number(alt);
-  const k =
-    Number.isFinite(altNum) && altNum >= 1
-      ? Math.min(Math.trunc(altNum), PATHFINDER_LIMITS.maxAlternatives)
-      : PATHFINDER_LIMITS.defaultAlternatives;
-
   // ── Contact picklist for the datalist (best-effort, never blocking) ──
-  let picklist: Array<{ id: string; fullName: string; company: string | null }> =
-    [];
+  let picklist: Array<{ id: string; fullName: string; company: string | null }> = [];
   try {
     const res = await serverFetchJson<{
       contacts?: Array<{ id: string; fullName: string; company: string | null }>;
@@ -102,19 +108,6 @@ export default async function PathfinderPage({
     }
   } catch {
     picklist = [];
-  }
-  if (picklist.length === 0) {
-    try {
-      const local = await searchContacts(
-        conn,
-        { sort: "score", limit: 50 },
-        {},
-        scope,
-      );
-      picklist = local.contacts;
-    } catch {
-      picklist = [];
-    }
   }
   const datalist = (
     <datalist id="netpro-pathfinder-contacts">
@@ -140,6 +133,7 @@ export default async function PathfinderPage({
     }> = [];
     let nodes = 0;
     let edges = 0;
+    let serverError: string | null = null;
     try {
       const res = await serverFetchJson<{
         nodes?: number;
@@ -151,20 +145,10 @@ export default async function PathfinderPage({
         edges = res.data.edges ?? 0;
         candidates = res.data.warmIntros ?? [];
       } else {
-        const g = await getNetworkGraph(conn, { ...analysis, scope });
-        nodes = g.nodes;
-        edges = g.edges;
-        candidates = g.warmIntros;
+        serverError = (res.data as ErrorEnvelope)?.error ?? `Server ${res.status}`;
       }
-    } catch {
-      try {
-        const g = await getNetworkGraph(conn, { ...analysis, scope });
-        nodes = g.nodes;
-        edges = g.edges;
-        candidates = g.warmIntros;
-      } catch {
-        candidates = [];
-      }
+    } catch (e) {
+      serverError = e instanceof Error ? e.message : String(e);
     }
     return (
       <div>
@@ -172,10 +156,23 @@ export default async function PathfinderPage({
         <p style={{ color: "#475569", maxWidth: 640 }}>
           Who can introduce you to this person? Pick a target and NetPro ranks
           the shortest chains of confirmed links to them — you choose whom to
-          ask, NetPro drafts the note (nothing sends itself). Chains are{" "}
-          <strong>ranked, never auto-picked</strong>. Server:{" "}
+          ask. Chains are <strong>ranked, never auto-picked</strong>. Server:{" "}
           <code>{serverUrl}</code>
         </p>
+        {serverError ? (
+          <div
+            style={{
+              background: "#fffbeb",
+              border: "1px solid #fde68a",
+              color: "#92400e",
+              borderRadius: 10,
+              padding: "0.6rem 0.9rem",
+            }}
+          >
+            Server not reachable at <code>{serverUrl}</code> — run <code>netpro serve</code> for pathfinding.{" "}
+            <em>({serverError})</em>
+          </div>
+        ) : null}
         <PathfinderForm
           target={target}
           from={from}
@@ -193,8 +190,7 @@ export default async function PathfinderPage({
         ) : (
           <p style={{ color: "#9ca3af" }}>
             No confirmed edges yet — the pathfinder needs a graph to walk.{" "}
-            <Link href="/import">Import connections</Link> or{" "}
-            <Link href="/edges">link two people</Link>.
+            <Link href="/import">Import connections</Link>.
           </p>
         )}
         {candidates.length > 0 ? (
@@ -220,7 +216,7 @@ export default async function PathfinderPage({
     );
   }
 
-  // ── Results: server first, core fallback ───────────────────────────
+  // ── Results: server only ───────────────────────────────────────────
   let plan: IntroPathPlan | null = null;
   let planError: string | null = null;
   let serverError: string | null = null;
@@ -237,28 +233,35 @@ export default async function PathfinderPage({
     if (res.ok) {
       plan = res.data;
     } else if (res.status >= 500) {
-      // A broken server falls back to local core; a 4xx is an answer
-      // (unknown contact, bad selector) and is rendered as-is below.
       serverError =
-        (res.data as { error?: string })?.error ?? `Server ${res.status}`;
+        (res.data as ErrorEnvelope)?.error ?? `Server ${res.status}`;
     } else {
       planError =
-        (res.data as { error?: string })?.error ?? `Server ${res.status}`;
+        (res.data as ErrorEnvelope)?.error ?? `Server ${res.status}`;
     }
   } catch (e) {
     serverError = e instanceof Error ? e.message : String(e);
   }
-  if (!plan && !planError) {
-    try {
-      plan = await planIntroPaths(
-        conn,
-        { target, from, k },
-        { ...analysis, scope },
-      );
-    } catch (e) {
-      if (e instanceof GraphError) planError = e.message;
-      else throw e;
-    }
+
+  if (serverError && !plan && !planError) {
+    return (
+      <div>
+        <h1>Pathfinder</h1>
+        <div
+          style={{
+            background: "#fffbeb",
+            border: "1px solid #fde68a",
+            color: "#92400e",
+            borderRadius: 10,
+            padding: "0.6rem 0.9rem",
+            margin: "0.75rem 0",
+          }}
+        >
+          Server not reachable at <code>{serverUrl}</code> — run <code>netpro serve</code> for pathfinding.{" "}
+          <em>({serverError})</em>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -267,12 +270,6 @@ export default async function PathfinderPage({
       <p style={{ color: "#6b7280", fontSize: "0.9rem", marginTop: 0 }}>
         Ranked warm-intro chains — strength, weakest tie, hops, and the first
         ask. Server: <code>{serverUrl}</code>
-        {serverError ? (
-          <span style={{ color: "#92400e" }}>
-            {" "}
-            — {serverError} (local fallback)
-          </span>
-        ) : null}
       </p>
       <PathfinderForm
         target={target}
@@ -297,7 +294,7 @@ export default async function PathfinderPage({
           </h2>
           <p style={{ color: "#6b7280", marginTop: "0.25rem" }}>
             From{" "}
-            <Link href={`/contacts/${plan.origin.contactId}`}>
+            <Link href={`/people/${plan.origin.contactId}`}>
               {plan.origin.fullName}
             </Link>
             {plan.origin.selectedBy === "strongest-tie"
@@ -309,13 +306,13 @@ export default async function PathfinderPage({
           {!plan.found ? (
             <p>
               Nobody links them within {plan.maxDepth} hops over these edges —{" "}
-              <Link href="/edges">add a link or review pending candidates</Link>
-              , raise the depth, or include pending candidates.
+              <Link href="/import">import connections</Link>, raise the depth,
+              or include pending candidates.
             </p>
           ) : (
             <div>
               {plan.paths.map((p) => (
-                <PathCard key={p.rank} plan={plan as IntroPathPlan} path={p} />
+                <PathCard key={p.rank} path={p} />
               ))}
             </div>
           )}
@@ -381,10 +378,10 @@ function PathfinderForm({
       </label>
       <label style={{ display: "grid", gap: "0.25rem" }}>
         <span style={{ fontSize: "0.8rem", color: "#6b7280" }}>
-          Depth (1–{PATHFINDER_LIMITS.apiMaxDepth})
+          Depth (1–{API_MAX_DEPTH})
         </span>
         <select name="depth" defaultValue={depth ?? "4"}>
-          {Array.from({ length: PATHFINDER_LIMITS.apiMaxDepth }, (_, i) =>
+          {Array.from({ length: API_MAX_DEPTH }, (_, i) =>
             String(i + 1),
           ).map((d) => (
             <option key={d} value={d}>
@@ -395,13 +392,13 @@ function PathfinderForm({
       </label>
       <label style={{ display: "grid", gap: "0.25rem" }}>
         <span style={{ fontSize: "0.8rem", color: "#6b7280" }}>
-          Alternatives (1–{PATHFINDER_LIMITS.maxAlternatives})
+          Alternatives (1–{MAX_ALTERNATIVES})
         </span>
         <select
           name="alt"
-          defaultValue={alt ?? String(PATHFINDER_LIMITS.defaultAlternatives)}
+          defaultValue={alt ?? String(DEFAULT_ALTERNATIVES)}
         >
-          {Array.from({ length: PATHFINDER_LIMITS.maxAlternatives }, (_, i) =>
+          {Array.from({ length: MAX_ALTERNATIVES }, (_, i) =>
             String(i + 1),
           ).map((d) => (
             <option key={d} value={d}>
@@ -441,13 +438,7 @@ function PathfinderForm({
  * stepper and the first ask. All numbers arrive ranked from core — nothing is
  * recomputed or re-sorted here.
  */
-function PathCard({
-  plan,
-  path,
-}: {
-  plan: IntroPathPlan;
-  path: RankedIntroPath;
-}) {
+function PathCard({ path }: { path: RankedIntroPath }) {
   const stats: Array<{ label: string; value: string }> = [
     { label: "Path strength", value: path.score.score.toFixed(2) },
     {
@@ -533,7 +524,7 @@ function PathCard({
               </span>
               <span style={{ paddingBottom: "0.7rem" }}>
                 <Link
-                  href={`/contacts/${n.contactId}`}
+                  href={`/people/${n.contactId}`}
                   style={{ fontWeight: 600, color: "#111827" }}
                 >
                   {n.fullName}
@@ -584,7 +575,7 @@ function PathCard({
 
       <p
         style={{
-          margin: "0.25rem 0 0.6rem",
+          margin: "0.25rem 0 0",
           fontSize: "0.9rem",
           background: "#f9fafb",
           borderRadius: 8,
@@ -593,21 +584,6 @@ function PathCard({
       >
         <span style={{ color: "#6b7280" }}>First ask: </span>
         {path.ask.suggestion}
-      </p>
-      <p style={{ margin: 0 }}>
-        <Link
-          href={draftHref(plan, path)}
-          style={{
-            display: "inline-block",
-            padding: "0.35rem 0.75rem",
-            border: "1px solid #3b82f6",
-            borderRadius: 6,
-            color: "#1d4ed8",
-            textDecoration: "none",
-          }}
-        >
-          Draft intro request to {path.ask.fullName}
-        </Link>
       </p>
     </article>
   );

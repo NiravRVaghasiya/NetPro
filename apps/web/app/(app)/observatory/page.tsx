@@ -10,18 +10,14 @@
 // server (http://127.0.0.1:3777) via @/lib/netpro-server — never by
 // duplicating `packages/core` logic in React.
 //
-// When the server is not running (e.g. `next dev` without `netpro serve`),
-// the page degrades to a banner and still renders via the direct DB fallback
-// so the operator is not blocked. Dependency rule preserved:
-// packages/core → CLI/Server → Web UI.
+// Phase 24 — the direct-DB fallback is gone: when the server is not running
+// the page renders an empty shell and a "run `netpro serve`" banner. The
+// dependency rule is now unconditional: packages/core → CLI/Server → Web UI.
 
 import Link from "next/link";
-import { requireScope } from "@/lib/authz";
 import { ObservatoryGrid, type ObservatoryStats } from "@/components/observatory";
 import { ActivityFeed } from "@/components/activity-feed";
 import { getServerUrl, serverFetchJson } from "@/lib/netpro-server";
-import { conn } from "@/lib/db";
-import { getNetworkOverview } from "@netpro/core/src/analytics";
 
 export const metadata = { title: "Observatory — NetPro" };
 
@@ -37,7 +33,6 @@ type JobRow = {
 };
 
 export default async function ObservatoryPage() {
-  await requireScope();
   const serverUrl = getServerUrl();
 
   let serverReachable = false;
@@ -49,7 +44,7 @@ export default async function ObservatoryPage() {
     if (health.ok) serverReachable = true;
 
     if (serverReachable) {
-      const [analyticsRes, graphRes, jobsRes, providersRes, healthDetailRes] = await Promise.all([
+      const [analyticsRes, graphRes, jobsRes, providersRes] = await Promise.all([
         serverFetchJson<{
           metrics?: { totalContacts?: number };
           graph?: {
@@ -82,7 +77,6 @@ export default async function ObservatoryPage() {
           embeddings?: { configured: boolean };
           search?: { indexContacts?: number | null };
         }>("/api/providers"),
-        serverFetchJson<{ status?: string }>("/api/health"),
       ]);
 
       const analytics = analyticsRes.ok ? analyticsRes.data : null;
@@ -177,41 +171,9 @@ export default async function ObservatoryPage() {
     serverReachable = false;
   }
 
-  let fallbackStats: ObservatoryStats | null = null;
-  if (!serverStats) {
-    try {
-      const overview = await getNetworkOverview(conn, {});
-      fallbackStats = {
-        contacts: overview.metrics.totalContacts,
-        relationships: (overview.graph as { edges?: number } | undefined)?.edges,
-        communities: (overview.graph as { communities?: { count?: number } } | undefined)?.communities?.count,
-        modularity: (overview.graph as { communities?: { modularity?: number } } | undefined)?.communities?.modularity,
-        graph: overview.graph
-          ? {
-              nodes: (overview.graph as { nodes: number }).nodes,
-              edges: (overview.graph as { edges: number }).edges,
-              components: (overview.graph as { components: { count: number } }).components.count,
-              largestComponent: (overview.graph as { components: { largestSize: number } }).components.largestSize,
-              coverage: (overview.graph as { coverage?: number }).coverage,
-              avgPathLength: (overview.graph as { avgPathLength?: { value: number | null } }).avgPathLength?.value ?? null,
-              degraded: (overview.graph as { degraded?: { reason: string } | null }).degraded ?? null,
-              pendingCandidates: (overview.graph as { pendingCandidates?: number }).pendingCandidates,
-            }
-          : undefined,
-        jobs: { total: 0, running: 0, queued: 0, list: [] },
-        lastScan: null,
-        enrichment: { configured: false, hunter: false, pdl: false, clearbit: false },
-        ai: { configured: false },
-        embeddings: { configured: false },
-        indexContacts: overview.metrics.totalContacts,
-        generatedAt: overview.generatedAt,
-      };
-    } catch {
-      fallbackStats = { contacts: 0 };
-    }
-  }
-
-  const stats = serverStats ?? fallbackStats ?? { contacts: 0 };
+  // Phase 24 — no direct-DB fallback. When the server is down the grid
+  // renders an empty shell plus the "server not reachable" banner.
+  const stats = serverStats ?? { contacts: 0 };
 
   return (
     <div>

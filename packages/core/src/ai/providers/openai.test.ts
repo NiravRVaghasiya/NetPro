@@ -11,7 +11,7 @@ function fakeFetch(
     | Partial<Response>
     | ((url: string, init?: RequestInit) => Partial<Response>),
 ): ReturnType<typeof vi.fn<typeof fetch>> {
-  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  return vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const r = typeof response === "function" ? response(url, init) : response;
     return { ok: true, status: 200, json: async () => ({}), ...r } as Response;

@@ -18,7 +18,6 @@
 // renders the job's result snapshot.
 
 import Link from "next/link";
-import { requireScope } from "@/lib/authz";
 import { getServerUrl, serverFetchJson } from "@/lib/netpro-server";
 import { ScanPanel, type ScanJob, type ScanResult } from "@/components/scan-panel";
 import { ActivityFeed } from "@/components/activity-feed";
@@ -35,7 +34,6 @@ type ScanJobRow = ScanJob & {
 };
 
 export default async function ScanPage() {
-  await requireScope();
   const serverUrl = getServerUrl();
 
   let reachable = false;

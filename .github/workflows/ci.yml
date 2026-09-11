@@ -324,14 +324,18 @@ jobs:
 
       # Stages apps/web/.next/standalone like the Docker runner, starts it on
       # loopback with a scratch SQLite install, and asserts: landing page +
-      # security headers, /login, /api/health on SQLite, the private
-      # Observatory trusted from loopback, a /_next/static asset, clean exit.
+      # security headers, /login 404, no /api routes of its own, the private
+      # Observatory client shell, a /_next/static asset, clean exit.
       - name: Web UI loading smoke
         run: scripts/smoke/web-ui.sh
 
   # ── 9. Docker self-hosted e2e — the published deployment shape ─────────
+  # Phase 24 — the image ships three roles: the standalone @netpro/server, the
+  # pure-client Web UI, and the CLI (migrations). This job runs server + web
+  # together against Postgres and proves the Web UI exposes no API or Auth.js
+  # surface of its own (the server-smoke job already proves the auth boundary).
   docker:
-    name: Docker image e2e (PostgreSQL + Web UI)
+    name: Docker image e2e (PostgreSQL + server + Web UI)
     needs: web-ui-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -388,41 +392,59 @@ jobs:
           fi
           cat /tmp/migrate.log
 
-      - name: "Start the web container (phase 5: no credentials at all)"
+      # Phase 24 — the standalone @netpro/server owns every API. Start it the
+      # way compose does (node /app/packages/server/dist/bin.js) and wait on
+      # its own /api/health.
+      - name: "Start the server container (no credentials at all)"
         run: |
-          # The Phase 5 exit criterion, exercised in CI: the production image
-          # starts and serves with DB_DIALECT/DATABASE_URL alone. No
-          # GITHUB_CLIENT_ID, no GITHUB_CLIENT_SECRET, no
-          # NETPRO_OWNER_GITHUB_ID, no NEXTAUTH_SECRET, no NEXTAUTH_URL.
-          # NETPRO_TRUST_LOCAL_UI=1 is the operator's assertion that the
-          # instance is reachable only from this machine: inside the container
-          # the socket peer is the Docker bridge, so the loopback check cannot
-          # pass on its own (docker-compose.yml publishes on 127.0.0.1 and sets
-          # the same flag).
-          docker run -d --name web --network netpro-ci -p 3000:3000 \
+          docker run -d --name server --network netpro-ci -p 3777:3777 \
             -e DB_DIALECT=postgresql \
             -e DATABASE_URL='postgresql://netpro:netpro@db:5432/netpro?sslmode=disable' \
-            -e NETPRO_TRUST_LOCAL_UI=1 \
-            netpro:ci
+            -e NETPRO_HOST=0.0.0.0 \
+            -e NETPRO_PORT=3777 \
+            -e NETPRO_AUTH_MODE=open \
+            netpro:ci node /app/packages/server/dist/bin.js
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then break; fi
+            if curl -fsS http://127.0.0.1:3777/api/health >/dev/null 2>&1; then break; fi
             sleep 2
           done
-          if ! curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
-            echo "::error::Web container never served /api/health"
+          if ! curl -fsS http://127.0.0.1:3777/api/health >/dev/null 2>&1; then
+            echo "::error::Server container never served /api/health"
+            docker logs server 2>&1 | tail -80
+            echo "::error::server log: $(docker logs server 2>&1 | tr '\n' ' ' | tail -c 800)"
+            exit 1
+          fi
+
+      # The Web UI is a pure client: it needs only NETPRO_SERVER_URL. There is
+      # no DB_DIALECT, no DATABASE_URL, no NETPRO_AUTH_MODE, no Auth.js vars.
+      - name: "Start the web container (pure client, no credentials at all)"
+        run: |
+          docker run -d --name web --network netpro-ci -p 3000:3000 \
+            -e NETPRO_SERVER_URL=http://server:3777 \
+            netpro:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/ >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          if ! curl -fsS http://127.0.0.1:3000/ >/dev/null 2>&1; then
+            echo "::error::Web container never served /"
             docker logs web 2>&1 | tail -80
             echo "::error::web log: $(docker logs web 2>&1 | tr '\n' ' ' | tail -c 800)"
             exit 1
           fi
 
-      - name: Check health, Web UI loading, auth boundaries and logs
+      - name: Check health, Web UI loading, and the Phase 24 client boundary
         run: |
-          echo "--- health ---"
-          curl -fsS http://127.0.0.1:3000/api/health | tee /tmp/health.json
+          echo "--- server health (PostgreSQL) ---"
+          curl -fsS http://127.0.0.1:3777/api/health | tee /tmp/health.json
           grep -q '"status":"healthy"' /tmp/health.json || {
             echo "::error::health not healthy: $(cat /tmp/health.json)"; exit 1; }
           grep -q '"dialect":"postgresql"' /tmp/health.json || {
             echo "::error::health dialect not postgresql: $(cat /tmp/health.json)"; exit 1; }
+
+          echo "--- server answers the API ---"
+          curl -fsS http://127.0.0.1:3777/api/contacts >/dev/null || {
+            echo "::error::/api/contacts failed on the server"; exit 1; }
 
           echo "--- Web UI loading (Phase 21) ---"
           curl -fsS http://127.0.0.1:3000/ -D /tmp/landing.headers -o /tmp/landing.html
@@ -430,106 +452,51 @@ jobs:
           grep -q '<title>NetPro' /tmp/landing.html || { echo "::error::landing page is not NetPro"; exit 1; }
           grep -q 'Private\. Local\. Searchable\.' /tmp/landing.html || {
             echo "::error::landing page is not the local-first on-ramp"; exit 1; }
-          login_code="$(curl -s -o /tmp/login.html -w '%{http_code}' http://127.0.0.1:3000/login)"
-          [ "$login_code" = "200" ] || { echo "::error::/login expected 200, got $login_code"; exit 1; }
           asset="$(grep -oE '/_next/static/[^"]+\.js' /tmp/landing.html | head -1)"
           [ -n "$asset" ] || { echo "::error::no static asset referenced by the landing page"; exit 1; }
           curl -fsS "http://127.0.0.1:3000$asset" -o /dev/null || {
             echo "::error::static asset $asset failed"; exit 1; }
 
-          echo "--- local mode trusts this machine (phase 5) ---"
-          # A request whose Host is loopback comes from the operator, so the
-          # private API answers it without any sign-in at all.
-          local_card="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/card)"
-          [ "$local_card" = "200" ] || { echo "::error::local /api/card expected 200, got $local_card"; exit 1; }
-
-          echo "--- auth boundaries ---"
-          # Private API must reject callers that did not come from this
-          # machine. Phase 5 local mode decides that from the Host header
-          # (plus the absence of proxy headers), so the remote case is
-          # exercised with a non-loopback Host — the same shape an attacker
-          # reaches the container with.
-          REMOTE=(-H 'Host: netpro.example')
-          api_card="$(curl -s -o /dev/null -w '%{http_code}' "${REMOTE[@]}" http://127.0.0.1:3000/api/card)"
-          [ "$api_card" = "401" ] || { echo "::error::remote /api/card expected 401, got $api_card"; exit 1; }
-          # Note on proxy headers: this container runs NETPRO_TRUST_LOCAL_UI=1,
-          # which (by design — the Docker bridge masks the socket peer, and the
-          # port is published on 127.0.0.1 only) trusts a loopback Host without
-          # inspecting X-Forwarded-For. The XFF boundary is enforced by the
-          # standalone @netpro/server layer instead and is proven there by the
-          # server-smoke job (scripts/smoke/local-stack.sh, both dialects).
-          # v2.0 Phase 6: every owner-only route added since has to answer the
-          # same way in a production build, not just in unit tests.
-          for path in /api/events /api/events/anything /api/events/anything/match /api/graph/overview /api/skills/gap; do
-            code="$(curl -s -o /dev/null -w '%{http_code}' "${REMOTE[@]}" "http://127.0.0.1:3000${path}")"
-            [ "$code" = "401" ] || { echo "::error::remote ${path} expected 401, got $code"; exit 1; }
+          echo "--- Phase 24 client boundary: no API, no Auth.js surface ---"
+          login_code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/login)"
+          [ "$login_code" = "404" ] || { echo "::error::/login expected 404 (Auth.js removed), got $login_code"; exit 1; }
+          health_code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/health)"
+          [ "$health_code" = "404" ] || { echo "::error::web /api/health expected 404 (no duplicated API), got $health_code"; exit 1; }
+          # The pages that drive the UI are client shells; they must render even
+          # though the data comes from the server.
+          for path in /observatory /network /people /search /pathfinder /activity /scan /settings; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3000${path}")"
+            [ "$code" = "200" ] || { echo "::error::${path} expected 200, got $code"; exit 1; }
           done
-          # v2.5 Phase 7: the analytics and content surfaces joined the
-          # owner-only boundary; the beacons stay public but must behave like
-          # it (no 401, no Set-Cookie, nosniff) in a production build.
-          for path in /api/analytics /api/card/views /api/content /api/content/anything /api/content/anything/metrics /api/content/anything/mentions; do
-            code="$(curl -s -o /dev/null -w '%{http_code}' "${REMOTE[@]}" "http://127.0.0.1:3000${path}")"
-            [ "$code" = "401" ] || { echo "::error::remote ${path} expected 401, got $code"; exit 1; }
-          done
-          pixel="$(curl -s -D - -o /dev/null http://127.0.0.1:3000/api/card/pixel.gif)"
-          echo "$pixel" | head -1 | grep -q ' 200 ' || { echo "::error::pixel.gif expected 200, got: $(echo "$pixel" | head -1)"; exit 1; }
-          echo "$pixel" | grep -qi 'cache-control:.*no-store' || { echo "::error::pixel.gif missing no-store"; exit 1; }
-          echo "$pixel" | grep -qi 'x-content-type-options: nosniff' || { echo "::error::pixel.gif missing nosniff"; exit 1; }
-          if echo "$pixel" | grep -qi '^set-cookie:'; then echo "::error::pixel.gif set a cookie"; exit 1; fi
-          preflight="$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS http://127.0.0.1:3000/api/card/view)"
-          [ "$preflight" = "204" ] || { echo "::error::/api/card/view OPTIONS expected 204, got $preflight"; exit 1; }
-          beacon="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"page":"/card"}' http://127.0.0.1:3000/api/card/view)"
-          [ "$beacon" = "200" ] || { echo "::error::/api/card/view beacon expected 200, got $beacon"; exit 1; }
-          card="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/card)"
-          [ "$card" = "404" ] || { echo "::error::/card expected 404, got $card"; exit 1; }
+          # The web container reaches the server over the private network.
+          docker exec web wget -qO- http://server:3777/api/health | grep -q '"status":"healthy"' || {
+            echo "::error::web container could not reach the server over the compose network"; exit 1; }
 
-          echo "--- no UntrustedHost / auth misconfiguration in logs ---"
-          # This is the Phase 6 production auth bug: it only appears at runtime
-          # in a production build, so a build-only check cannot catch it.
-          docker logs web 2>&1 | tee /tmp/web.log
-          if grep -qi "UntrustedHost" /tmp/web.log; then
-            echo "::error::UntrustedHost present in web logs"
-            exit 1
-          fi
-
-      - name: Re-check the boundary in GitHub mode
+      - name: Re-check the auth boundary on the server in token mode
         run: |
-          # Phase 5 keeps the v3.0 deployment shape available: with
-          # NETPRO_AUTH_MODE=github nothing is trusted, not even loopback —
-          # every caller must sign in. The credentials are fake on purpose;
-          # only the 401 path is under test.
-          docker rm -f web >/dev/null 2>&1 || true
-          docker run -d --name web --network netpro-ci -p 3000:3000 \
+          # Phase 5/24 — the server owns authentication. In token mode even a
+          # loopback-looking caller needs the credential; with the token it is
+          # admitted. This is the boundary the old Web UI enforced inline.
+          docker rm -f server >/dev/null 2>&1 || true
+          docker run -d --name server --network netpro-ci -p 3777:3777 \
             -e DB_DIALECT=postgresql \
             -e DATABASE_URL='postgresql://netpro:netpro@db:5432/netpro?sslmode=disable' \
-            -e NETPRO_AUTH_MODE=github \
-            -e NEXTAUTH_SECRET=ci-only-secret-not-a-real-credential \
-            -e NEXTAUTH_URL=http://localhost:3000 \
-            -e AUTH_URL=http://localhost:3000 \
-            -e GITHUB_CLIENT_ID=ci-fake-client-id \
-            -e GITHUB_CLIENT_SECRET=ci-fake-client-secret \
-            -e NETPRO_OWNER_GITHUB_ID=1 \
-            netpro:ci
+            -e NETPRO_HOST=0.0.0.0 \
+            -e NETPRO_PORT=3777 \
+            -e NETPRO_AUTH_MODE=token \
+            -e NETPRO_AUTH_TOKEN=ci-token-not-a-real-credential \
+            netpro:ci node /app/packages/server/dist/bin.js
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then break; fi
+            if curl -fsS http://127.0.0.1:3777/api/health >/dev/null 2>&1; then break; fi
             sleep 2
           done
-          for path in /api/card /api/events /api/graph/overview; do
-            code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3000${path}")"
-            [ "$code" = "401" ] || { echo "::error::github-mode ${path} expected 401 even from loopback, got $code"; exit 1; }
-          done
-          # Web UI loading still works in GitHub mode — it redirects to the
-          # sign-in page instead of rendering the app, but it must not crash.
-          login_code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/login)"
-          [ "$login_code" = "200" ] || { echo "::error::github-mode /login expected 200, got $login_code"; exit 1; }
-          docker logs web 2>&1 | tee /tmp/web-github.log
-          if grep -qi "UntrustedHost" /tmp/web-github.log; then
-            echo "::error::UntrustedHost present in GitHub-mode web logs"
-            exit 1
-          fi
+          code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3777/api/contacts)"
+          [ "$code" = "401" ] || { echo "::error::token-mode /api/contacts expected 401, got $code"; exit 1; }
+          code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer ci-token-not-a-real-credential' http://127.0.0.1:3777/api/contacts)"
+          [ "$code" = "200" ] || { echo "::error::token-mode /api/contacts with token expected 200, got $code"; exit 1; }
 
       - name: Tear down
         if: always()
         run: |
-          docker rm -f web db >/dev/null 2>&1 || true
+          docker rm -f web server db >/dev/null 2>&1 || true
           docker network rm netpro-ci >/dev/null 2>&1 || true

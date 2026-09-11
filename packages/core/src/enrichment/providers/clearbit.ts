@@ -28,7 +28,11 @@ export function createClearbitProvider(apiKey: string | null): EnrichmentProvide
       if (!response.ok) {
         throw new Error(`Clearbit company lookup failed: ${response.status}`);
       }
-      const company = await response.json();
+      const company = (await response.json()) as {
+        name?: string;
+        domain?: string;
+        category?: { industry?: string };
+      };
 
       return {
         provider: 'clearbit',

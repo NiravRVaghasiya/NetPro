@@ -1,11 +1,3 @@
-vi.mock("@/lib/authz", () => ({
-  requireScope: async () => ({
-    workspaceId: "default",
-    userId: "test-user",
-    role: "owner",
-  }),
-}));
-
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 

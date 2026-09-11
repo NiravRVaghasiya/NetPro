@@ -10,10 +10,10 @@
 //   → Import, search, warm-intro paths — all through the local server at
 //     http://127.0.0.1:3777.
 //
-// The page is public (proxy.ts allows "/") and links into the authenticated
-// app shell. The server's health endpoint is fetched client-side only if the
-// caller wants a live dot — the static shell must not 500 when `netpro serve`
-// is not running.
+// Phase 24 — there is no proxy/auth middleware in the Web UI anymore, so this
+// page is unconditionally public and links into the app shell. It must not
+// 500 when `netpro serve` is not running — the server's health endpoint is
+// fetched client-side only if the caller wants a live dot.
 
 import Link from "next/link";
 
@@ -89,7 +89,7 @@ export default function LandingPage() {
           NetPro runs on this machine. The CLI, the local server at{" "}
           <code>http://127.0.0.1:3777</code>, and the Web UI are three interfaces to the same application. Your contacts, the
           graph, and the search index live in <code>~/.netpro/netpro.db</code> (SQLite) by default — no hosted
-          platform, no cloud database, no mandatory GitHub OAuth. PostgreSQL remains for Docker/self-hosted.
+          platform, no cloud database, no GitHub OAuth (removed in Phase 24). PostgreSQL remains for Docker/self-hosted.
         </p>
         <ul style={{ margin: "0.75rem 0 0", paddingLeft: "1.2rem", color: "#374151", lineHeight: 1.6 }}>
           <li>

@@ -59,59 +59,29 @@ cp apps/web/.env.example apps/web/.env.local
 npm run dev -w apps/web
 ```
 
-Visit http://localhost:3000. The public card is unavailable until you explicitly
-publish one. Private pages open straight into the workspace: requests from this
-machine are the operator (see [Authentication modes](#authentication-modes)).
+Visit http://localhost:3000. The Web UI is a pure client of the standalone
+server (Phase 24): requests from this machine reach the server as the operator
+(see [Authentication modes](#authentication-modes)). Start the server first —
+`netpro serve` — and the Observatory, Network, People, Search, Pathfinder,
+Activity, Scan, Import, and Settings pages all render from it.
 
 ## Authentication modes
 
-Local NetPro requires **no credentials at all**. `NETPRO_AUTH_MODE` decides who
-is trusted:
+Local NetPro requires **no credentials at all**. `NETPRO_AUTH_MODE` on the
+**server** decides who is trusted (the Web UI performs no authentication of its
+own since Phase 24):
 
 | Mode | Who gets in |
 | --- | --- |
-| `local` (default) | Requests whose Host is loopback (`127.0.0.1`, `localhost`, `::1`) and that did not arrive through a proxy are the operator, identified by `~/.netpro/config.toml`. Everyone else needs GitHub sign-in (if configured) or their own front door. |
-| `github` | Every caller signs in with GitHub. Selected automatically when `GITHUB_CLIENT_ID` + `GITHUB_CLIENT_SECRET` are present, so existing deployments are unchanged. |
+| `local` (default) | Requests whose socket peer is loopback (`127.0.0.1`, `localhost`, `::1`) and that did not arrive through a proxy are the operator, identified by `~/.netpro/config.toml`. Everyone else needs the access token (`netpro token`). |
+| `token` | Every caller, loopback included, presents the access token (`Authorization: Bearer <token>`). |
 | `open` | NetPro authenticates nobody: only behind a reverse proxy, VPN, or private network that does. |
 
-In `local` mode, bind/publish the Web UI to **127.0.0.1** — the trust decision
-uses the Host header, so a public interface would let a caller claim to be
-local. To expose it, use `github` or `open`. The full model is in
-[phase-5-authentication.md](phase-5-authentication.md).
-
-## Configure GitHub sign-in (optional)
-
-GitHub OAuth is an optional integration rather than the application's identity
-system: skip this entirely for local use. It is a **single-owner** instance when
-you do configure it, not a multi-tenant service. Set these in
-`apps/web/.env.local` (or the production server and Docker `.env`):
-
-- `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`: credentials for your GitHub
-  OAuth app, created in GitHub **Settings → Developer settings → OAuth Apps**.
-- `NETPRO_OWNER_GITHUB_ID`: your numeric GitHub account ID, **not** your username
-  or OAuth client ID. For example, retrieve it with
-  `gh api users/YOUR_USERNAME --jq .id` (or view that user's public GitHub API
-  response). No other GitHub account can sign in.
-- `NEXTAUTH_SECRET`: replace the example value with a random secret generated
-  by `openssl rand -base64 32`. Keep it on the server and out of Git.
-- `NEXTAUTH_URL`: the externally reachable app origin. For local development,
-  use `http://localhost:3000`. Register
-  `http://localhost:3000/api/auth/callback/github` as the OAuth app callback;
-  replace the origin with your HTTPS domain for a hosted instance.
-
-Set `NETPRO_AUTH_MODE=github` as well when you want GitHub sign-in to be the
-only way in (for example on a public server). Auth.js v5's `AUTH_SECRET` /
-`AUTH_URL` names are also supported. Behind a trusted reverse proxy, configure
-its forwarded host/protocol correctly; set `AUTH_TRUST_HOST=true` only when that
-proxy/host is trusted. Card writes enforce same-origin requests using those
-headers.
-
-Restart after environment changes. Missing or invalid owner configuration
-**disables sign-in**, rather than allowing open registration. When upgrading
-from Phases 1–4, existing sessions are invalidated and the owner must sign in
-again. Changing the configured owner also revokes the old owner's sessions.
-This controls access to the entire instance; it does not partition or erase
-its stored data. Publicly published cards remain public until unpublished.
+To expose a server beyond loopback, use `token` (or `open` behind your own
+auth). To expose the Web UI itself, put your own auth/TLS reverse proxy in
+front of port 3000 — it has no sign-in of its own. The full model is in
+[phase-5-authentication.md](phase-5-authentication.md) and
+[phase-24-deprecate-old-web.md](phase-24-deprecate-old-web.md).
 
 ## Run the CLI
 
@@ -237,13 +207,14 @@ node apps/cli/dist/index.js analyze --dormant --days 60 --limit 20
 node apps/cli/dist/index.js analyze --json
 ```
 
-In the web app, the **Dashboard** page (`/dashboard`) renders the same numbers
-from `GET /api/analytics`: metric cards, a 12-month growth chart, top
-companies/industries, clusters, your reconnect list, and — since v2.0
-Phase 2 — a **Network graph** section (Louvain communities, centrality,
-components, and warm-intro candidates over your confirmed edges; `pending`
-candidates stay out until you confirm them). Use **Graph** (`/graph`) to turn
-those candidates into actual intro plans (see below).
+The **Observatory** page renders the same numbers from `GET /api/analytics`:
+metric cards, a 12-month growth chart, top companies/industries, clusters, and
+your reconnect list. The **Network** page shows the graph section (Louvain
+communities, centrality, components, and warm-intro candidates over your
+confirmed edges; `pending` candidates stay out until you confirm them), and
+**Pathfinder** turns candidates into actual intro plans (see below). The legacy
+`/dashboard` and `/graph` pages were removed in Phase 24; these are their
+server-backed successors.
 
 > Analytics reads LinkedIn's "Connected On" date — imports record it as the
 > contact's `createdAt` and initial `lastInteraction`, so growth reflects when
@@ -268,9 +239,8 @@ netpro edge import edges.csv          # two columns: from,to
 netpro edge merge                     # collapse A→B / B→A duplicates
 ```
 
-The web UI is **Edges** in the navigation (`/edges`, `GET/POST /api/edges`).
-On a contact page, **Also met at…** records event attendance and links them
-to others already marked at that event.
+Edge management is CLI-first (the `/edges` page was removed in Phase 24);
+the **Network** and **People** pages visualize the graph the CLI maintains.
 
 ## Find a warm intro (v2.0 Phase 3)
 
@@ -294,15 +264,13 @@ one-way). `--draft` reuses the outreach credentials from `netpro config` /
 the environment and remains **draft-only**: NetPro composes, you review and
 send.
 
-The web app has **Graph** in the navigation (`/graph`): a target picker
-(search the contact list or type any name/email/id), the ranked chain cards,
-and a one-click **Draft intro request** link that pre-fills the outreach
-composer with the right recipient, context and ask. `/graph/<contactId>`
-shows one person's centrality, community, and every link they have (pending
-rows included, so you can confirm right there). The same data is available
-over the owner-only JSON APIs `GET /api/graph/overview` and
-`GET /api/graph/paths?target=&from=&depth=` (the web API caps depth at 6;
-the CLI accepts the engine's full 1–8).
+The **Pathfinder** page (`/pathfinder`) is the web surface for this: a target
+picker (search the contact list or type any name/email/id), the ranked chain
+cards, and a **First ask** on each path (the `/graph` page and its
+`/api/graph/overview` + `/api/graph/paths` routes were removed in Phase 24; the
+standalone server serves `GET /api/graph`, `GET /api/graph/path`, and
+`GET /api/graph/visualization`, and the page caps depth at 6 while the CLI
+accepts the engine's full 1–8).
 
 ## Find who has the skills you need (v2.0 Phase 5)
 
@@ -340,14 +308,10 @@ credentials and may only pick from the same taxonomy; if the model fails the
 heuristic result still stands and the failure is reported. It is off unless
 you ask for it.
 
-The web app has **Skills** in the navigation (`/skills`): the target form,
-the coverage table (each name links to the contact and to a warm-intro
-search), the gaps, the ranked matches, a one-click **Derive skills** panel,
-and — with no target — a map of what your network collectively knows. Skill
-tags with their evidence appear on every contact page (a stored skill the
-current text no longer supports is drawn dashed with a `?`). The same data is
-available over the owner-only JSON APIs `GET /api/skills/gap?role=&description=&skills=[&contact=]`
-and `POST /api/skills/extract` (`{ mode?, contact?, dryRun? }`).
+The `/skills` page and its `/api/skills/*` routes were removed in Phase 24 —
+skills are now CLI-first (`netpro skills …` above). Skill tags still surface
+on the **Search** results and **People** pages, which the standalone server
+feeds.
 
 ## Events and who was there (v2.0 Phase 6)
 
@@ -384,20 +348,14 @@ Two rules worth knowing:
 
 - **An attendee list is evidence of attendance, not of a meeting.** The
   `met_at_event` edges an import creates are **pending** — confirm the ones
-  you believe on `/edges`. A manual `netpro events link` is `confirmed`,
-  because that is you speaking rather than an export file.
+  you believe with `netpro edge confirm`. A manual `netpro events link` is
+  `confirmed`, because that is you speaking rather than an export file.
 - Pairwise linking is capped at 250 edges per event per run; when a large
   event hits the cap the summary says so instead of quietly writing a
   fraction.
 
-The web app has **Events** in the navigation (`/events`): the list with
-network overlap, **Where to go next** (ranked 0.6 × people you know, 0.2 ×
-industry fit, 0.2 × timing, each score explained), a CSV import panel that
-previews before it writes, and `/events/<id>` for the attendee list, the
-unmatched rows, and a re-check button. Each contact page now lists the events
-you crossed paths at. The data is also available over the owner-only JSON
-APIs `GET/POST /api/events`, `GET/DELETE /api/events/[id]`,
-`POST /api/events/[id]/match` and `POST/DELETE /api/events/[id]/attendees`.
+The `/events` page and its `/api/events/*` routes were removed in Phase 24 —
+events are CLI-first (`netpro events …` above).
 
 ## Draft AI outreach
 
@@ -416,9 +374,8 @@ netpro outreach --name "Pat Lee" --email pat@newco.com --company NewCo --role CT
 netpro outreach --to "Jane Doe" --json           # scriptable JSON output
 ```
 
-The web app drafts from the **Outreach** page (`/outreach`, backed by
-`POST /api/outreach`) — pick a contact or fill in a new recipient, choose a
-tone, and add context. Configure the server with `AI_PROVIDER`,
+The `/outreach` page was removed in Phase 24 — drafting is CLI-first
+(`netpro outreach` above). Configure the server with `AI_PROVIDER`,
 `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`), optionally `OPENAI_BASE_URL` for an
 OpenAI-compatible endpoint, and `OPENAI_MODEL`/`ANTHROPIC_MODEL` overrides; the
 **Settings** page shows which integrations are configured.
@@ -428,8 +385,9 @@ OpenAI-compatible endpoint, and `OPENAI_MODEL`/`ANTHROPIC_MODEL` overrides; the
 NetPro v1.5 keeps a per-contact interaction history — email, meetings, calls,
 notes, LinkedIn messages, intros — with a computed relationship score, plus
 follow-up reminders with due-today/overdue/upcoming views. The web CRM lives at
-**Contacts** in the navigation (`/contacts`, `/contacts/[id]`); from the
-terminal, `netpro track` speaks the same language:
+**People** in the navigation (`/people`, `/people/[id]` — the read-only
+Phase 24 successors of `/contacts`); from the terminal, `netpro track` speaks
+the same language:
 
 ```bash
 # Log yesterday's coffee — meeting defaults to inbound + in_person
@@ -467,8 +425,8 @@ remember, **NetPro drafts, you send**. Every message is rendered per recipient
 from whitelisted merge variables (`{{firstName}}`, `{{company}}`, `{{role}}`,
 `{{headline}}`, `{{location}}`, `{{industry}}`, `{{email}}`, `{{fullName}}`,
 `{{lastName}}`); no SMTP, no secrets, nothing leaves your machine automatically.
-The web UI is at **Campaigns** in the navigation (`/outreach/campaigns`,
-`/outreach/campaigns/[id]`); the CLI commands:
+Campaigns are CLI-first since Phase 24 (the `/outreach/campaigns` pages were
+removed); the CLI commands:
 
 ```bash
 # Create a draft campaign: one message, recipients from a search snapshot
@@ -512,29 +470,20 @@ drip times are advice shown in the UI — nothing is sent automatically.
 
 ## Create your profile card
 
-After signing in, open **Profile card** in the navigation (`/settings/card`):
+Phase 24 removed the `/settings/card` editor and the public `/card` page from
+the Web UI, so the profile card is now generated from the CLI (portable HTML +
+vCard). Use the fictional example in
+[`docs/examples/profile.json`](examples/profile.json) as the JSON source and
+replace its details (see the CLI section below).
 
-1. Enter your own public name, headline, biography, role/company/location, and
-   optional email, phone, and up to six HTTP(S) links. Nothing is prefilled from
-   your imported contacts or GitHub account.
-2. Use the **Private preview** to review the card. **Save draft** persists edits
-   without publishing them or changing an existing live card.
-3. Check the publication confirmation and click **Publish card** (or **Publish
-   changes**). The current form is saved and published together.
-4. Share `/card`. Visitors do not need an account; **Save contact** downloads
-   `/card/vcard` as a vCard 3.0 file.
-5. **Unpublish** immediately makes both public URLs return 404. Your saved draft
-   is retained; edits you have not saved also stay in the current editor.
-
-Every filled field on a published card is public, including email/phone and
-contact downloads. Private draft changes stay private until you publish again.
-Cards request `noindex, nofollow` and do not track viewers or load third-party
-images, but `noindex` is **not** access control. Unpublishing cannot revoke copies
-that someone has already downloaded, cached independently, or screenshotted.
+Every filled field on a generated card is public, including email/phone and
+contact downloads, so treat the generated file like any other public asset —
+`noindex` is **not** access control, and republishing cannot revoke copies
+someone has already downloaded, cached independently, or screenshotted.
 
 ### Portable HTML and vCard (CLI)
 
-Download **profile JSON** from the editor, or copy the fictional example in
+Copy the fictional example in
 [`docs/examples/profile.json`](examples/profile.json) and replace its details:
 
 ```bash
@@ -564,9 +513,9 @@ Input is limited to 32 KiB, six links, a 2,000-character bio, and bounded
 single-line fields. URLs must be absolute HTTP(S), without embedded credentials.
 
 Both SQLite and Postgres receive the additive `profile_cards` migration on the
-next CLI database open or web server startup. The web editor uses the web
-app’s configured database; the offline `card` command never reads or changes
-that database.
+next CLI database open or server startup. The offline `card` command never
+reads or changes the database; the server no longer exposes the old `/card`
+routes (removed in Phase 24).
 
 ## Profile views (v2.5)
 
@@ -586,31 +535,15 @@ node apps/cli/dist/index.js card --views --days 30
 node apps/cli/dist/index.js analyze --views      # the views section of the report
 ```
 
-In the web app: the **Dashboard** renders a "Profile views" strip (totals,
-sparkline, top referrers, recent views), and **Settings → Card** has the full
-analytics tables (7/30/90-day windows, show/hide-bots). `GET /api/card/views`
-is the owner-only API behind both.
-
-Track where views come from:
-
-1. **Embed the pixel** — copy the snippet from **Settings → Card → Tracking**
-   (built from your instance's origin) and paste it before `</body>` on your
-   blog or portfolio. It is one 1-pixel request, no JavaScript:
-
-   ```html
-   <img src="https://your-app.example.com/api/card/pixel.gif?p=blog" width="1" height="1" alt="">
-   ```
-
-2. **Share a signed link** — `https://your-app.example.com/card?v=…`
-   (minted on **Settings → Card**) attributes visits to a specific contact in
-   your "known visitors" list. Tokens are signed by your instance, expire
-   after 30 days, and a link to an unknown or deleted contact is ignored.
-   HTML cards can opt into the pixel with
-   `card --generate --pixel-url https://your-app.example.com`.
-
-Operator controls (server environment): `NETPRO_DISABLE_VIEWS=true` keeps the
-beacons answering but stores nothing; `NETPRO_VIEW_SALT` sets the hash salt
-(default: `NEXTAUTH_SECRET`). See [deployment.md](deployment.md) for details.
+The view-tracking *beacons* (`/api/card/pixel.gif`, `/api/card/view`) and the
+`/card` page lived in the old Web UI and were removed in Phase 24. View
+analytics remain a CLI-first feature (`netpro card --views`, `netpro analyze
+--views`); HTML cards can still embed a pixel if you host the beacon yourself
+(`card --generate --pixel-url https://your-app.example.com`). Operator
+controls (server environment): `NETPRO_DISABLE_VIEWS=true` keeps beacons
+answering but stores nothing; `NETPRO_VIEW_SALT` sets the hash salt (default
+falls back to a built-in constant). See
+[deployment.md](deployment.md) for details.
 
 ## Content tracker (v2.5)
 
@@ -639,11 +572,8 @@ node apps/cli/dist/index.js content show my-post --metrics
 node apps/cli/dist/index.js content analyze --days 30
 ```
 
-In the web app: the **Content** page (`/content`) lists and filters your
-library with an "At a glance" overview; each piece (`/content/[id]`) shows
-its snapshot history, the contacts it involves (mentions), and forms to
-record numbers. The dashboard renders a "Content" strip, and contacts pages
-list the content a person is part of.
+The `/content` page and its `/api/content/*` routes were removed in Phase 24 —
+content tracking is CLI-first (`netpro content …` above).
 
 **Providers:** v2.5 ships `manual` (always available) and `rss` (import)
 built in. `devto`, `twitter`, and `github` are **disabled stubs** —
@@ -682,10 +612,10 @@ netpro plugin enable example-event-discovery --i-have-reviewed-permissions
 netpro plugin update example-event-discovery
 ```
 
-Prefer the web UI? `/settings/plugins` (admin) has the same flow: browse the
-marketplace, install, review the permissions dialog, enable. Plugin secrets
-live in the encrypted vault (`/settings/keys`) as `plugin.<name>.<key>`. To
-self-host the index or publish your own plugin, see
+Plugins are CLI-first since Phase 24 (the `/settings/plugins` and
+`/settings/keys` pages were removed); plugin secrets live in the encrypted
+vault as `plugin.<name>.<key>`. To self-host the index or publish your own
+plugin, see
 **[deployment.md](deployment.md#plugin-marketplace-v30-phase-6)** and
 `marketplace/README.md`.
 
@@ -714,11 +644,11 @@ npm run build && npm run db:migrate    # build once, migrate once, then start
 
 # …or the containerised self-hosted path:
 cp .env.example .env
-# Edit .env — POSTGRES_PASSWORD and APP_URL are enough to run.
-# Add NETPRO_AUTH_MODE=github + the GitHub variables for remote sign-in.
+# Edit .env — POSTGRES_PASSWORD is enough to run locally.
 docker compose build
 docker compose up -d
-curl http://localhost:3000/api/health
+curl http://localhost:3000/            # Web UI (pure client)
+curl http://localhost:3777/api/health  # standalone NetPro API
 ```
 
 > SQLite is the local default (and fine on a VPS or a container with a

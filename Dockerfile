@@ -115,7 +115,27 @@ COPY --from=builder /app/node_modules/better-sqlite3 ./node_modules/better-sqlit
 # bindings and file-uri-to-path are better-sqlite3's own runtime requires.
 COPY --from=builder /app/node_modules/bindings ./node_modules/bindings
 COPY --from=builder /app/node_modules/file-uri-to-path ./node_modules/file-uri-to-path
+# pg is CommonJS that resolves its backends dynamically, so tsup keeps it
+# external (see apps/cli/tsup.config.ts). It used to survive here only by
+# accident: Next.js's standalone trace pulled pg and its transitive deps into
+# the image because the Web UI imported @netpro/db. Phase 24 removed those
+# imports, so the Web UI is a pure client and the trace no longer carries pg —
+# the `netpro migrate` job then died with "Cannot find module 'pg-types'". Copy
+# pg's full runtime closure explicitly. Keep this list in sync with the `pg`
+# `dependencies` in its package.json; apps/cli/src/bundle.test.ts asserts it.
 COPY --from=builder /app/node_modules/pg ./node_modules/pg
+COPY --from=builder /app/node_modules/pg-types ./node_modules/pg-types
+COPY --from=builder /app/node_modules/pg-int8 ./node_modules/pg-int8
+COPY --from=builder /app/node_modules/postgres-array ./node_modules/postgres-array
+COPY --from=builder /app/node_modules/postgres-bytea ./node_modules/postgres-bytea
+COPY --from=builder /app/node_modules/postgres-date ./node_modules/postgres-date
+COPY --from=builder /app/node_modules/postgres-interval ./node_modules/postgres-interval
+COPY --from=builder /app/node_modules/xtend ./node_modules/xtend
+COPY --from=builder /app/node_modules/pg-protocol ./node_modules/pg-protocol
+COPY --from=builder /app/node_modules/pg-pool ./node_modules/pg-pool
+COPY --from=builder /app/node_modules/pg-connection-string ./node_modules/pg-connection-string
+COPY --from=builder /app/node_modules/pgpass ./node_modules/pgpass
+COPY --from=builder /app/node_modules/split2 ./node_modules/split2
 # Next.js's standalone output already places the workspace packages (and the
 # committed migration SQL) at /app/packages/db, which is one of the resolver's
 # candidate paths, so no extra copy of the migrations is needed here.
@@ -147,7 +167,10 @@ EXPOSE 3000 3777
 # though the server is up and answering fine on 127.0.0.1. Verified directly
 # with `docker exec ... wget http://localhost:3000/...` (fails) vs
 # `wget http://127.0.0.1:3000/...` (succeeds) against a running container.
+# Phase 24 — the Web UI has no /api routes of its own, so the healthcheck
+# probes the landing page. The standalone @netpro/server (compose `server`
+# service) carries its own /api/health probe.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
+  CMD wget -qO- http://127.0.0.1:3000/ || exit 1
 
 CMD ["node", "apps/web/server.js"]

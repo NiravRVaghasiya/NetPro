@@ -37,8 +37,14 @@ export function createHunterProvider(apiKey: string | null): EnrichmentProvider 
       if (!response.ok) {
         throw new Error(`Hunter.io email-finder failed: ${response.status}`);
       }
-      const json = await response.json();
-      const data = json.data;
+      const json = (await response.json()) as {
+        data?: {
+          score?: number;
+          email?: string;
+          verification?: { status?: string };
+        };
+      };
+      const data = json.data ?? {};
 
       return {
         provider: 'hunter',
@@ -60,6 +66,6 @@ async function findDomain(company: string, apiKey: string): Promise<string | und
 
   const response = await fetch(url);
   if (!response.ok) return undefined;
-  const json = await response.json();
+  const json = (await response.json()) as { data?: { domain?: string } };
   return json.data?.domain;
 }

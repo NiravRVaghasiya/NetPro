@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 #
-# Phase 21 — Web UI smoke against the production standalone build.
+# Phase 21/24 — Web UI smoke against the production standalone build.
 #
 # Stages apps/web/.next/standalone exactly like the Docker runner stage
 # (server.js + traced node_modules + static + public), starts it on
-# 127.0.0.1 with a scratch SQLite install, and asserts:
+# 127.0.0.1 with a scratch SQLite install, and asserts the Phase 24 contract:
 #
 #   • the landing page loads and is the local-first on-ramp
-#   • /login loads
-#   • the private Observatory renders for the trusted loopback operator
-#   • the UI's /api/health answers against SQLite (Web UI loading + data path)
+#   • /login is gone (Auth.js flows removed in Phase 24)
+#   • the Web UI has no /api/* routes of its own — it is a pure client of the
+#     standalone @netpro/server (the server smoke covers /api/health)
+#   • the private Observatory renders as a client shell (server-driven data)
 #   • production security headers are present
 #
 # Requires a full build first:  npm run build -w apps/web && npm run build -w @netpro/cli
@@ -37,8 +38,10 @@ assert_contains() {
   grep -Eq "$pattern" "$file" || die "$message"
 }
 
-# Migrate the scratch SQLite database the UI's data routes will open.
-step 'init scratch install for the UI'
+# Migrate the scratch SQLite database the CLI uses (the Web UI itself no
+# longer opens a database — Phase 24 — but the CLI still proves the install
+# works end to end).
+step 'init scratch install for the CLI'
 node "$CLI" init >"$WORKDIR/init.txt"
 assert_contains "$WORKDIR/init.txt" 'NetPro initialized'
 
@@ -58,14 +61,14 @@ BASE="http://127.0.0.1:$PORT"
 step "starting standalone Next.js server on $BASE"
 (
   cd "$STANDALONE"
-  HOSTNAME=127.0.0.1 PORT="$PORT" NODE_ENV=production NETPRO_TRUST_LOCAL_UI=1 \
+  HOSTNAME=127.0.0.1 PORT="$PORT" NODE_ENV=production \
     node apps/web/server.js
 ) >"$WEB_LOG" 2>&1 &
 SERVER_PID=$!
 SMOKE_PIDS+=("$SERVER_PID")
 SERVER_LOG="$WEB_LOG"
 
-wait_for_http "$BASE/login"
+wait_for_http "$BASE/"
 ok 'web server is listening'
 sed 's/^/    /' "$WEB_LOG" | tail -8
 
@@ -78,24 +81,21 @@ grep -qi 'content-security-policy' "$WORKDIR/landing.headers" || die 'CSP header
 grep -qi 'x-content-type-options: nosniff' "$WORKDIR/landing.headers" || die 'nosniff header missing'
 ok 'landing page renders with production security headers'
 
-step '/login loads'
-code="$(curl -s -o "$WORKDIR/login.html" -w '%{http_code}' "$BASE/login")"
-[ "$code" = '200' ] || die "/login expected 200, got $code"
-assert_contains "$WORKDIR/login.html" 'NetPro'
-ok '/login renders'
+step '/login is gone (Auth.js removed in Phase 24)'
+code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/login")"
+[ "$code" = '404' ] || die "/login expected 404 (Auth.js flows removed), got $code"
+ok '/login returns 404'
 
-step 'UI data path: /api/health against SQLite'
-curl -fsS "$BASE/api/health" >"$WORKDIR/health.json"
-cat "$WORKDIR/health.json" | sed 's/^/    /'; echo
-assert_contains "$WORKDIR/health.json" '"status":"healthy"'
-assert_contains "$WORKDIR/health.json" '"dialect":"sqlite"'
-ok 'Web UI health endpoint is healthy on SQLite'
+step 'the Web UI has no /api routes of its own (pure client)'
+code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/health")"
+[ "$code" = '404' ] || die "/api/health expected 404 (no duplicated API surface), got $code"
+ok '/api/health returns 404 — the server owns the API'
 
-step 'Observatory renders for the trusted loopback operator'
+step 'Observatory renders as a client shell'
 code="$(curl -s -o "$WORKDIR/obs.html" -w '%{http_code}' "$BASE/observatory")"
-[ "$code" = '200' ] || die "/observatory expected 200 in local-trust mode, got $code"
+[ "$code" = '200' ] || die "/observatory expected 200, got $code"
 assert_contains "$WORKDIR/obs.html" 'Observatory|NetPro'
-ok 'Observatory page loads without a sign-in from loopback'
+ok 'Observatory page loads (server-driven data)'
 
 step 'static Next assets are served'
 asset="$(grep -oE '/_next/static/[^"]+\.js' "$WORKDIR/landing.html" | head -1)"

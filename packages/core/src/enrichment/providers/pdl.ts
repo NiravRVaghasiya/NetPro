@@ -33,7 +33,19 @@ export function createPDLProvider(apiKey: string | null): EnrichmentProvider {
       if (!response.ok) {
         throw new Error(`People Data Labs enrich failed: ${response.status}`);
       }
-      const person = await response.json();
+      const person = (await response.json()) as {
+        likelihood?: number;
+        work_email?: string;
+        personal_emails?: string[];
+        job_company_name?: string;
+        job_title?: string;
+        job_title_levels?: string[];
+        location_name?: string;
+        location_country?: string;
+        linkedin_url?: string;
+        github_url?: string;
+        twitter_url?: string;
+      };
 
       return {
         provider: 'pdl',

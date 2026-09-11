@@ -6,6 +6,18 @@
 [![Release: v3.0.0](https://img.shields.io/badge/Release-v3.0.0-2ea44f)](https://github.com/NiravRVaghasiya/NetPro/releases)
 [![Changelog](https://img.shields.io/badge/Changelog-CHANGELOG.md-8A2BE2)](CHANGELOG.md)
 
+> **Phase 24 (local-first) — the Web UI is a pure client.** The Web UI's own
+> API routes, Auth.js sign-in, and legacy pages (`/dashboard`, `/contacts`,
+> `/edges`, `/graph`, `/skills`, `/events`, `/content`, `/outreach`,
+> `/settings/*` sub-pages, the public `/card`) were removed: it now renders
+> Observatory, Network, People, Search, Pathfinder, Activity, Scan, Import,
+> and Settings entirely from the standalone server. Everything those legacy
+> pages did is still available through the CLI (`netpro …`). See
+> [docs/phase-24-deprecate-old-web.md](docs/phase-24-deprecate-old-web.md).
+> The `/dashboard`, `/settings/*`, `/api/*`, and Auth.js / GitHub OAuth
+> references in the release history below describe the releases that shipped
+> them, before this cleanup — the current architecture has none of them.
+
 **v1.0 (Phases 1–6), v1.5 (Phases 7–8), v2.0 "The Strategist", v2.5
 "The Observer", and v3.0 "The Platform" are implemented** on top of the v0.1-alpha scaffold:
 
@@ -105,15 +117,14 @@
   `/api/campaigns`). No SMTP, no stored secrets, nothing sent automatically.
 
 > **Local use needs no setup at all:** `netpro init` + `netpro serve` create an
-> installation identity and trust this machine. GitHub sign-in is an optional
-> integration for instances reachable from elsewhere —
-> `NETPRO_AUTH_MODE=github` plus `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`,
-> and (for the break-glass owner) `NETPRO_OWNER_GITHUB_ID`. See
+> installation identity and trust this machine. To reach an instance from
+> elsewhere, use the server's `token` mode (or `open` behind your own auth) —
+> Phase 24 removed the Web UI's Auth.js sign-in entirely. See
 > [docs/phase-5-authentication.md](docs/phase-5-authentication.md).
 
-The full monorepo (CLI + web, dual-dialect Drizzle database, a local
-installation identity with optional GitHub OAuth via Auth.js) builds, lints,
-typechecks, and tests successfully — **1698 tests**,
+The full monorepo (CLI + web, dual-dialect Drizzle database, and a local
+installation identity — GitHub OAuth/Auth.js removed in Phase 24) builds,
+lints, typechecks, and tests successfully — **1698 tests**,
 plus 57 more in live PostgreSQL suites that run in CI against a real database
 (including a performance pass at 5k contacts / 20k edges / 10k views / 1k
 content items, and the view-beacon ingest suite). **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
@@ -425,7 +436,7 @@ Docker/team deployments via `~/.netpro/config.toml` or environment. See
 
 ## Structure
 
-- `apps/web` — Next.js app (App Router), local-first auth with optional GitHub OAuth via Auth.js
+- `apps/web` — Next.js app (App Router), a pure client of the standalone NetPro server (no database, no API routes, no Auth.js — see `docs/phase-24-deprecate-old-web.md`)
 - `apps/cli` — commander CLI (`netpro init|serve|status|token|config|import|enrich|search|reindex|outreach|analyze|path|track|edge|campaign|export|card|migrate|skills|events|content`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
 - `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths), the Phase 3 pathfinder surface (ranking, first-ask, per-contact graph position), the v2.0 skills taxonomy/gap analyzer, the Phase 6 event matcher (CSV import, attendee matching, recommendations), the v2.5 profile-view beacon + viewer analytics (privacy-hardened ingestion, windowed stats, timelines, known-visitor matches), the v2.5 content tracker data model (URL identity, CSV/feed import, metrics snapshots, mentions, provider interface), the v2.5 daily retention purge (90-day views / 365-day snapshots with latest-per-piece survival, at-most-once-per-24 h, audit-logged), and v3.0 Phase 2's workspace-scoped CRM engine (explicit `workspace_id` predicates threading an optional `WorkspaceScope`, authorship on interactions/follow-ups, and a cross-tenant scope-guard suite)

@@ -327,7 +327,7 @@ describe('downloadAndVerifyTarball (Phase 6)', () => {
     const tgz = fixtureTarGz({});
     const fetchImpl: FetchImpl = async (url) => {
       expect(url).toBe('https://cdn.invalid/p.tgz');
-      return new Response(tgz as unknown as BodyInit, { status: 200 });
+      return new Response(new Uint8Array(tgz), { status: 200 });
     };
     await expect(downloadAndVerifyTarball('https://cdn.invalid/p.tgz', sha256Hex(tgz), { fetchImpl })).resolves.toEqual(
       tgz

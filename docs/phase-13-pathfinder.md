@@ -59,11 +59,11 @@ New first-class page in the primary nav (Observatory · Network · Search ·
 - Server-first (`GET /api/graph/path`), core fallback when `netpro serve`
   is down. A server 4xx (unknown contact, bad selector) renders as the
   answer; only network failures and 5xx fall back.
-- The contact datalist is fed best-effort from the server (`/api/search`
-  top-by-score) with a direct-core fallback.
-- Cross-links: Network's "Pathfinder full →", the Observatory's Pathfinder
-  entry, and the legacy `/graph` header all point here; `/graph` and
-  `/network?target=` keep working until Phase 24.
+- The contact datalist is fed from the server (`/api/search` top-by-score).
+- Cross-links: Network's "Pathfinder full →" and the Observatory's Pathfinder
+  entry point here. Phase 24 removed the legacy `/graph` page and the
+  `/network?target=` compatibility path; the pathfinder page itself is the
+  only surface now.
 
 ## Exit criteria (plan)
 

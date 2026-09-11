@@ -42,8 +42,10 @@ created_at = "2026-09-10T17:25:30.542Z"
 ```
 
 It is generated once and never rewritten (hand edits and comments survive), and
-`netpro status` prints it. The Web UI mirrors it into a local owner account so
-workspaces, activity logs, and permissions work with no sign-in at all.
+`netpro status` prints it. The Web UI reads it from `GET /api/identity` (Phase
+24 — the Web UI no longer writes to the database, so the owner account comes
+from the server, and workspaces, activity logs, and permissions work with no
+sign-in at all).
 
 If you ever do expose the server beyond this machine, callers need the access
 token instead:
@@ -98,10 +100,11 @@ Three modes, set with `NETPRO_AUTH_MODE` or `[auth] mode` in `config.toml`:
 | `token`           | Every caller, loopback included, needs the access token.                                                                  |
 | `open`            | Nobody is authenticated — only behind your own auth (reverse proxy, VPN, private network).                                |
 
-**GitHub OAuth is never required.** It remains available to the Web UI as an
-optional integration (`NETPRO_AUTH_MODE=github` with `GITHUB_CLIENT_ID`,
-`GITHUB_CLIENT_SECRET`, `NEXTAUTH_SECRET`, and optionally
-`NETPRO_OWNER_GITHUB_ID`) for instances reachable from other machines.
+**GitHub OAuth is never required.** Phase 24 removed the Web UI's Auth.js flows
+entirely — the Web UI is a pure client of this server and performs no
+authentication of its own. To expose a server beyond this machine, use `token`
+mode (or `open` behind your own reverse proxy / VPN), or put your own auth in
+front of the Web UI.
 
 ## Configuration
 
