@@ -47,6 +47,7 @@ export function defaultConfigToml(): string {
 [server]
 # host = "127.0.0.1"              # Loopback by default — expose deliberately.
 # port = 3777
+# allowed_origins = "https://ui.example.com"   # CSV browser origins (default: loopback only)
 
 [auth]
 # mode = "local"                  # local (default) | token | open

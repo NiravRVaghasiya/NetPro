@@ -129,6 +129,43 @@ describe('runServe (netpro serve core)', () => {
     ).rejects.toThrow(/Unknown auth mode/);
   });
 
+  it('names the exposure policy on a remote bind, stays quiet on loopback (phase 23)', async () => {
+    const remote: string[] = [];
+    const remoteHandle = await runServe({
+      env: { ...scratchEnv(), NETPRO_AUTH_MODE: 'open' },
+      host: '0.0.0.0',
+      port: 0,
+      log: (line) => remote.push(line),
+      signals: [],
+    });
+    handles.push(remoteHandle);
+    const text = remote.join('\n');
+    expect(text).toMatch(/Remote bind \(0\.0\.0\.0\): browser origins: loopback origins only/);
+    expect(text).toMatch(/rate limit: 600 req\/60s per IP/);
+    expect(text).toContain('No TLS here — terminate HTTPS at a reverse proxy');
+    expect(text).toContain('docs/deployment.md');
+
+    // Explicit knobs show up verbatim.
+    const custom: string[] = [];
+    const customHandle = await runServe({
+      env: {
+        ...scratchEnv(),
+        NETPRO_AUTH_MODE: 'open',
+        NETPRO_ALLOWED_ORIGINS: 'https://ui.example.com',
+        NETPRO_HSTS: 'true',
+      },
+      host: '0.0.0.0',
+      port: 0,
+      log: (line) => custom.push(line),
+      signals: [],
+    });
+    handles.push(customHandle);
+    const customText = custom.join('\n');
+    expect(customText).toContain('browser origins: https://ui.example.com');
+    expect(customText).toContain('HSTS: on');
+    expect(customText).not.toContain('No TLS here');
+  });
+
   it('warns that open mode answers anyone (phase 5)', async () => {
     const lines: string[] = [];
     const handle = await runServe({

@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { writeFileSync } from "node:fs";
+import { chmodSync, writeFileSync } from "node:fs";
 import type { SqliteConn, PgConn } from "@netpro/db";
 import { exportContactsCSV } from "@netpro/core/src/export";
 import {
@@ -28,7 +28,11 @@ export async function executeExport(
   const csv = exportContactsCSV(contacts);
 
   if (options.output) {
-    writeFileSync(options.output, csv, "utf-8");
+    // Phase 23 — an export is the network in a file: owner-only, like the
+    // database and backups. mode covers creation; chmodSync covers overwrite
+    // of a pre-existing (possibly looser) file.
+    writeFileSync(options.output, csv, { encoding: "utf-8", mode: 0o600 });
+    chmodSync(options.output, 0o600);
     return {
       output: `✓ Exported ${contacts.length} contacts to ${options.output}`,
       csv,

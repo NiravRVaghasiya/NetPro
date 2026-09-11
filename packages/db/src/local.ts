@@ -33,7 +33,7 @@
 // like it is running on a hosted platform. The dialect is what the user (or
 // their config file) says it is, defaulting to SQLite.
 
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
@@ -96,7 +96,14 @@ export function ensureSqliteDir(sqlitePath: string): void {
   mkdirSync(dirname(sqlitePath), { recursive: true });
 }
 
-/** Create `~/.netpro` plus its fixed subdirectories. Idempotent. */
+/**
+ * Create `~/.netpro` plus its fixed subdirectories. Idempotent.
+ *
+ * Phase 23 — the install directory holds the database, the access token, and
+ * backups: the whole professional network in one place. Everything here is
+ * mode 0700 (owner-only), applied on every call so installs created before
+ * this phase tighten up the next time they are touched.
+ */
 export function ensureNetProHome(env: NodeJS.ProcessEnv = process.env): {
   home: string;
   logs: string;
@@ -107,6 +114,9 @@ export function ensureNetProHome(env: NodeJS.ProcessEnv = process.env): {
   const keys = join(home, 'keys');
   mkdirSync(logs, { recursive: true });
   mkdirSync(keys, { recursive: true });
+  chmodSync(home, 0o700);
+  chmodSync(logs, 0o700);
+  chmodSync(keys, 0o700);
   return { home, logs, keys };
 }
 
@@ -337,7 +347,7 @@ export function resolveAuthMode(env: NodeJS.ProcessEnv = process.env): LocalAuth
 export type LocalConfig = {
   database?: LocalDatabaseConfig;
   /** Validated by readLocalConfig: host is a string, port an integer 1–65535. */
-  server?: { host?: string; port?: number };
+  server?: { host?: string; port?: number; allowedOrigins?: string };
   installation?: LocalInstallationConfig;
   auth?: { mode?: LocalAuthMode };
   raw: TomlTable;
@@ -417,13 +427,31 @@ export function readLocalConfig(env: NodeJS.ProcessEnv = process.env): LocalConf
   if (dialect !== undefined || dbPath !== undefined || url !== undefined) {
     config.database = { dialect, path: dbPath, url };
   }
+  // Phase 23 — unknown [server] keys are rejected, not ignored: a typo in a
+  // security setting must never silently leave the default in force.
+  for (const key of Object.keys(serverTable)) {
+    if (!['host', 'port', 'allowed_origins'].includes(key)) {
+      throw new LocalConfigError(
+        `${path}: unknown key "${key}" in [server] ` +
+          `(NetPro understands host, port, allowed_origins)`
+      );
+    }
+  }
   const host = expectString('server', 'host', serverTable.host);
   const port = serverTable.port;
   if (port !== undefined && (typeof port !== 'number' || !Number.isInteger(port) || port <= 0 || port > 65535)) {
     throw new LocalConfigError(`${path}: [server] port must be an integer between 1 and 65535`);
   }
-  if (host !== undefined || port !== undefined) {
-    config.server = { host, port: port as number }; // validated above
+  // A comma-separated origin list (the config subset has no arrays):
+  // allowed_origins = "https://ui.example.com, https://netpro.example.com".
+  // NETPRO_ALLOWED_ORIGINS wins over this when both are set.
+  const allowedOrigins = expectString('server', 'allowed_origins', serverTable.allowed_origins);
+  if (host !== undefined || port !== undefined || allowedOrigins !== undefined) {
+    config.server = {
+      host,
+      port: port as number, // validated above
+      ...(allowedOrigins === undefined ? {} : { allowedOrigins }),
+    };
   }
 
   // ── [installation] — local identity (Phase 5) ──

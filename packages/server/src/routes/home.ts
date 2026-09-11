@@ -10,6 +10,7 @@
 
 import type { ServerResponse } from 'node:http';
 import { sendText } from '../middleware/json';
+import { applyConsoleCsp } from '../middleware/security';
 
 export const SERVER_VERSION = '3.0.0';
 
@@ -164,6 +165,7 @@ export function renderLockedHtml(info: LockedInfo): string {
 }
 
 export function handleLocked(res: ServerResponse, info: LockedInfo): void {
+  applyConsoleCsp(res); // Phase 23 — setHeader merges with sendText's writeHead.
   sendText(res, 401, renderLockedHtml(info), 'text/html; charset=utf-8');
 }
 
@@ -176,5 +178,6 @@ function escapeHtml(value: string): string {
 }
 
 export function handleHome(res: ServerResponse, info: HomeInfo): void {
+  applyConsoleCsp(res); // Phase 23 — setHeader merges with sendText's writeHead.
   sendText(res, 200, renderHomeHtml(info), 'text/html; charset=utf-8');
 }

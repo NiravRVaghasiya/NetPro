@@ -101,7 +101,9 @@ export function registerWebhookCommand(program: Command): void {
           console.log(`Created webhook ${wh.id}`);
           console.log(`URL: ${wh.url}`);
           if (isPrivateNetworkUrl(wh.url)) {
-            console.log('⚠️  Private-network target — allowed but flagged (self-hosted n8n/localhost).');
+            // Phase 23 — createWebhook rejects these unless the hatch is open,
+            // so reaching this line means deliberate opt-in. Say so.
+            console.log('Private-network target — allowed via NETPRO_WEBHOOKS_ALLOW_PRIVATE=1 (self-hosted n8n/localhost).');
           }
           console.log(`Events: ${wh.eventAllowlist.join(',')}`);
           console.log(`Status: ${wh.status}`);

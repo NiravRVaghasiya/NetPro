@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -95,6 +95,25 @@ describe('ensureNetProHome', () => {
       for (const p of [first.home, first.logs, first.keys]) {
         expect(existsSync(p)).toBe(true);
       }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('stores the install directory mode 0700 and tightens pre-existing installs (phase 23)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'netpro-home-'));
+    process.env.NETPRO_HOME = join(dir, 'home');
+    try {
+      const layout = ensureNetProHome();
+      for (const p of [layout.home, layout.logs, layout.keys]) {
+        expect(statSync(p).mode & 0o777).toBe(0o700);
+      }
+      // A pre-hardening install (world-readable) tightens on next touch.
+      chmodSync(layout.home, 0o755);
+      chmodSync(layout.keys, 0o755);
+      ensureNetProHome();
+      expect(statSync(layout.home).mode & 0o777).toBe(0o700);
+      expect(statSync(layout.keys).mode & 0o777).toBe(0o700);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -256,6 +275,25 @@ mode = "token"
 
     writeConfig(home, '[installation]\nid = 5\n');
     expect(() => readLocalConfig()).toThrow(/must be a non-empty string/);
+  });
+
+  it('reads [server] allowed_origins and rejects unknown server keys (phase 23)', () => {
+    const home = scratchHome();
+    writeConfig(
+      home,
+      '[server]\nallowed_origins = "https://ui.example.com, https://netpro.example.com"\n'
+    );
+    expect(readLocalConfig().server).toEqual({
+      host: undefined,
+      port: undefined,
+      allowedOrigins: 'https://ui.example.com, https://netpro.example.com',
+    });
+
+    writeConfig(home, '[server]\nallowed_origins = 42\n');
+    expect(() => readLocalConfig()).toThrow(/must be a non-empty string/);
+
+    writeConfig(home, '[server]\nallow_origin = "https://typo.example.com"\n');
+    expect(() => readLocalConfig()).toThrow(/unknown key "allow_origin" in \[server\]/);
   });
 
   it('surfaces TOML syntax errors with the file path and line number', () => {

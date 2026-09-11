@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@netpro/db/src/schema.sqlite';
@@ -42,5 +45,22 @@ describe('executeExport', () => {
 
   it('rejects an unsupported format', async () => {
     await expect(executeExport({ format: 'json' }, conn)).rejects.toThrow(/not yet supported/);
+  });
+
+  it('writes --output files mode 0600 (phase 23)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'netpro-export-'));
+    try {
+      const output = join(dir, 'contacts.csv');
+      const { csv } = await executeExport({ format: 'csv', output }, conn);
+      expect(csv).toContain('Jane Doe');
+      expect(statSync(output).mode & 0o777).toBe(0o600);
+      // Overwriting a looser pre-existing file tightens it too.
+      const { chmodSync } = await import('node:fs');
+      chmodSync(output, 0o644);
+      await executeExport({ format: 'csv', output }, conn);
+      expect(statSync(output).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

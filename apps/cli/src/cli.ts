@@ -18,6 +18,7 @@ import { registerCampaignCommand } from "./commands/campaign";
 import { registerCardCommand } from "./commands/card";
 import { registerExportCommand } from "./commands/export";
 import { registerMigrateCommand } from "./commands/migrate";
+import { registerBackupCommand, registerRestoreCommand } from "./commands/backup";
 import { registerSkillsCommand } from "./commands/skills";
 import { registerEventsCommand } from "./commands/events";
 import { registerContentCommand } from "./commands/content";
@@ -58,6 +59,8 @@ export function createProgram(): Command {
   registerExportCommand(program);
   registerCardCommand(program);
   registerMigrateCommand(program);
+  registerBackupCommand(program);
+  registerRestoreCommand(program);
   registerSkillsCommand(program);
   registerEventsCommand(program);
   registerContentCommand(program);

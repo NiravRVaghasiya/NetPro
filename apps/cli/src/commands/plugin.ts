@@ -368,6 +368,10 @@ export function registerPluginCommand(program: Command) {
       try {
         const updated = await enablePlugin(conn, name, scope);
         console.log(`Enabled ${updated.name}@${updated.version}`);
+        // Phase 23 — plugins load via dynamic import into this process: no
+        // sandbox, full access to the database. The review gate above is the
+        // trust decision; say what it means out loud, every time.
+        console.log('Plugins run in-process with full access to your NetPro data. Only enable plugins you trust.');
       } catch (e) {
         console.error((e as Error).message);
         process.exit(1);

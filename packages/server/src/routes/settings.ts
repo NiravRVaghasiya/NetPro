@@ -16,7 +16,13 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { SqliteConn, PgConn } from '@netpro/db';
-import { describeConn, netproHome, readLocalConfig, type LocalConfig } from '@netpro/db';
+import {
+  describeConn,
+  netproHome,
+  readLocalConfig,
+  redactPostgresUrl,
+  type LocalConfig,
+} from '@netpro/db';
 import { sendJson, readJsonBody } from '../middleware/json';
 import type { AuthPolicy } from '../auth/index';
 import type { ServerConfig } from '../config';
@@ -28,8 +34,16 @@ export type SettingsDeps = {
 };
 
 function serializeLocalConfig(raw: LocalConfig) {
-  // raw comes from readLocalConfig — already parsed, no secrets.
-  return raw;
+  // Phase 23 — raw comes from readLocalConfig, and [database] url can carry
+  // user:password@. Authenticated callers may see *that* a URL is configured
+  // and where it points, but never the credential inside it.
+  if (!raw.database || typeof raw.database !== 'object' || typeof raw.database.url !== 'string') {
+    return raw;
+  }
+  return {
+    ...raw,
+    database: { ...raw.database, url: redactPostgresUrl(raw.database.url) },
+  };
 }
 
 export async function handleGetSettings(
