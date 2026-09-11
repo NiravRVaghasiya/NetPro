@@ -1,453 +1,867 @@
 # NetPro
 
-> Your professional network, owned by you. Open source LinkedIn Premium alternative.
+**Your professional network, owned by you.** NetPro is a local-first, open-source
+alternative to LinkedIn Premium: import your connections, search them properly,
+understand the graph, keep the relationships alive — from a CLI, a local HTTP API,
+and a web UI that owns none of your data.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-3.0.0-informational.svg)](package.json)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
+[![CI](https://github.com/NiravRVaghasiya/NetPro/actions/workflows/ci.yml/badge.svg)](https://github.com/NiravRVaghasiya/NetPro/actions/workflows/ci.yml)
 
-> **Phase 24 (local-first) — the Web UI is a pure client.** The Web UI's own
-> API routes, Auth.js sign-in, and legacy pages (`/dashboard`, `/contacts`,
-> `/edges`, `/graph`, `/skills`, `/events`, `/content`, `/outreach`,
-> `/settings/*` sub-pages, the public `/card`) were removed: it now renders
-> Observatory, Network, People, Search, Pathfinder, Activity, Scan, Import,
-> and Settings entirely from the standalone server. Everything those legacy
-> pages did is still available through the CLI (`netpro …`). The
-> `/dashboard`, `/settings/*`, `/api/*`, and Auth.js / GitHub OAuth
-> references in the release history below describe the releases that shipped
-> them, before this cleanup — the current architecture has none of them.
+---
 
-**v1.0 (Phases 1–6), v1.5 (Phases 7–8), v2.0 "The Strategist", v2.5
-"The Observer", and v3.0 "The Platform" are implemented** on top of the v0.1-alpha scaffold:
+## Table of contents
 
-- **Phase 1 — Import, Enrichment & Export:** LinkedIn CSV import with
-  dedup/merge, three-provider contact enrichment (Hunter.io, People Data Labs,
-  Clearbit), and CSV export.
-- **Phase 2 — People Search:** faceted search over your contacts —
-  free-text query plus company/role/location/industry/seniority/email/score/
-  activity filters, relevance/score/recent/name sorting, facets, and
-  pagination — wired into both the CLI (`netpro search`) and the web app
-  (`/search`, `GET /api/search`). Portable SQL by default; v2.0 Phase 4 adds
-  the FTS5/`tsvector` and semantic arms behind the same entry point.
-- **Phase 3 — Network Analytics:** a composite network health score,
-  activity/dormancy breakdown, 12-month growth series, industry/company
-  diversity (Shannon entropy), company clusters, and the dormant-ties
-  reconnect list — computed in `packages/core/analytics` and surfaced through
-  `netpro analyze` and the web dashboard (`/dashboard`, `GET /api/analytics`).
-  Imports now persist LinkedIn's "Connected On" date, so growth reflects when
-  relationships actually formed.
-- **Phase 4 — AI Outreach (Drafting):** BYO-key AI message drafting for a
-  contact (by email/id/name) or an ad-hoc recipient — choose a tone
-  (professional/warm/casual/friendly), add context and your ask, and get a
-  ready-to-send subject + body. The engine lives in `packages/core/ai`
-  (OpenAI-compatible and Anthropic providers over plain `fetch`, no SDK
-  dependencies, no network in tests), surfaced through `netpro outreach` and
-  the web composer (`/outreach`, `POST /api/outreach`). NetPro **drafts** —
-  you review and send; nothing is emailed automatically, and the web app
-  reads keys only from server env vars (`/settings` shows integration status).
-- **Phase 5 — Profile Card:** an owner-only editor (`/settings/card`) with a
-  live preview, private drafts, explicit publication, and unpublishing. The
-  public `/card` page and `/card/vcard` download read only a separately
-  published snapshot — never imported contacts or unsaved/private edits.
-  `netpro card --generate --input profile.json` produces a standalone HTML
-  card offline; `--format vcard` exports a contact file. Shared validation,
-  rendering, and SQLite/Postgres persistence live in `packages/core/card`.
-  No remote avatars or new runtime dependencies; visitor tracking arrived
-  later as v2.5's privacy-preserving beacon (see below).
+- [What is NetPro?](#what-is-netpro)
+- [Feature highlights](#feature-highlights)
+- [Architecture](#architecture)
+- [Quickstart](#quickstart)
+- [The web UI](#the-web-ui)
+- [Where each capability lives](#where-each-capability-lives)
+- [CLI reference](#cli-reference)
+- [HTTP API](#http-api)
+- [Data model](#data-model)
+- [Configuration](#configuration)
+- [Deployment](#deployment)
+- [Privacy & security model](#privacy--security-model)
+- [Repository layout](#repository-layout)
+- [Development](#development)
+- [Project status](#project-status)
+- [Documentation](#documentation)
+- [License](#license)
 
-- **Phase 6 — Deployment & Release Readiness:** NetPro is now actually
-  deployable. An explicit `netpro migrate` deploy step, production security
-  headers, a readiness-aware `/api/health`, and a hardened Docker Compose
-  stack. See **[docs/deployment.md](docs/deployment.md)** — the recipe is the
-  same on any Node host.
+---
 
-  Verifying against a _real_ PostgreSQL server for the first time surfaced two
-  release-blocking bugs that a passing local build could never have shown:
+## What is NetPro?
 
-  1. **Concurrent migrations failed 5 of 6 cold starts.** Each instance ran
-     migrations at startup, so a deploy that starts many instances at once
-     raced against itself (`CREATE TABLE "account"`, and even
-     `CREATE SCHEMA IF NOT EXISTS`, which races with itself in Postgres). Now
-     serialized with a Postgres advisory lock, with a mutation-verified
-     regression test.
-  2. **Production authentication was completely broken.** Auth.js v5 derives
-     host trust from `AUTH_URL`/`AUTH_TRUST_HOST` — _not_ from
-     `NEXTAUTH_URL`, which is what NetPro's docs told operators to set. Every
-     self-hosted production request failed with `UntrustedHost`. Development
-     masked it.
+NetPro turns your **LinkedIn connections export** into a private, queryable
+network database and then gives you the tools a paid social network hides behind
+a subscription:
 
-  Also: `middleware.ts` → `proxy.ts` for Next.js 16, and the build now emits
-  **zero warnings** (was six).
+| Question | NetPro's answer |
+| --- | --- |
+| Who do I know, and who's gone quiet? | CRM contacts, relationship scores, dormancy analysis |
+| How do I find a specific person? | Hybrid search — substring + full-text + optional semantic, fused with RRF |
+| Who are the hubs, brokers and communities? | Louvain communities, degree & Brandes betweenness, components |
+| Who can introduce me to *X*? | Pathfinder: ranked warm-intro chains **and the first ask to make** |
+| Who should I reach out to, and what do I say? | Follow-up reminders + BYO-key AI drafting (drafts only — you send) |
+| Where should I go next? | Event matcher and event recommendations from attendee lists |
+| Is my writing landing? | Content tracker with metric snapshots and mentions |
+| What are we collectively missing? | Skills gap analyzer against a target role |
 
-- **Phase 4 (local-first) — No platform assumptions:** the hosted-platform
-  build path is gone (platform-specific deploy config, build wrappers, and
-  deploy build scripts removed), the database dialect is configured rather
-  than inferred, pooling is an explicit `NETPRO_SERVERLESS` switch, and the
-  viewer beacon reads generic proxy geo headers. See
-  [docs/local-first.md](docs/local-first.md).
+**Design principles**
 
-- **Phase 5 (local-first) — Authentication without OAuth:** local NetPro needs
-  no credentials. `netpro init` writes an installation identity to
-  `~/.netpro/config.toml` and a `0600` access token; requests from
-  `127.0.0.1` are the operator; `NETPRO_AUTH_MODE` selects `local` (default),
-  `token`, or `open`. GitHub OAuth is never required.
-  See [docs/local-first.md](docs/local-first.md).
+1. **Local-first.** `netpro init` creates `~/.netpro` (config, SQLite database,
+   logs, keys) and `netpro serve` runs the whole application on
+   `http://127.0.0.1:3777`. There is no cloud account, no hosted platform and no
+   GitHub OAuth anywhere in the stack.
+2. **Everything is optional except the app.** OpenAI/Anthropic (AI drafts),
+   Hunter.io/People Data Labs/Clearbit (enrichment) and embedding providers are
+   **bring-your-own-key enhancements**. With none configured, NetPro still
+   imports, indexes, searches, analyses, scores and reminds.
+3. **NetPro drafts; a human sends.** No SMTP, no stored mailbox credentials, no
+   background sending. Outreach and campaigns produce messages you review, send
+   from your own mail client, and then record.
+4. **One implementation, many interfaces.** Every long-running operation is one
+   `@netpro/core` function → one job → one SSE event stream → consumed by the
+   CLI, the HTTP API and the web UI. Nothing is reimplemented in a UI layer.
+5. **Postgres when you need it.** SQLite is the default dialect; PostgreSQL is an
+   explicit, first-class deployment option for Docker, teams and servers.
 
-- **Phase 7 — CRM Tracking & Follow-up Reminders:** per-contact interaction
-  history (email, meeting, call, note, LinkedIn message, intro) with a
-  documented **relationship score** — recency 40% / frequency 25% / depth 20% /
-  richness 15%, recomputed on every logged interaction — plus follow-up
-  reminders with due-today/overdue/upcoming views, completion, snooze, cancel,
-  and optional recurrence, and a unified per-contact timeline. The engine lives
-  in `packages/core/crm`, surfaced through `netpro track` and the web app
-  (`/contacts`, `/contacts/[id]`, `GET/POST /api/interactions`,
-  `/api/follow-ups`).
+---
 
-- **Phase 8 — Batch Campaigns (Draft-Only):** personalized multi-step outreach
-  with whitelisted merge variables (`{{firstName}}`, `{{company}}`, `{{role}}`,
-  …), drip sequences with per-step delays, recipients snapshotted from an
-  explicit list or a saved search, a lifecycle (draft → active →
-  paused/completed/archived), and a per-day send limit. NetPro **drafts** each
-  personalized message; a human sends it from their own mailbox and records the
-  outcome — every confirmed send is logged as a real interaction (feeding the
-  relationship score), and a recorded reply cancels the remaining drip. The
-  engine lives in `packages/core/campaigns`, surfaced through `netpro campaign`
-  and the web app (`/outreach/campaigns`, `/outreach/campaigns/[id]`,
-  `/api/campaigns`). No SMTP, no stored secrets, nothing sent automatically.
+## Feature highlights
 
-> **Local use needs no setup at all:** `netpro init` + `netpro serve` create an
-> installation identity and trust this machine. To reach an instance from
-> elsewhere, use the server's `token` mode (or `open` behind your own auth) —
-> Phase 24 removed the Web UI's Auth.js sign-in entirely. See
-> [docs/local-first.md](docs/local-first.md).
+### Own and query your data
 
-The full monorepo (CLI + web, dual-dialect Drizzle database, and a local
-installation identity — GitHub OAuth/Auth.js removed in Phase 24) builds,
-lints, typechecks, and tests successfully — **1698 tests**,
-plus 57 more in live PostgreSQL suites that run in CI against a real database
-(including a performance pass at 5k contacts / 20k edges / 10k views / 1k
-content items, and the view-beacon ingest suite). **v1.0 is deployable and v1.5 is complete:** CRM tracking, follow-up
-reminders, and batch campaigns are implemented, and per-contact relationship
-scoring now has a producer (interaction logging). **v2.0 — "The Strategist" is
-complete** — shipped as `v2.0.0` on 2026-09-08 — **v2.5 — "The Observer" is
-complete**, shipped as `v2.5.0` on 2026-09-09 — **and v3.0 — "The Platform" is
-complete**, shipped as `v3.0.0` on 2026-09-10:
+- **LinkedIn CSV import** with dedup/merge, row-level validation and a
+  `--preview` mode that reports exactly which rows an import would skip.
+  The `Connected On` date is preserved, so growth reflects when relationships
+  actually formed.
+- **Portable export** to CSV.
+- **Dual dialect storage** — SQLite (`~/.netpro/netpro.db`, WAL mode) by default;
+  PostgreSQL via config or `DATABASE_URL`. Portable SQL everywhere, no
+  `pgvector` requirement.
+- **Backup & restore** — `netpro backup` / `netpro restore` (SQLite snapshot or
+  `pg_dump`, with a pre-restore safety copy).
 
-- **Phase 1 — Edge provenance (shipped):** `edges` gained `source`,
-  `confidence`, `status` + indexes, plus `netpro edge`, CSV mutuals as
-  *pending* candidates, and “also met at…” attendance.
-- **Phase 2 — Graph analytics engine (shipped):** pure-TS Louvain community
-  detection, degree + Brandes betweenness centrality, and a warm-intro
-  pathfinder (BFS over `edges`, `maxDepth` 4 default) in
-  `packages/core/graph`, surfaced through `netpro analyze --graph`, the
-  `graph` payload of `GET /api/analytics`, and a “Network graph” strip on
-  `/dashboard`. Over-budget graphs degrade with documented notices, never
-  silent zeroes.
-- **Phase 3 — Pathfinder surface (shipped):** `netpro path <target>` resolves
-  selectors (or defaults to your strongest tie), ranks the k-shortest chains
-  by relationship strength (0.6 × weakest-tie + 0.4 × mean hop strength), and
-  names the first ask — with `--draft` handing that ask to the Phase 4 AI
-  composer (draft-only, as ever). The web app got `/graph` (target picker +
-  ranked chain cards + one-click "Draft intro request" that pre-fills the
-  outreach composer), `/graph/<contactId>` (centrality, community, adjacency
-  incl. pending rows), and the owner-only APIs `GET /api/graph/paths` +
-  `GET /api/graph/overview`. Chains are ranked; **you** pick the intermediary
-  — the plan's auto-pick stays deferred.
-- **Phase 4 — Hybrid search (shipped):** additive migration `0004` gives
-  `search_index` a real producer plus an FTS5 virtual table (SQLite) and a
-  generated `tsvector` + GIN index (Postgres). `searchContacts` is now a
-  three-arm dispatcher — portable substring, keyword full-text, and an
-  opt-in embedding arm — merged with **reciprocal rank fusion** (k=60).
-  The keyword arm indexes the whole contact document (notes, tags, industry,
-  seniority, department, country), so it finds people substring matching
-  misses. Surfaced as `netpro search --mode keyword|hybrid` / `--semantic`,
-  the new `netpro reindex [--embeddings] [--status]`, a `/search` engine
-  selector + "Results powered by…" badge, `GET /api/search?mode=`, and a
-  `search` block in the owner-only health payload. **Configuring nothing
-  changes nothing**: no index → substring search, no key → no semantic arm,
-  provider down → keyword results with a stated reason rather than an error.
-- **Phase 5 — Skills gap analyzer (shipped):** additive migration `0005`
-  adds `contacts.skills`; `packages/core/skills` derives skills from
-  headline, role, tags, custom fields and notes against an embedded,
-  explainable taxonomy (~100 skills, alias table, whole-token matching, every
-  hit carries its field + snippet as evidence) and compares a target role /
-  job description / skill list against one contact or the whole network —
-  present, partial (via named adjacent-skill rules), missing, a match score,
-  per-skill coverage and the skills nobody has. Verdicts live on the contact,
-  evidence in `enrichments`; re-runs are idempotent and only write changes.
-  Surfaced as `netpro skills [contact] | gap | extract | status`,
-  `netpro search --skills`, the `/skills` page + skill tags on contact
-  pages, and the owner-only `GET /api/skills/gap` / `POST /api/skills/extract`.
-  **Offline by default**: the AI pass is opt-in per run, may only pick from
-  the taxonomy, and degrades to the heuristic result when the model fails.
-- **Phase 6 — Event matcher (shipped):** no migration — Phase 1's `events`
-  and `event_attendees` tables finally have a producer. `packages/core/events`
-  imports a conference CSV (alias-tolerant headers: `Event Name`, `starts_at`,
-  `Attendee Emails`…), matches each attendee line against your contacts in
-  three explainable tiers — exact email (1.0), exact name (0.9), last name +
-  first initial (0.6, reported but never linked without asking) — and refuses
-  to choose when more than one person fits. Imports are idempotent, and the
-  `met_at_event` edges they create land **pending**: an attendee list is
-  evidence of attendance, not of a meeting. Attendee lines that resolve to
-  nobody are parked on the event (in `activity_log`) so you can re-check them
-  after importing new contacts, or link them by hand. `recommendEvents` ranks
-  where to go next — 0.6 × how many of your contacts went, 0.2 × industry fit,
-  0.2 × timing — and prints the reason for every score. Surfaced as
-  `netpro events list|show|add|import|match|link|unlink|recommend|rm`, the
-  `/events` and `/events/[id]` pages, an **Events** section on each contact,
-  and the owner-only `GET/POST /api/events`, `GET/DELETE /api/events/[id]`,
-  `POST /api/events/[id]/match` and `POST/DELETE /api/events/[id]/attendees`.
-  Pairwise linking is capped per event (250) and says so when it stops, and
-  live event *discovery* ships as a disabled provider interface — no scraping,
-  no network.
-- **Phase 7 — Release readiness & the `v2.0.0` cut (shipped):** workspace
-  versions moved to `2.0.0`; the release closed out with an explicit
-  **Deferred** list; deployment docs gained the skills, events and graph
-  operating notes; and the release gate now includes a **performance pass
-  against a real PostgreSQL server** — 5k contacts / 20k edges, timing the
-  dashboard, hybrid search and the graph endpoints (327 ms / 32 ms / 209 ms
-  median on the measured machine).
-  CI also pins the promise that **no `pgvector` extension is required** —
-  embeddings are portable JSON, so a managed Postgres works as-is.
+### Search that explains itself
 
-- **v2.5 — “The Observer”: complete, shipped as `v2.5.0` on 2026-09-09.**
-  Migration `0006` and the `@netpro/core/views` module made the
-  producer-less `profile_views` table trustworthy and privacy-preserving —
-  daily-salted HMAC viewer hashing (no
-  raw IPs ever stored; legacy values blanked on upgrade), a vendored bot
-  deny-list, owner-view labeling, dedup/filter indexes, and the 90-day
-  raw-view retention purge. Phase 2 wired the producer: the public tracking
-  beacon (`GET /api/card/pixel.gif`, `POST /api/card/view`) ingests views
-  into `profile_views` with rate limiting, allowlisted pages,
-  sanitized referrers/UTM, DNT/GPC minimal mode, 5-min/1-h de-duplication,
-  and signed `?v=` contact-resolution tokens — plus a settings panel with a
-  copy-paste embed snippet and an opt-in pixel for HTML cards
-  (`netpro card --pixel-url`). Phase 3 added the query side: windowed view
-  stats, the recent timeline, and known-visitor matches in
-  `packages/core/views/analytics` (bots/owner excluded with reported
-  counts, 90-day window cap, ~23 ms at 10k views), surfaced as
-  `netpro card --views` and `netpro analyze --views`, the owner-only
-  `GET /api/card/views` and the `views` block of `GET /api/analytics`
-  (`?views=0` opts out), a “Profile views” strip on `/dashboard`, and an
-  analytics section on `/settings/card`. Phase 4 added the content
-  tracker's data model: migration `0007` (`content_items` with a UNIQUE
-  normalized-URL dedupe key, append-only `content_metrics` snapshots,
-  `content_mentions`), the `@netpro/core/content` module (URL
-  canonicalization, alias-tolerant CSV + dependency-free RSS/Atom import,
-  metrics snapshots, mentions, windowed overviews), and the provider seam
-  (`manual` + `rss` built in; `devto`/`twitter`/`github` as disabled,
-  self-explaining stubs). Phase 5 shipped the content surface on top of
-  that model: `netpro content` (18th top-level command; `list`/`add`/
-  `show`/`import`/`fetch`/`rm`/`analyze`, all with `--json`), the
-  owner-only `/api/content` API (list with engagement attached,
-  idempotent adds, CSV/feed imports with dry runs and multipart uploads,
-  id-or-URL selectors, series + snapshot routes, mention links), the
-  `/content` library and `/content/[id]` detail pages (latest snapshot +
-  history + contacts), a Content section on `/contacts/[id]`, and a
-  "Content" strip on `/dashboard`. Phase 6 tied it all together: the
-  content overview joins `getNetworkOverview` (the dashboard's "Content"
-  strip and `GET /api/analytics` read one shared payload; `?content=0`
-  opts out), the dashboard's strips gained two-step onboarding empty
-  states, and a **daily retention job** (web process, in-memory, audited
-  in `activity_log`) purges raw profile views past 90 days and content
-  snapshots past 365 days — the latest snapshot per piece always
-  survives — with `NETPRO_DISABLE_RETENTION` / `NETPRO_VIEW_RETENTION_DAYS`
-  / `NETPRO_CONTENT_METRIC_RETENTION_DAYS` operator knobs; the plan's
-  performance budgets were measured at 10k views / 1k content / 5k
-  metrics (~53 ms dashboard / ~10 ms views / ~2 ms content on SQLite) and
-  ship as hermetic budget tests.
-- **Phase 7 — Release readiness & the `v2.5.0` cut (shipped):** workspace
-  versions moved to `2.5.0`; the release closed out with explicit privacy
-  notes and a **Deferred** list (what The Observer deliberately is not:
-  cross-day tracking, stranger deanonymization, platform metric
-  integrations, third-party scripts); and the **release performance pass
-  against a real PostgreSQL server** was extended with the Observer fixture —
-  5k contacts / 20k edges plus 10k views / 1k content items / 5k metric
-  snapshots — recording **~485 ms** for the full dashboard payload,
-  **~16 ms** for the views overview and **~5 ms** for the content list
-  (medians, PostgreSQL 18.4).
-  CI's Docker smoke now also proves the new boundary in a production build:
-  the analytics/content routes answer 401, the beacons stay public,
-  cookieless, and `no-store`/`nosniff`.
+- **Three-arm search engine**: portable substring (always on), keyword full-text
+  (SQLite FTS5 / Postgres `tsvector` over the *whole* contact document — notes,
+  tags, industry, seniority, department, country) and an opt-in embedding arm,
+  fused with **reciprocal rank fusion** (k=60).
+- Facets, pagination, sorting (relevance / score / recent / name) and filters for
+  company, role, location, industry, seniority, email, relationship score,
+  activity window, tags, skills and Louvain community.
+- **`--explain`** tells you *why* each result matched (`matchReasons`).
+- Configure nothing and nothing changes: no index → substring search, no key →
+  no semantic arm, provider down → keyword results with a stated reason.
 
-- **v3.0 — “The Platform”: complete, shipped as `v3.0.0` on 2026-09-10.**
-  NetPro stops being a single-owner tool and becomes a workspace-scoped
-  platform. Migrations `0008`–`0014` (both dialects), four new core modules
-  (`workspaces`, the `crypto` key vault, `plugins`, `webhooks`), three new CLI
-  commands, six new web pages and 22 new API routes — and a single-owner
-  install keeps behaving exactly as it did in v2.5.
-- **Phase 1 — Workspaces & membership (shipped):** migration `0008` adds
-  `workspaces`, `workspace_members` and `workspace_invites`, plus a
-  `workspace_id` column (and index) on every data table, seeded with a
-  `default` bootstrap workspace. The role matrix is owner > admin > member >
-  viewer, with a break-glass owner that cannot be removed or demoted and a
-  last-owner guard. Surfaced as `netpro team`
-  (`list`/`members`/`invite`/`accept`/`remove`/`role`/`revoke`) and the
-  admin-only `/settings/team`.
-- **Phase 2 — Workspace-scoped engine (shipped):** every core query now
-  carries an explicit `workspace_id` predicate through
-  `bootstrapScope`/`resolveScope`/`workspacePredicate` — CRM, analytics,
-  hybrid search, views/beacon, content, graph edges, events, campaigns,
-  skills, enrichment, import/export and the retention purge. Authorship
-  (`created_by_user`, migration `0010`) stamps who logged an interaction or
-  raised a follow-up, and `0011` backfills any NULL scope into the bootstrap
-  workspace and attaches a DB-level `DEFAULT` on Postgres. Every web API
-  route and page derives its scope from the session (`requireScope()`), every
-  CLI command accepts `--workspace`, and a cross-tenant scope-guard suite
-  asserts no workspace can read another's rows.
-- **Phase 3 — Team collaboration (shipped):** follow-ups became assignable
-  (migration `0012`) with assign/unassign audit trails, removal of a member
-  unassigning their pending follow-ups, an owner-transfer flow, and an
-  audit viewer — `listActivityLog` behind `/settings/activity` and
-  `GET /api/activity`, filterable by action, entity, member and date. The
-  dashboard and contacts list gained “Assigned to me” / “Unassigned” views.
-- **Phase 4 — Encrypted web key vault (shipped):** migration `0009` plus
-  `/settings/keys` store personal and workspace provider credentials
-  encrypted at rest with AES-256-GCM and principal/slot-bound key
-  derivation. The management API answers masked-only, bodies are bounded,
-  writes have member/admin floors, and a read-only env fallback works with no
-  master key. Outreach, AI skills, enrichment and semantic search now read
-  the vault first; the CLI keychain is unchanged.
-- **Phase 5 — Plugin runtime & manifest (shipped):** migration `0013` plus
-  `packages/core/src/plugins` — strict manifest validation (npm-style names,
-  semver, engine ranges, capability allowlist, exact-host network allowlist),
-  an ESM loader that refuses incompatible engines, a per-workspace registry of
-  enrichers / AI providers / content providers / event discovery / commands,
-  and a `fetch` wrapper that blocks any host the manifest did not declare
-  (each block audited). A crashing plugin is isolated, logged and disabled —
-  it never takes the app down. Plugins install **disabled** and need an
-  explicit `--i-have-reviewed-permissions` (or a reviewed checkbox in
-  `/settings/plugins`) before they run. `netpro plugin`
-  (`list`/`paths`/`discover`/`info`/`install`/`enable`/`disable`/`rm`/
-  `settings`) and a reference plugin ship in-tree.
-- **Phase 6 — Self-hosted marketplace (shipped):** `marketplace/index.json`
-  (schema 1) plus a GNU-tar tarball in this repo, consumed by
-  `netpro plugin search|install|update` and `/settings/plugins`. Installs
-  fetch a static index (no telemetry, 1 h cache), verify sha256 (mismatch =
-  hard audited refusal), extract with a vendored USTAR reader that rejects
-  symlinks, absolute paths, `..` escapes, truncation and oversized archives,
-  check that the archive manifest matches the index listing exactly, and
-  register the plugin disabled behind the Phase 5 review gate. Updates are
-  install-over with version monotonicity. Point `MARKETPLACE_INDEX_URL` at
-  your own mirror to self-host; the index is checksums, not curation —
-  nothing auto-installs.
-- **Phase 7 — Outbound webhooks (shipped):** migration `0014` plus
-  `packages/core/src/webhooks` — an 18-event catalog, HMAC-SHA256 signatures
-  (`t=<unix>,v1=<hmac>`, 5-minute tolerance), URL validation (http/https
-  only, no embedded credentials, 2048-char cap) with a CLI-side
-  private-network **warning**, 10 s delivery timeout, exponential backoff
-  (60 s base, 32 min cap, 8 attempts), a delivery log with redelivery, and a
-  30-day purge folded into the daily retention job. Surfaced as
-  `netpro webhook` (`list`/`events`/`add`/`enable`/`disable`/`rotate`/
-  `deliveries`/`test`/`redeliver`/`retry`/`rm`), the admin-only
-  `/settings/webhooks`, and
-  [docs/webhooks.md](docs/webhooks.md) with receiver recipes for Zapier, n8n,
-  Make and a plain Node endpoint. Outbound only — no inbound ingestion.
-- **Phase 8 — Release readiness & the `v3.0.0` cut (shipped):** every
-  workspace moved to `3.0.0` (root, `apps/cli`, `apps/web`, `packages/*`,
-  `netpro --version`); CI runs lint, typecheck, test and build on Node 20 and
-  22, the live-PostgreSQL integration + performance jobs, a Docker image
-  build with a production smoke test, and a marketplace end-to-end pass
-  (search → install → update → enable → list against the shipped index).
-  Locally that gate is **1698 tests passing** (57 live-Postgres tests run in
-  CI) with zero lint or typecheck errors.
+### Network intelligence
 
-**Deferred from v2.0 (deliberate, not forgotten):** live event discovery
-providers (the `EventDiscoveryProvider` interface ships, disabled); a native
-pgvector column + ANN index (a later optimization); AI skills extraction as a
-default (opt-in per run); real SMTP delivery for campaigns (NetPro drafts
-today, a human sends); and the `$EDITOR` draft-review loop. (Per-user
-encrypted web key storage shipped in v3.0 Phase 4.)
+- **Analytics overview** — network health score, activity/dormancy breakdown,
+  12-month growth, industry/company diversity (Shannon entropy), company
+  clusters and the dormant-ties reconnect list.
+- **Graph engine** — Louvain community detection, degree + Brandes betweenness
+  centrality, connected components, average path length, and a BFS **pathfinder**
+  ranked by relationship strength (0.6 × weakest tie + 0.4 × mean hop strength).
+- **Edge provenance** — every relationship carries `source`, `confidence` and a
+  `status`; inferred edges (CSV mutuals, event attendance) land **pending** and
+  are excluded from analysis until you confirm them.
+- **Pathfinder** names the intermediary, shows each hop's recency and score, and
+  with `--draft` hands the first ask to the AI composer.
 
-**Deferred from v2.5 (privacy by omission, on purpose):** no cross-day viewer
-tracking (daily-salted hashes, 90-day raw-row purge), no contact resolution
-from IP/email/user-agent (only the owner's signed `?v=` links), no platform
-metric integrations beyond the disabled provider stubs (`manual` + `rss`
-ship; devto/twitter/github name the key that would enable them), and no
-cookies, third-party scripts, or off-site beacons anywhere in the observer
-features.
+### Keep relationships alive
 
-**Deferred from v3.0 (deliberate, not forgotten):** no plugin sandbox — a
-plugin runs in-process with the server's Node privileges, which is exactly why
-the manifest's network allowlist, the workspace data boundary and the human
-permissions-review gate stand in front of every enable; no curated plugin
-store — the marketplace is a static, checksummed index and nothing
-auto-installs or auto-updates; no background webhook delivery worker —
-deliveries are attempted when the event is emitted and pending ones are
-retried on demand (`netpro webhook retry`); private-network webhook targets
-are **warned** about in the CLI, not blocked (the pattern check is
-hostname-only and never resolves DNS), so egress policy stays with the
-operator; no inbound webhook ingestion; and
-still no SMTP — campaigns draft, a human sends.
+- **CRM** — a per-contact interaction history (email, meeting, call, note,
+  LinkedIn message, intro) with a documented **relationship score**:
+  recency 40% / frequency 25% / depth 20% / richness 15%, recomputed on every
+  logged interaction.
+- **Follow-up reminders** with due/overdue/upcoming views, completion, snooze,
+  cancel, optional recurrence, and assignment to a teammate.
+- **Unified timeline** per contact — profile, stats, interactions, follow-ups.
 
-> **Analytics scope note:** the clustering story is **two-section** and, since
-> v2.0 Phase 3, graph-native end to end: attribute clusters (normalized
-> company) remain for “who's where”, while the **Network graph** section —
-> Louvain communities, centrality, components, average path length, warm-intro
-> candidates, and now the ranked pathfinder itself (`/graph`, `netpro path`,
-> `GET /api/graph/*`) — runs over the confirmed `edges`. Inferred (pending)
-> edges are excluded until the owner confirms them (every surface offers a
-> `--status all` / "confirmed + pending" preview). Phase 1's producers
-> (`netpro edge`, CSV mutuals as *pending* candidates, “also met at…”
-> attendance) feed the graph; per-contact **relationship scoring ships with
-> the CRM (Phase 7)**, is recomputed on every logged interaction, and since
-> Phase 3 is what ranks intro chains — recency + score appear on every hop.
+### Outreach that stays yours
 
-> **Search implementation note:** `searchContacts` is a three-arm dispatcher
-> (portable substring, keyword full-text, opt-in semantic) merged with
-> reciprocal rank fusion — see Phase 4 above. The portable arm alone runs
-> identically on both dialects, so an un-migrated or un-indexed database keeps
-> working; the keyword and semantic arms light up when the migration and a key
-> are present. A native pgvector column for the semantic arm remains a
-> documented later optimization.
+- **AI outreach drafting** (OpenAI-compatible or Anthropic, over plain `fetch`,
+  no SDKs) for a contact or an ad-hoc recipient, with tone, context and ask.
+- **Batch campaigns** — whitelisted merge variables (`{{firstName}}`,
+  `{{company}}`, …), multi-step drip sequences with per-step delays, recipient
+  snapshots from a list or a saved search, lifecycle
+  (draft → active → paused/completed/archived) and a per-day send limit.
+  Every confirmed send is logged as a real interaction (feeding the relationship
+  score); a recorded reply cancels the remaining drip.
 
-## Local-first quickstart
+### Observe the network
 
-Install the supported CLI globally and run NetPro on your machine — no hosted
-platform, no cloud account, no GitHub OAuth, no `DATABASE_URL`:
+- **Skills gap analyzer** — an embedded, explainable taxonomy (101 skills across
+  12 categories, with aliases and adjacent-skill rules) extracts skills from
+  headlines, roles, tags, custom fields and notes, each hit carrying its field
+  and snippet as evidence.
+  Compare a target role / job description / skill list against one contact or the
+  whole network: present, partial, missing, match score and per-skill coverage.
+  Offline by default; the AI pass is opt-in per run and may only pick from the
+  taxonomy.
+- **Event matcher** — import conference CSVs (alias-tolerant headers), match each
+  attendee against your contacts in three explainable tiers (exact email 1.0,
+  exact name 0.9, last name + first initial 0.6 — reported but never linked
+  without asking), and `recommend` where to go next with a stated reason per
+  score. Unresolved attendees are parked so you can re-match after new imports.
+- **Content tracker** — canonical URL identity, CSV/RSS-Atom import, engagement
+  snapshots over time, mention links and windowed overviews. `manual` and `rss`
+  providers ship enabled; `devto`/`twitter`/`github` are self-explaining disabled
+  stubs.
+- **Profile-view analytics** — a privacy-hardened data model: daily-salted HMAC
+  viewer hashes (never raw IPs), a vendored bot deny-list, dedup windows,
+  owner-view labelling and a 90-day raw-row purge.
+
+### Work as a team, extend the platform
+
+- **Workspaces & roles** — owner > admin > member > viewer, a break-glass owner
+  that cannot be removed, a last-owner guard, workspace-scoped queries across
+  every core module, authorship stamps, invite links and an audit log.
+- **Encrypted key vault** — workspace-scoped provider credentials encrypted at
+  rest with AES-256-GCM and principal/slot-bound key derivation (schema +
+  `@netpro/core/crypto` module).
+- **Plugins** — strict manifests (npm-style names, semver, engine ranges,
+  capability allow-list, exact-host network allow-list), an ESM loader, a
+  per-workspace registry of enrichers / AI providers / content providers / event
+  discovery / commands, and a `fetch` wrapper that blocks undeclared hosts.
+  Plugins install **disabled** and require an explicit permissions review.
+- **Self-hosted marketplace** — a static `marketplace/index.json` (schema 1) with
+  sha256 checksums, hardened tarball extraction (rejects symlinks, absolute
+  paths, `..` escapes, oversized archives), manifest-matches-index verification
+  and install-over updates. Point `MARKETPLACE_INDEX_URL` at your own mirror.
+- **Outbound webhooks** — an 18-event catalog, HMAC-SHA256 signatures
+  (`t=<unix>,v1=<hmac>`, 5-minute tolerance), an SSRF guard on every delivery
+  attempt, a 10 s timeout with ≤3 re-validated redirects, exponential backoff
+  (60 s → 32 min, 8 attempts), a delivery log with redelivery, and a 30-day
+  purge. Outbound only.
+- **Daily retention job** — at most one run per 24 h, decided by the data (not a
+  cron table), audited in `activity_log`: raw profile views (90 d), content
+  metric snapshots (365 d — the latest per piece always survives) and webhook
+  deliveries (30 d).
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TB
+  subgraph clients["Interfaces"]
+    CLI["apps/cli<br/>netpro CLI · 27 commands"]
+    WEB["apps/web<br/>Next.js 16 Web UI<br/>(pure client, no DB, no API routes)"]
+  end
+
+  SERVER["packages/server<br/>node:http — REST API, auth, jobs, SSE<br/>127.0.0.1:3777"]
+
+  CORE["packages/core<br/>ALL business logic:<br/>import · search · graph · CRM · AI · views · content · skills · events<br/>campaigns · workspaces · plugins · webhooks · retention"]
+
+  DB["packages/db<br/>Drizzle schema · migrations<br/>dual dialect"]
+
+  SQLITE[("SQLite<br/>~/.netpro/netpro.db<br/>(default)")]
+  PG[("PostgreSQL<br/>Docker / team / remote")]
+  KEYS["~/.netpro/keys<br/>access token (0600) · CLI keychain"]
+  PROV["Optional BYO-key providers<br/>OpenAI · Anthropic<br/>Hunter · PDL · Clearbit · embeddings"]
+
+  CLI -->|"in-process commands"| CORE
+  CLI -->|"serve / scan delegation"| SERVER
+  WEB -->|"HTTP + SSE"| SERVER
+  SERVER --> CORE
+  CORE --> DB
+  DB --> SQLITE
+  DB --> PG
+  CLI -.-> KEYS
+  CORE -.->|"only when configured"| PROV
+
+  classDef optional stroke-dasharray: 5 5;
+  class PROV optional;
+```
+
+**The dependency rule is one-way and enforced in CI:**
+
+```text
+packages/db  →  packages/core  →  packages/server  →  apps/web
+                                 ↘  apps/cli
+```
+
+`@netpro/core` holds every business rule. `@netpro/server` orchestrates it behind
+HTTP, auth, jobs and SSE. `apps/web` renders what the server returns — it never
+opens a database, never duplicates search or graph logic and performs no
+authentication of its own.
+
+**One operation → one job → one event stream → many interfaces.** A scan started
+as `netpro scan` in a terminal and a scan started from the web UI's Scan page are
+the same `runScan()` implementation, the same `Job`, and the same SSE events:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant T as Terminal
+  participant S as packages/server
+  participant J as Job registry
+  participant C as packages/core
+  participant W as Web UI
+
+  T->>S: POST /api/scan
+  S->>J: create job (queued, 0%)
+  J-->>W: event job.queued
+  S->>C: runScan() — reindex + enrich + graph
+  C-->>S: progress updates
+  S-->>W: scan.progress (15 → 40 → 70 → 90%)
+  C-->>S: result snapshot
+  S->>J: completed (100%)
+  J-->>W: event job.completed
+  T->>S: GET /api/jobs/:id
+  S-->>T: job + result
+```
+
+Scan stages: `queued → discovering → processing → enriching → indexing → completed`.
+Every step is best-effort by design — a scan with no providers configured, or on
+an un-migrated database, still completes and still reports real numbers.
+
+---
+
+## Quickstart
+
+**Prerequisites:** Node.js ≥ 20. Nothing else — no Docker, no database server, no
+account.
 
 ```bash
 npm install -g netpro
-netpro init       # creates ~/.netpro (config, SQLite db, logs, keys)
-netpro serve      # http://127.0.0.1:3777
-netpro status     # install, database, and server health
+
+netpro init       # creates ~/.netpro: config.toml, SQLite db, logs, keys
+netpro serve      # http://127.0.0.1:3777 (foreground; Ctrl+C stops it)
+netpro status     # install · database · identity · server health · providers
 ```
 
-Then use the same local database from the terminal:
+`netpro init` output on a fresh machine:
+
+```text
+NetPro initialized
+
+Created /home/you/.netpro
+Database: SQLite — /home/you/.netpro/netpro.db (15/15 migrations applied)
+Server:   127.0.0.1:3777
+Config:   /home/you/.netpro/config.toml (created)
+Identity: ins_f73d12621d35deb56159f85a (you) — created
+Token:    np_N4h…b_kg at /home/you/.netpro/keys/access-token (created)
+```
+
+Then use the same local database from another terminal:
 
 ```bash
-netpro import linkedin.csv
+netpro import ~/Downloads/Connections.csv   # LinkedIn export
+netpro search "AI founders"                 # hybrid-capable search
+netpro analyze                              # score, growth, clusters, dormant ties
+netpro scan                                 # reindex + enrich + graph in one sweep
+```
+
+### From a source checkout
+
+```bash
+git clone https://github.com/NiravRVaghasiya/NetPro.git
+cd NetPro
+npm install
+npm run build
+
+node apps/cli/dist/index.js init
+node apps/cli/dist/index.js serve      # API + built-in console at :3777
+node apps/cli/dist/index.js --help     # the full command surface
+```
+
+Run the web UI against the running server:
+
+```bash
+cp apps/web/.env.example apps/web/.env.local   # defaults to http://127.0.0.1:3777
+npm run dev -w apps/web                        # http://localhost:3000
+```
+
+> The web UI is a **pure client**: it opens no database and serves no API of its
+> own. If the server is not running, every page says so and renders an empty
+> shell instead of failing.
+
+---
+
+## The web UI
+
+Ten server-backed pages plus a landing page, all rendered from the local NetPro
+server (SQLite or Postgres — the UI cannot tell the difference):
+
+| Page | What it shows | Server calls |
+| --- | --- | --- |
+| `/` | Local-first on-ramp: what NetPro is, links into the app | — |
+| `/observatory` | Network size, relationships, communities, jobs, last scan, index & provider status, live activity | `GET /api/analytics`, `/api/graph`, `/api/jobs`, `/api/providers`, SSE `/api/events` |
+| `/network` | Force-directed graph, communities, hubs, bridges; with `?target=` the ranked warm-intro chains | `GET /api/graph`, `/api/graph/visualization`, `/api/graph/path` |
+| `/search` | Hybrid search with filters, facets, engine badge and per-hit “why this matched” | `GET /api/search` |
+| `/pathfinder` | “Who can introduce me to X?” — ranked chains as a hop-by-hop stepper, first ask included | `GET /api/graph/path` |
+| `/people` | CRM list sorted by recency, score, name or follow-up | `GET /api/contacts` |
+| `/people/[id]` | Read-only contact timeline: profile, stats, interactions, pending follow-ups | `GET /api/contacts/:id` |
+| `/activity` | Live SSE feed of `job.*` / `scan.*` / `import.*` / `relationship.discovered`, plus the jobs table and progress ladder | `GET /api/jobs`, SSE `/api/events` |
+| `/scan` | Scan visualisation: source, progress, processed counts, new/updated contacts, edges discovered, enrichment; start a sweep from the UI | `POST /api/scan`, `GET /api/jobs` |
+| `/import` | Upload → preview/validate → import, with live job progress | `POST /api/import/preview`, `POST /api/import` |
+| `/settings` | Installation identity, auth mode, provider status and what each unconfigured provider would enable | `GET /api/identity`, `/api/providers` |
+
+Everything else NetPro can do — CRM writes, campaigns, cards, skills, events,
+content, teams, plugins, webhooks — is available through the CLI and, where noted
+below, the HTTP API. Those pages were intentionally removed in the local-first
+cleanup so the server, not the UI, owns authentication and data access.
+
+---
+
+## Where each capability lives
+
+| Capability | `core` | CLI | HTTP API | Web UI |
+| --- | :-: | --- | --- | :-: |
+| LinkedIn import + preview | ✅ | `netpro import` | `POST /api/import`, `/api/import/preview` | ✅ |
+| Scan (reindex + enrich + graph) | ✅ | `netpro scan` | `POST /api/scan` | ✅ |
+| Contact enrichment (BYO key) | ✅ | `netpro enrich` | `POST /api/enrich` | — |
+| Search (portable / keyword / hybrid) | ✅ | `netpro search` | `GET /api/search` | ✅ |
+| Reindex & embeddings | ✅ | `netpro reindex` | — | — |
+| Analytics overview | ✅ | `netpro analyze` | `GET /api/analytics` | ✅ |
+| Graph analytics | ✅ | `netpro analyze --graph` | `GET /api/graph*` | ✅ |
+| Pathfinder + first ask | ✅ | `netpro path [--draft]` | `GET /api/graph/path(s)` | ✅ |
+| CRM reads (contacts, timeline) | ✅ | `netpro track list` | `GET /api/contacts[/:id]` | ✅ |
+| CRM writes (interactions, follow-ups) | ✅ | `netpro track log/add/done/…` | — | — |
+| AI outreach drafting | ✅ | `netpro outreach` | — | — |
+| Batch campaigns | ✅ | `netpro campaign` | — | — |
+| Profile card (HTML / vCard) | ✅ | `netpro card` | — | — |
+| Profile-view analytics | ✅ | `netpro card --views`, `netpro analyze --views` | `views` block of `/api/analytics` | — |
+| Skills gap analyzer | ✅ | `netpro skills` | — | — |
+| Event matcher & recommendations | ✅ | `netpro events` | `GET /api/events` (list/detail) | — |
+| Content tracker | ✅ | `netpro content` | `content` block of `/api/analytics` | — |
+| Workspaces & team | ✅ | `netpro team` | — | — |
+| Plugins & marketplace | ✅ | `netpro plugin` | — | — |
+| Outbound webhooks | ✅ | `netpro webhook` | — | — |
+| Encrypted key vault | ✅ | — | — | — |
+| Backup / restore | — | `netpro backup`, `netpro restore` | — | — |
+| Jobs & live events | ✅ | job output | `GET /api/jobs`, SSE `/api/events` | ✅ |
+| Provider status | ✅ | `netpro status` | `GET /api/providers` | ✅ |
+
+---
+
+## CLI reference
+
+`netpro` is the primary interface. Every command supports `--help`; most accept
+`--json` for scripting. A global `--workspace <id>` selects the workspace for the
+invocation (precedence: flag → `NETPRO_WORKSPACE` → config → bootstrap
+workspace).
+
+### Command map
+
+| Command | What it does |
+| --- | --- |
+| `netpro init` | Create `~/.netpro`, the installation identity and the database |
+| `netpro serve` | Run the local server + built-in console (`127.0.0.1:3777`) |
+| `netpro status` | Install, database, identity, server health and provider status |
+| `netpro token` | Show / `--rotate` the access token used for remote callers |
+| `netpro config` | Manage configuration; API keys are stored encrypted via `set/get/delete/list` |
+| `netpro import [file]` | Import a LinkedIn connections CSV (`--preview` validates without writing) |
+| `netpro scan` | One observable sweep: reindex + enrichment + graph analysis |
+| `netpro enrich` | Enrich contacts via Hunter / PDL / Clearbit (`--source`, `--force`) |
+| `netpro search [query]` | Faceted search (`--mode portable\|keyword\|hybrid`, `--explain`, `--skills`, `--community`, …) |
+| `netpro reindex` | Rebuild the full-text index (`--embeddings`, `--status`, `--force`) |
+| `netpro outreach` | Draft an AI-composed message — NetPro drafts, you send |
+| `netpro analyze` | Network score, growth, diversity, clusters, dormant ties, graph, views |
+| `netpro path <target>` | Ranked warm-intro chains and the first ask (`--draft` composes it) |
+| `netpro track` | CRM interactions and follow-ups |
+| `netpro edge` | Graph edge provenance: add, list, import, merge, confirm, reject |
+| `netpro campaign` | Draft and manage batch campaigns — no sending |
+| `netpro export` | Export contacts as CSV |
+| `netpro card` | Generate a portable HTML card or vCard; `--views` shows profile-view analytics |
+| `netpro migrate` | Apply pending migrations (`--status`, `--no-backup`) |
+| `netpro backup` / `restore` | Database backups (`--list`, `--output`, `--force`) |
+| `netpro skills` | Skills derivation and gap analysis against a target role |
+| `netpro events` | Event matcher: import, match, link, recommend |
+| `netpro content` | Cross-posting tracker: add, import (CSV/RSS), fetch, analyze |
+| `netpro team` | Workspace members, invites and roles |
+| `netpro plugin` | Plugin install / enable / disable / settings + marketplace search |
+| `netpro webhook` | Outbound webhooks: add, deliveries, test, redeliver, retry |
+
+### Subcommand groups
+
+```text
+netpro track     log <contact> · add <contact> · list · done <id> · snooze <id>
+                 · cancel <id> · assign <id>
+netpro edge      add <from> <to> · list · rm <id> · import <csv> · merge
+                 · confirm <id> · reject <id>
+netpro campaign  list · create · add-recipients <id> · show <id> · activate
+                 · pause · complete · archive · mark-sent · mark-replied · mark-skipped
+netpro skills    gap · extract · status
+netpro events    list · show · add · import <csv> · match · link · unlink
+                 · recommend · rm
+netpro content   list · add <url> · show · import [file|feed] · fetch · rm · analyze
+netpro team      list · invite · revoke · add · rm · role <user> <role>
+netpro plugin    list · paths · discover · search · info · install · update
+                 · enable · disable · rm · settings
+netpro webhook   list · events · add <url> · rm · enable · disable · rotate
+                 · deliveries · test · redeliver · retry
+netpro config    set <key> <value> · get <key> · delete <key> · list
+```
+
+### A concrete session
+
+```bash
+# 1. own the data
+netpro init
+netpro import ~/Downloads/Connections.csv
+
+# 2. make it searchable and analysed in one sweep
 netpro scan
-netpro search "AI founders"
+
+# 3. ask questions
+netpro search "founder" --industry "software" --active-within 180 --explain
+netpro analyze --network-score
+netpro analyze --graph --limit 5
+netpro path "Ada Lovelace" --draft
+
+# 4. keep the relationship alive
+netpro track log ada@example.com --type email --direction outbound --note "Sent the deck"
+netpro track add ada@example.com --met-at "NeurIPS 2026" --follow-up 2w
+netpro track list --overdue
+
+# 5. reach out, one at a time or at scale
+netpro outreach --to ada@example.com --tone warm --purpose "a 15-minute call about OSS collab"
+netpro campaign create --name "Q3 reconnects" \
+  --subject "Good to see your name again, {{firstName}}" \
+  --body "Hi {{firstName}}, it has been a while since {{company}}…"
+netpro campaign add-recipients q3-reconnects --query "founder" --industry "software"
 ```
 
-Contributors can run the equivalent source checkout flow with
-`npm install && npm run build -w apps/cli && node apps/cli/dist/index.js ...`.
-SQLite at `~/.netpro/netpro.db` is the default; PostgreSQL stays available for
-Docker/team deployments via `~/.netpro/config.toml` or environment. See
-[`docs/local-first.md`](docs/local-first.md) and
-[`docs/deployment.md`](docs/deployment.md).
+---
 
-## Structure
+## HTTP API
 
-- `apps/web` — Next.js app (App Router), a pure client of the standalone NetPro server (no database, no API routes, no Auth.js)
-- `apps/cli` — commander CLI (`netpro init|serve|status|token|config|import|enrich|search|reindex|outreach|analyze|path|track|edge|campaign|export|card|migrate|skills|events|content`)
-- `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
-- `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths), the Phase 3 pathfinder surface (ranking, first-ask, per-contact graph position), the v2.0 skills taxonomy/gap analyzer, the Phase 6 event matcher (CSV import, attendee matching, recommendations), the v2.5 profile-view beacon + viewer analytics (privacy-hardened ingestion, windowed stats, timelines, known-visitor matches), the v2.5 content tracker data model (URL identity, CSV/feed import, metrics snapshots, mentions, provider interface), the v2.5 daily retention purge (90-day views / 365-day snapshots with latest-per-piece survival, at-most-once-per-24 h, audit-logged), and v3.0 Phase 2's workspace-scoped CRM engine (explicit `workspace_id` predicates threading an optional `WorkspaceScope`, authorship on interactions/follow-ups, and a cross-tenant scope-guard suite)
-- `packages/config` — shared ESLint and Tailwind configs
+`netpro serve` (or `node packages/server/dist/bin.js`) exposes a JSON API over
+`node:http` — no framework. `/api/health` and `/api/server-info` are public; every
+other route requires the local operator (loopback in `local` mode, a bearer token
+otherwise). Errors are JSON, never HTML.
 
-## Deploy
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/health` | Readiness probe: `healthy` (200) · `degraded` (503, migrations missing) · `unhealthy` (503) |
+| `GET` | `/api/server-info` | Service identity and auth mode |
+| `GET` | `/api/identity` | Installation id, auth mode and token presence (never the token) |
+| `GET` | `/api/contacts` | CRM contact list (`sort=recent\|score\|name\|follow-up`) |
+| `GET` | `/api/contacts/:id` | Contact timeline: profile, stats, interactions, follow-ups |
+| `GET` | `/api/search` | Search (`mode=portable\|keyword\|hybrid`, all filters, facets) |
+| `GET` | `/api/graph`, `/api/graph/overview`, `/api/graph/network` | Communities, centrality, components, warm-intro candidates |
+| `GET` | `/api/graph/path`, `/api/graph/paths` | Ranked intro chains to `?target=` |
+| `GET` | `/api/graph/visualization` | Node/link payload for the graph view |
+| `GET` | `/api/analytics` | Full overview: metrics, score, growth, clusters, dormant, graph, views, content |
+| `POST` | `/api/import` | Import (multipart, JSON `{csv}` or `text/csv`) → creates an import job |
+| `POST` | `/api/import/preview` | Parse + validate without writing |
+| `GET` | `/api/import/:id` | Import job status |
+| `POST` | `/api/scan` | Start a scan job with the 15 → 40 → 70 → 90 → 100 progress ladder |
+| `POST` | `/api/enrich` | Start an enrichment job |
+| `GET` | `/api/jobs`, `/api/jobs/:id` | Job registry (`?type=&status=&limit=&offset=`) |
+| `POST` | `/api/jobs/:id/cancel` | Cancel a queued/running job |
+| `GET` | `/api/events` | **SSE** with `Accept: text/event-stream`; otherwise calendar-event JSON |
+| `GET` | `/api/events/stream` | SSE alias (always a stream) |
+| `GET` | `/api/events/:id` | Event detail |
+| `GET`/`PUT` | `/api/settings` | Server, database, auth and installation settings |
+| `GET` | `/api/providers` | Which optional providers are configured, into which category |
+| `GET` | `/` | Built-in local console (loopback only; names the database) |
+
+**Jobs** are the contract between interfaces:
+
+```ts
+type Job = {
+  id: string;
+  type: 'import' | 'scan' | 'enrich' | 'index' | 'embed' | 'graph' | 'analyze';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  progress: number;                 // 0–100
+  metadata: Record<string, unknown>;
+  error: string | null;
+  startedAt / completedAt / createdAt / updatedAt: string | null;
+};
+```
+
+**SSE** example:
+
+```text
+retry: 3000
+: connected
+
+event: scan.progress
+data: {"type":"scan.progress","jobId":"…","progress":40,"message":"Processing contacts","seq":12,"timestamp":"…"}
+```
+
+Hardening applied to every response: request ids, `X-Content-Type-Options`,
+`X-Frame-Options`, `Referrer-Policy`, an optional HSTS switch, an origin
+allow-list for CORS (loopback by default) and a per-IP rate limit (600/min by
+default) that returns `429` with `Retry-After`.
+
+---
+
+## Data model
+
+27 tables per dialect, defined once in Drizzle
+([`packages/db/src/schema.sqlite.ts`](packages/db/src/schema.sqlite.ts) /
+[`schema.pg.ts`](packages/db/src/schema.pg.ts)) and applied by **15 mirrored
+migrations per dialect** (`0000`–`0014`).
+
+```mermaid
+erDiagram
+  workspaces ||--o{ workspace_members : "has"
+  workspaces ||--o{ workspace_invites : "issues"
+  workspaces ||--o{ contacts : "scopes"
+  contacts ||--o{ interactions : "logs"
+  contacts ||--o{ follow_ups : "schedules"
+  contacts ||--o{ enrichments : "provenance"
+  contacts ||--o| search_index : "indexed as"
+  contacts }o--o{ edges : "linked by"
+  events ||--o{ event_attendees : "attended"
+  contacts ||--o{ event_attendees : "matched to"
+  campaigns ||--o{ campaign_recipients : "targets"
+  contacts ||--o{ campaign_recipients : "personalized for"
+  content_items ||--o{ content_metrics : "snapshots"
+  content_items ||--o{ content_mentions : "mentioned by"
+  contacts ||--o{ content_mentions : "matched to"
+  contacts ||--o{ profile_views : "viewed by"
+  workspaces ||--o{ webhooks : "owns"
+  webhooks ||--o{ webhook_deliveries : "delivers"
+  workspaces ||--o{ plugins : "registers"
+  workspaces ||--o{ key_vault : "encrypts"
+  workspaces ||--o{ activity_log : "audits"
+```
+
+| Group | Tables |
+| --- | --- |
+| Identity & workspaces | `workspaces`, `workspace_members`, `workspace_invites`, `user`, `account`, `session`, `verificationToken` |
+| Network | `contacts`, `edges`, `enrichments`, `search_index` |
+| CRM | `interactions`, `follow_ups`, `activity_log` |
+| Events | `events`, `event_attendees` |
+| Content | `content_items`, `content_metrics`, `content_mentions` |
+| Campaigns | `campaigns`, `campaign_recipients` |
+| Privacy | `profile_views`, `profile_cards` |
+| Platform | `plugins`, `webhooks`, `webhook_deliveries`, `key_vault` |
+
+Migration history: `0000` base schema · `0001` profile card · `0002` CRM indexes ·
+`0003` edge provenance · `0004` hybrid search (FTS5 / `tsvector` + GIN) ·
+`0005` skills · `0006` view privacy · `0007` content tracker · `0008` workspaces ·
+`0009` key vault · `0010` authorship · `0011` workspace defaults · `0012` team
+collaboration · `0013` plugins · `0014` webhooks. All are additive and idempotent;
+concurrent cold starts are serialised with a Postgres advisory lock.
+
+---
+
+## Configuration
+
+Everything NetPro stores lives in one directory, `~/.netpro` by default
+(relocate the whole install with `NETPRO_HOME`):
+
+```text
+~/.netpro/
+├── config.toml    # user-editable configuration + this install's identity
+├── netpro.db      # SQLite database (the default dialect)
+├── backups/       # netpro backup output
+├── logs/          # install logs
+└── keys/          # credentials.enc (CLI keychain) · access-token (mode 0600)
+```
+
+```toml
+[database]
+# dialect = "sqlite"              # "sqlite" (default) or "postgresql"
+# path = "~/.netpro/netpro.db"
+# url = "postgresql://…"          # required when dialect = "postgresql"
+
+[server]
+# host = "127.0.0.1"              # loopback by default — expose deliberately
+# port = 3777
+
+[auth]
+# mode = "local"                  # local (default) | token | open
+
+[installation]                    # written by netpro init; no need to edit
+id = "ins_…"
+created_at = "…"
+```
+
+Precedence for every setting: **CLI flags → environment → `config.toml` →
+defaults**. The config parser accepts the documented TOML subset and fails loudly
+with a line number instead of silently ignoring a typo.
+
+### Environment variables
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `NETPRO_HOME` | `~/.netpro` | Install directory (config, database, logs, keys) |
+| `DB_DIALECT` | `sqlite` | `sqlite` or `postgresql` — never inferred |
+| `DB_PATH` | `<home>/netpro.db` | SQLite file path |
+| `DATABASE_URL` | — | Postgres connection string |
+| `NETPRO_SERVERLESS` | — | `1` → one DB connection per instance (scaled-out deployments) |
+| `NETPRO_DB_POOL_MAX`, `NETPRO_DB_SSL_CA` | — | Pool sizing and strict TLS verification |
+| `NETPRO_HOST` / `HOST`, `NETPRO_PORT` / `PORT` | `127.0.0.1`, `3777` | Server bind |
+| `NETPRO_AUTO_MIGRATE` | `true` | Apply pending migrations on server start |
+| `NETPRO_AUTH_MODE` | `local` | `local` \| `token` \| `open` |
+| `NETPRO_AUTH_TOKEN` | — | Access token for remote callers (else `~/.netpro/keys/access-token`) |
+| `NETPRO_ALLOWED_ORIGINS` | loopback | CSV origin allow-list for browser callers |
+| `NETPRO_RATE_LIMIT_MAX`, `_WINDOW_MS`, `_ENABLED` | `600`, `60000`, on | Per-IP rate limit |
+| `NETPRO_HSTS` | off | Send `Strict-Transport-Security` behind a TLS proxy |
+| `HUNTER_API_KEY`, `PDL_API_KEY`, `CLEARBIT_API_KEY` | — | Contact enrichment |
+| `AI_PROVIDER`, `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`, `OPENAI_BASE_URL` | — | AI drafting |
+| `EMBEDDINGS_PROVIDER`, `EMBEDDINGS_API_KEY`, `_MODEL`, `_BASE_URL`, `_DIMENSIONS` | disabled | Semantic search arm |
+| `NETPRO_VIEW_SALT` | built-in | Base salt for viewer hashing |
+| `NETPRO_DISABLE_VIEWS` | — | `true` → beacons answer but write no rows |
+| `NETPRO_DISABLE_RETENTION` | — | `true` → no purge ever runs |
+| `NETPRO_VIEW_RETENTION_DAYS`, `NETPRO_CONTENT_METRIC_RETENTION_DAYS`, `NETPRO_WEBHOOK_DELIVERY_RETENTION_DAYS` | `90`, `365`, `30` | Retention windows |
+| `ENCRYPTION_MASTER_KEY` | — | ≥32 chars; unlocks the encrypted web key vault |
+| `MARKETPLACE_INDEX_URL`, `NETPRO_PLUGIN_DIR`, `MARKETPLACE_NO_CACHE` | this repo, `./plugins`, 1 h cache | Plugin marketplace |
+| `NETPRO_WEBHOOKS_ALLOW_PRIVATE` | — | `1` allows webhooks to localhost/LAN receivers |
+| `NETPRO_SERVER_URL` / `NEXT_PUBLIC_NETPRO_SERVER_URL` | `http://127.0.0.1:3777` | Web UI → server address |
+| `NETPRO_AUTH_TOKEN` / `NEXT_PUBLIC_NETPRO_AUTH_TOKEN` | — | Token the web UI presents when the server requires one |
+
+### Authentication modes
+
+| Mode | Who gets in |
+| --- | --- |
+| `local` *(default)* | Requests whose socket peer is loopback and that did not arrive through a proxy are the operator, identified by `~/.netpro/config.toml`. Everyone else needs the access token (`netpro token`). |
+| `token` | Every caller, loopback included, presents `Authorization: Bearer <token>`. |
+| `open` | NetPro authenticates nobody — only correct behind your own auth (reverse proxy with sign-in, VPN, private network). |
+
+No mode uses GitHub OAuth, cookies or third-party sign-in.
+
+---
+
+## Deployment
+
+Two supported shapes, both documented in
+[`docs/deployment.md`](docs/deployment.md):
+
+| Target | Database | Best for |
+| --- | --- | --- |
+| Local (`netpro init` + `netpro serve`) | SQLite file in `~/.netpro` | Everyday use — no credentials, no cloud |
+| Docker Compose / any Node host | PostgreSQL | A server you own: remote access, a team, a VPS |
+
+### Docker Compose
+
+```mermaid
+flowchart LR
+  subgraph host["Your host (ports published on 127.0.0.1 by default)"]
+    WEB["web<br/>Next.js standalone<br/>:3000"]
+    SRV["server<br/>@netpro/server<br/>:3777"]
+    MIG["migrate (one-shot)<br/>netpro migrate"]
+    DB[("db<br/>postgres:16-alpine<br/>volume: postgres_data")]
+    VOL[("plugins volume")]
+  end
+  BROWSER["Browser"] --> WEB
+  WEB -->|"NETPRO_SERVER_URL=http://server:3777"| SRV
+  SRV --> DB
+  SRV --- VOL
+  MIG --> DB
+  SRV -. "depends_on: healthy" .- MIG
+  SRV -. "depends_on: healthy" .- DB
+```
 
 ```bash
-npm run build                 # any Node host: build once…
-npm run db:migrate            # …apply migrations, then start the server
-docker compose up -d          # or: self-host with Postgres
+cp .env.example .env          # set POSTGRES_PASSWORD (and auth mode)
+docker compose up -d          # migrate → server → web
+curl http://127.0.0.1:3777/api/health
 ```
 
-Read [`docs/deployment.md`](docs/deployment.md) first — it covers the
-Postgres setup, migrations, authentication modes, TLS, and a production
-checklist.
+The image ships three roles from one build: the standalone API server, the
+pure-client web UI, and the CLI used by the migration job. Postgres is **not**
+published to the host by default, and both app ports bind to loopback unless you
+change them.
 
-See [`docs/getting-started.md`](docs/getting-started.md) to run it locally.
+### Any Node host
+
+```bash
+npm ci
+npm run build
+export DB_DIALECT=postgresql
+export DATABASE_URL='postgresql://user:pass@host:5432/netpro?sslmode=require'
+npm run db:migrate            # apply migrations as an explicit release step
+npm run start -w apps/web     # or: node packages/server/dist/bin.js for the API
+```
+
+Health semantics for orchestrators: `healthy` (200) = database reachable and
+fully migrated; `degraded` (503) = reachable with pending migrations;
+`unhealthy` (503) = unreachable. `/api/health` is public by design so a probe
+works before any credential exists.
+
+---
+
+## Privacy & security model
+
+- **Local by default.** The server binds `127.0.0.1`; binding to `0.0.0.0`
+  requires an explicit setting, prints a warning naming what is now reachable, and
+  ensures a remote access token exists.
+- **No telemetry, no third-party scripts, no cookies** in the observer features.
+  Provider calls happen only when you configure a key and run the command —
+  never in the background during import.
+- **Viewer privacy by construction.** Viewer identifiers are HMAC-SHA256 digests
+  under a daily-rotating salt truncated to 64 bits; raw IPs are never stored, bot
+  traffic is filtered by a vendored deny-list, and raw rows are purged after
+  90 days.
+- **Secrets never surface.** Provider keys live in the environment or the
+  encrypted CLI keychain and are never printed by any interface; the key vault
+  returns masked values only; webhook secrets are shown exactly once on rotation.
+- **Webhook egress guard.** Private-network targets (loopback, RFC 1918,
+  link-local cloud-metadata addresses, IPv6 ULA/link-local, `*.internal`) are
+  refused at creation *and* re-checked on every delivery and every redirect hop.
+  Deliberate local receivers opt in with `NETPRO_WEBHOOKS_ALLOW_PRIVATE=1`.
+- **Plugins are gated.** Manifests declare capabilities and an exact host
+  allow-list; undeclared hosts are blocked and audited; a crashing plugin is
+  isolated and disabled instead of taking the process down; enabling requires an
+  explicit permissions review.
+- **Marketplace integrity.** Static index, sha256 verification (mismatch is a
+  hard refusal), hardened tar extraction, and installation always lands
+  **disabled**.
+- **Web hardening.** Request ids, security headers, origin allow-listing,
+  per-IP rate limiting, bounded request bodies and JSON-only API errors.
+
+---
+
+## Repository layout
+
+```text
+NetPro/
+├── apps/
+│   ├── cli/                 # `netpro` — commander CLI (tsup bundle, 27 commands)
+│   └── web/                 # Next.js 16 App Router UI — pure client of the server
+├── packages/
+│   ├── core/                # ALL business logic (search, graph, CRM, AI, views,
+│   │                        #  content, skills, events, campaigns, plugins, webhooks)
+│   ├── server/              # node:http API, auth, jobs, SSE, security middleware
+│   ├── db/                  # Drizzle schema (SQLite + Postgres) and migrations
+│   └── config/              # shared ESLint + Tailwind configs
+├── docs/                    # getting-started, local-first, deployment, webhooks,
+│                            # example profile JSON
+├── marketplace/             # self-hosted plugin index + reference tarball
+├── plugins/                 # in-tree reference plugin (example-event-discovery)
+├── scripts/                 # package check + CLI/server/web smoke tests
+├── Dockerfile               # three roles, one image
+├── docker-compose.yml       # migrate → server → web + Postgres
+└── .github/workflows/ci.yml # the full release gate
+```
+
+---
+
+## Development
+
+```bash
+npm install          # Node ≥ 20; npm workspaces + Turborepo
+npm run build        # build every workspace
+npm run lint         # ESLint across the monorepo
+npm run typecheck    # tsc --noEmit everywhere
+npm test             # hermetic vitest suites (real scratch SQLite files, not mock SQL)
+npm run test:pg      # PostgreSQL integration suites (needs a live database)
+npm run smoke        # CLI + server + web UI smoke tests against shipped artifacts
+npm run dev          # workspace dev scripts
+```
+
+Current local run (Node 22.22.3): **1,644 tests passing** — CLI 360, core 998,
+db 120, server 136, web 30 — with **60 PostgreSQL-backed tests skipped** because
+no `NETPRO_TEST_DATABASE_URL` was present; those run in CI against a real
+Postgres server. Measured performance budgets also ship as tests (graph analytics
+at 3,000 nodes / 8,000 edges, skills extraction at 5,000 contacts, search and
+view/content pipelines).
+
+### CI pipeline
+
+```mermaid
+flowchart LR
+  A["Install<br/>npm ci"] --> B["Lint & typecheck<br/>Node 20 + 22"]
+  B --> C["Unit tests<br/>(hermetic, SQLite)"]
+  C --> D["SQLite integration<br/>+ marketplace e2e"]
+  D --> E["PostgreSQL integration<br/>+ performance pass"]
+  E --> F["Build all workspaces<br/>+ package check"]
+  F --> G["CLI smoke"]
+  G --> H["Server smoke<br/>SQLite + PostgreSQL"]
+  H --> I["Web UI smoke<br/>(standalone build)"]
+  I --> J["Docker e2e<br/>Postgres + server + web"]
+```
+
+The gate proves the published shape, not just compilation: migrations apply
+twice as a no-op, `token` mode answers `401` without the token and `200` with it,
+the web UI exposes no API or auth surface of its own, and the Docker image runs
+the real deploy path end to end.
+
+---
+
+## Project status
+
+**v3.0.0 — “The Platform”** (released 2026-09-10), built on v1.0 (import,
+enrichment, export, search, analytics, AI drafts, profile card), v1.5 (CRM
+tracking, follow-up reminders, campaigns), v2.0 “The Strategist” (graph engine,
+pathfinder, hybrid search, skills, events) and v2.5 “The Observer” (privacy-first
+profile views and the content tracker).
+
+**Deliberately deferred** — documented, not forgotten:
+
+- live event-discovery providers (the interface ships, disabled);
+- a native `pgvector` column + ANN index (embeddings are portable JSON today);
+- AI skills extraction as a default (it is opt-in per run);
+- real SMTP delivery for campaigns — NetPro drafts, a human sends;
+- `$EDITOR` draft review;
+- cross-day viewer tracking or stranger deanonymisation (privacy by omission);
+- a plugin sandbox — plugins run in-process, which is exactly why the manifest
+  network allow-list and the review gate exist;
+- a curated plugin store (the marketplace is a checksummed static index);
+- a background webhook delivery worker and inbound webhook ingestion;
+- web pages for the CLI-only capabilities listed in
+  [Where each capability lives](#where-each-capability-lives).
+
+---
+
+## Documentation
+
+| Document | Covers |
+| --- | --- |
+| [`docs/getting-started.md`](docs/getting-started.md) | Install, first import, authentication modes, running the CLI |
+| [`docs/local-first.md`](docs/local-first.md) | The `~/.netpro` install, identity, `serve`, config precedence, one-operation/two-interface design |
+| [`docs/deployment.md`](docs/deployment.md) | Postgres, migrations, TLS, pooling, health checks, search engines, retention, remote-exposure checklist |
+| [`docs/webhooks.md`](docs/webhooks.md) | Event catalog, signature verification, receiver recipes (Zapier, n8n, Make, Node) |
+| [`docs/examples/profile.json`](docs/examples/profile.json) | Input shape for `netpro card --generate` |
+| [`packages/server/README.md`](packages/server/README.md) | The server's API contract, job model and SSE transport |
+
+---
 
 ## License
 
-MIT
+[MIT](LICENSE) © NetPro Contributors
