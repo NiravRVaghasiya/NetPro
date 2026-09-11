@@ -119,11 +119,20 @@ SMOKE_DIALECT=postgresql \
 
 ## Docker e2e additions
 
-The Docker job keeps every previous boundary check and gains the Phase 21
-Web UI assertions against the real image: landing page 200 with NetPro
-markup and the local-first on-ramp, `/login` 200, and the hashed static
-asset referenced by the page loads. The GitHub-mode re-check also confirms
-`/login` still serves while private APIs remain 401.
+The Docker job keeps the non-loopback-Host boundary checks and gains the
+Phase 21 Web UI assertions against the real image: landing page 200 with
+NetPro markup and the local-first on-ramp, `/login` 200, and the hashed
+static asset referenced by the page loads. The GitHub-mode re-check also
+confirms `/login` still serves while private APIs remain 401.
+
+One boundary is deliberately *not* asserted against the container: with
+`NETPRO_TRUST_LOCAL_UI=1` (required because the Docker bridge masks the
+socket peer; the compose port is published on `127.0.0.1` only), the Web UI
+trusts a loopback Host without inspecting `X-Forwarded-For` — see
+`isTrustedLocalRequest` in `apps/web/lib/auth-mode.ts`. The proxy-header
+boundary is a property of the standalone `@netpro/server` layer instead,
+and the server-smoke matrix proves it on both dialects (proxied request
+401, same request with the bearer token 200).
 
 ## What the redesign fixed to make the gate real
 
