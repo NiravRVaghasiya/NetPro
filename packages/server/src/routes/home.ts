@@ -11,8 +11,11 @@
 import type { ServerResponse } from 'node:http';
 import { sendText } from '../middleware/json';
 import { applyConsoleCsp } from '../middleware/security';
+import { SERVER_VERSION } from '../version';
 
-export const SERVER_VERSION = '3.0.0';
+// Re-exported because the console page and the package index both take it from
+// here; the single literal lives in `../version` (see version.test.ts).
+export { SERVER_VERSION };
 
 export type HomeInfo = {
   dialect: string;

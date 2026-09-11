@@ -32,7 +32,7 @@ export function createProgram(): Command {
   program
     .name("netpro")
     .description("NetPro — your professional network, owned by you")
-    .version("3.0.0")
+    .version("3.0.1")
     // v3.0 Phase 2 — one workspace scope per invocation. Precedence:
     // flag → NETPRO_WORKSPACE → config → bootstrap workspace.
     .option(

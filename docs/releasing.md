@@ -23,24 +23,31 @@ workflow refuses a tag whose commit is not on the default branch.
 
 ## Cutting a release
 
-1. **Bump the version.** The root `package.json` holds the released version;
-   every workspace `package.json` carries the same number (they are `private`
-   and never published individually). Keep them identical — the workflow fails
-   the release if the tag and `package.json` disagree.
+1. **Bump the version.**
 
    ```bash
-   # 3.0.0 → 3.1.0 in the root and in apps/* and packages/*
-   node -e "
-     const fs = require('node:fs');
-     const files = ['package.json', ...fs.readdirSync('apps').map((d) => \`apps/\${d}/package.json\`), ...fs.readdirSync('packages').map((d) => \`packages/\${d}/package.json\`)];
-     for (const file of files) {
-       const json = JSON.parse(fs.readFileSync(file, 'utf8'));
-       json.version = '3.1.0';
-       fs.writeFileSync(file, JSON.stringify(json, null, 2) + '\n');
-     }
-   "
-   git diff --stat   # root + apps/cli + apps/web + packages/{config,core,db,server}
+   npm run release:bump -- 3.1.0
+   npm install --package-lock-only   # relock the workspace versions
+   git diff --stat                   # 7 manifests + the 2 literals below
    ```
+
+   `scripts/bump-version.mjs` moves every place the number is written: the seven
+   `package.json` files (root + `apps/*` + `packages/*` — they are `private` and
+   never published individually, and the workflow fails if the tag and
+   `package.json` disagree), plus two *literals* that are easy to miss because
+   nothing in a normal build reads them back:
+
+   - `apps/cli/src/cli.ts` — commander's `.version()`, baked into the bundle;
+   - `packages/server/src/version.ts` — rendered into the console page and
+     returned by `GET /api/settings`, baked into that bundle too.
+
+   Neither can read the manifest it was released from (the bundled CLI has no
+   `package.json` beside it), so a bump that misses them publishes a CLI that
+   still reports the previous version — and the gate's installed-package smoke,
+   which compares `netpro --version` against the tarball, fails an hour later
+   instead of here. `apps/cli/src/cli.test.ts` and
+   `packages/server/src/version.test.ts` pin both literals to the root
+   `package.json`, so a hand-edit that forgets one fails in CI as well.
 
 2. **Write the release notes** at `docs/releases/v3.1.0.md`. Its H1 becomes the
    release title and the file becomes the release body verbatim, so the notes
@@ -52,6 +59,12 @@ workflow refuses a tag whose commit is not on the default branch.
    `README.md` (the version badge, quickstart install URL, the test counts in
    *Development*), `docs/getting-started.md` (install/smoke commands), and the
    release-asset URL in the new notes file.
+
+   ```bash
+   # Everything that points at a downloadable asset — historical release notes
+   # under docs/releases/ keep their own version on purpose.
+   grep -rn "releases/download/v" README.md docs/*.md
+   ```
 
 4. **Merge to `master`** and wait for the CI gate to go green — that is where
    the PostgreSQL integration suites, the server smoke on both dialects, the
@@ -114,23 +127,49 @@ SQLite *and* PostgreSQL, the standalone Web UI smoke, and the Docker image e2e.
 The job is idempotent: it edits the notes if the release already exists and
 uploads assets with `--clobber`. Re-run it from the Actions tab with
 **Run workflow → Release**, passing the existing tag — use this when a release
-run failed after the tag was pushed, or when only the notes changed.
+run failed *before* uploading, or when only the notes changed. Note what a
+re-run cannot do: the job checks out the tag, so it rebuilds the same source,
+byte for byte. A re-run never fixes a bad artifact.
 
-To fix the release *contents* (a broken artifact), push the fix to `master` and
-cut the release again. Prefer a **new patch version** once anyone may have
-downloaded the bad artifact — a published tag is a promise. Re-pointing a tag is
-only appropriate while it has not been consumed: the v3.0.0 cut was re-created
-minutes after it first published, with zero downloads, because the first tarball
-could not run once installed.
+## Withdrawing a bad artifact
 
-```bash
-gh release delete v3.1.0 --yes        # remove the release first
-git push origin :refs/tags/v3.1.0     # delete the bad tag
-git push origin v3.1.0                # re-create at the new commit
-```
+An artifact that was published before a bug in it was known has to be fixed by a
+new commit on `master`, and then by a **new version** — not by moving the tag.
 
-`gh release view v3.1.0 --json assets -q '.assets[].downloadCount'` is the check
-for "has anyone consumed it".
+1. **Check consumption**, because that decides which of these you are doing:
+
+   ```bash
+   gh release view v3.0.0 --json assets -q '.assets[] | "\(.name) \(.downloadCount)"'
+   ```
+
+2. **Zero downloads** — nobody holds the old bytes, so re-pointing is
+   defensible:
+
+   ```bash
+   gh release delete v3.0.0 --yes        # remove the release first
+   git push origin :refs/tags/v3.0.0     # delete the bad tag
+   git tag -a v3.0.0 -m 'NetPro v3.0.0 — <summary>' <fixed-commit>
+   git push origin v3.0.0                # the gate re-runs against the new commit
+   ```
+
+3. **Anyone may have it** — cut the patch release (above) and *withdraw* the
+   broken asset, so the same broken bytes stop being served. This is what v3.0.0
+   did: the published tarball installed but could not run `netpro init`, it had
+   two downloads, and v3.0.1 shipped the fix.
+
+   ```bash
+   gh release delete-asset v3.0.0 netpro-3.0.0.tgz --yes
+   gh release delete-asset v3.0.0 SHA256SUMS --yes
+   gh release edit v3.0.0 --notes-file docs/releases/v3.0.0.md   # keep the record, point forwards
+   ```
+
+   The edit is not optional: the published body is a copy taken from
+   `docs/releases/<tag>.md` at release time, so changing the file in the
+   repository does **not** change what the release page says. Anyone arriving at
+   the old page should learn there what replaced it.
+
+A published tag is a promise, and the number on the box changes when the contents
+do.
 
 ## Doing it by hand (fallback)
 
