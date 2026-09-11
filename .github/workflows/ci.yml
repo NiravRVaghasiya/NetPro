@@ -296,8 +296,11 @@ jobs:
       - name: Server process smoke (${{ matrix.dialect }})
         env:
           SMOKE_DIALECT: ${{ matrix.dialect }}
-          DATABASE_URL: ${{ matrix.dialect == 'postgresql' && 'postgresql://netpro:netpro@127.0.0.1:5432/netpro?sslmode=disable' || '' }}
-        run: scripts/smoke/local-stack.sh
+        run: |
+          if [ "${{ matrix.dialect }}" = "postgresql" ]; then
+            export DATABASE_URL='postgresql://netpro:netpro@127.0.0.1:5432/netpro?sslmode=disable'
+          fi
+          scripts/smoke/local-stack.sh
 
   # ── 8. Web UI smoke — production standalone output really serves ───────
   web-ui-smoke:
