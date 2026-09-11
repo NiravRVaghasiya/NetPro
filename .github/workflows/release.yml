@@ -1,0 +1,212 @@
+name: Release
+
+# Cut a release by pushing an annotated version tag (`v3.0.0`) at a commit on
+# `master`. This workflow re-proves the artifact and then publishes the GitHub
+# Release described by `docs/releases/<tag>.md`, with the installable CLI
+# bundle and its checksums attached.
+#
+#   Tag → gate (build · lint · typecheck · tests · CLI smoke · packaging)
+#       → release (notes from docs/releases/<tag>.md + netpro-<version>.tgz)
+#
+# The deep gates — PostgreSQL integration against a real server, the server
+# smoke on both dialects, the standalone Web UI smoke and the Docker image e2e
+# — run on every push to `master` in ci.yml, and this workflow refuses to
+# release a commit that is not on `master`. What it re-runs here is the part
+# that decides whether a *shipped artifact* is valid: the bundled CLI as a real
+# process over real migrations, and the tarball an operator installs.
+#
+# Re-run a failed release with `workflow_dispatch` and the tag as input; the
+# job is idempotent (notes are edited, assets are uploaded with --clobber).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)release, e.g. v3.0.0'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  # ── 1. Release gate — nothing is published from a commit that cannot build,
+  #       test, or package itself. ──────────────────────────────────────────
+  gate:
+    name: Release gate (build, tests, packaging)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # On a tag push this is the tag; on workflow_dispatch it is the tag
+          # named in the input, so a re-run releases the same commit.
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          # `git merge-base` below needs the tag's real ancestry.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # The tag and package.json are two places that say the same thing; a
+      # release is the wrong moment to find out they disagree.
+      - name: Resolve and verify the version
+        id: version
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          version="$(node -p "require('./package.json').version")"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$tag" != "v$version" ]; then
+            echo "::error::tag $tag does not match the package.json version $version"
+            exit 1
+          fi
+          echo "Releasing $tag (package version $version)"
+          git fetch --no-tags origin "${{ github.event.repository.default_branch }}"
+          if ! git merge-base --is-ancestor HEAD FETCH_HEAD; then
+            echo "::error::$tag is not on the default branch — releases are cut from it (see docs/releasing.md)"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build all workspaces
+        run: npm run build
+
+      # The shipped CLI is the product for most users: init, migrate, serve and
+      # status as real processes over a scratch ~/.netpro, including the
+      # graceful SIGTERM path.
+      - name: CLI process smoke
+        run: scripts/smoke/cli.sh
+
+      # The tarball an operator installs, built exactly the way they would get
+      # it (`prepack` rebuilds the CLI and runs the package check).
+      - name: Package the CLI
+        run: |
+          mkdir -p dist-assets
+          npm pack --pack-destination dist-assets
+          test -f "dist-assets/netpro-${{ steps.version.outputs.version }}.tgz" \
+            || { echo "::error::npm pack did not produce netpro-${{ steps.version.outputs.version }}.tgz"; ls -la dist-assets; exit 1; }
+
+      - name: Verify the installable tarball
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tarball="dist-assets/netpro-$VERSION.tgz"
+          rm -rf /tmp/netpro-tarball && mkdir -p /tmp/netpro-tarball
+          tar xzf "$tarball" -C /tmp/netpro-tarball
+
+          VERSION="$VERSION" node -e '
+            const fs = require("node:fs");
+            const root = "/tmp/netpro-tarball/package";
+            const pkg = JSON.parse(fs.readFileSync(`${root}/package.json`, "utf8"));
+            const checks = [
+              ["package name is netpro", pkg.name === "netpro"],
+              ["package version matches the tag", pkg.version === process.env.VERSION],
+              ["package is publishable", pkg.private === false],
+              ["bin.netpro points at the bundled CLI", pkg.bin?.netpro === "./apps/cli/dist/index.js"],
+              ["bundled CLI is present", fs.existsSync(`${root}/apps/cli/dist/index.js`)],
+              ["SQLite migrations are present", fs.existsSync(`${root}/packages/db/migrations/sqlite/meta/_journal.json`)],
+              ["PostgreSQL migrations are present", fs.existsSync(`${root}/packages/db/migrations/postgres/meta/_journal.json`)],
+              ["native drivers stay runtime dependencies", ["better-sqlite3", "pg"].every((d) => pkg.dependencies?.[d])],
+            ];
+            for (const [label, ok] of checks) console.log(`${ok ? "ok  " : "FAIL"} — ${label}`);
+            const failed = checks.filter(([, ok]) => !ok);
+            if (failed.length > 0) {
+              console.error("::error::the release tarball is not installable");
+              process.exit(1);
+            }
+            console.log(`netpro@${pkg.version} tarball verified: bundled CLI, both migration sets, bin metadata.`);
+          '
+
+      - name: Write checksums
+        run: |
+          cd dist-assets
+          sha256sum ./*.tgz > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: dist-assets/*
+          if-no-files-found: error
+
+  # ── 2. Publish — the GitHub Release, described by docs/releases/<tag>.md. ──
+  release:
+    name: Publish the GitHub Release
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Creating the release and uploading its assets.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist-assets
+
+      - name: Publish or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.gate.outputs.tag }}
+        run: |
+          notes="docs/releases/$TAG.md"
+          if [ -f "$notes" ]; then
+            # The notes file is the release body; its H1 is the release title,
+            # so the two can never drift apart.
+            title="$(grep -m1 '^# ' "$notes" | sed 's/^# //')"
+            export TITLE="${title:-NetPro $TAG}"
+            echo "Using release notes from $notes"
+          else
+            export TITLE="NetPro $TAG"
+            echo "No $notes in this tag — falling back to generated notes."
+          fi
+
+          prerelease=()
+          case "$TAG" in *-*) prerelease=(--prerelease);; esac
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — updating its notes."
+            if [ -f "$notes" ]; then
+              gh release edit "$TAG" --title "$TITLE" --notes-file "$notes" "${prerelease[@]}"
+            else
+              gh release edit "$TAG" --title "$TITLE" "${prerelease[@]}"
+            fi
+          elif [ -f "$notes" ]; then
+            gh release create "$TAG" --verify-tag --title "$TITLE" --notes-file "$notes" "${prerelease[@]}"
+          else
+            gh release create "$TAG" --verify-tag --title "$TITLE" --generate-notes "${prerelease[@]}"
+          fi
+
+          # --clobber keeps a re-run of the same tag idempotent.
+          gh release upload "$TAG" dist-assets/* --clobber
+
+          echo "--- published ---"
+          gh release view "$TAG" --json url,tagName,name,isPrerelease,assets \
+            --template '{{.url}}{{"\n"}}{{range .assets}}  {{.name}} ({{.size}} bytes){{"\n"}}{{end}}'
