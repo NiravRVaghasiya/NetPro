@@ -147,6 +147,49 @@ describe("resolveProviderStatus", () => {
     const status = resolveProviderStatus(EMPTY, { now: () => new Date("2026-01-01T00:00:00.000Z") });
     expect(status.generatedAt).toBe("2026-01-01T00:00:00.000Z");
   });
+
+  it("reads keys from the encrypted server vault with source vault", () => {
+    const status = resolveProviderStatus(EMPTY, {
+      vault: { "outreach.openai": "present", "enrichment.hunter": "present" },
+    });
+    expect(status.providers.find((p) => p.id === "openai")).toMatchObject({
+      configured: true,
+      source: "vault",
+    });
+    expect(status.providers.find((p) => p.id === "hunter")).toMatchObject({
+      configured: true,
+      source: "vault",
+    });
+    expect(status.ai.configuredProviders).toEqual(["OpenAI"]);
+    expect(status.capabilities.aiOutreach).toBe("available");
+    expect(status.capabilities.enrichment).toBe("available");
+    // Env still wins for display when both hold a key.
+    const both = resolveProviderStatus(
+      { OPENAI_API_KEY: "env-key" },
+      { vault: { "outreach.openai": "present" } },
+    );
+    expect(both.providers.find((p) => p.id === "openai")).toMatchObject({
+      configured: true,
+      source: "env",
+    });
+  });
+
+  it("counts a vault key toward the embeddings gate", () => {
+    const status = resolveProviderStatus(
+      { EMBEDDINGS_PROVIDER: "openai" },
+      { vault: { "embeddings.openai": "present" } },
+    );
+    expect(status.embeddings.configured).toBe(true);
+    expect(status.embeddings.status).toBe("configured");
+    expect(status.capabilities.semanticSearch).toBe("available");
+  });
+
+  it("never leaks a vault marker into the snapshot", () => {
+    const status = resolveProviderStatus(EMPTY, {
+      vault: { "outreach.openai": "marker-not-a-key" },
+    });
+    expect(JSON.stringify(status)).not.toContain("marker-not-a-key");
+  });
 });
 
 describe("configuredEnrichmentProviders", () => {

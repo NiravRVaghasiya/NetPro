@@ -35,7 +35,13 @@ import {
 } from '../middleware/rate-limit';
 import { handleHealth } from './health';
 import { handleHome, handleLocked } from './home';
-import { handleListContacts, handleGetContact } from './contacts';
+import { handleListContacts, handleGetContact, handleCreateContact } from './contacts';
+import {
+  handleDeleteCredential,
+  handleListCredentials,
+  handleSaveCredential,
+  handleTestCredential,
+} from './credentials';
 import { handleSearch } from './search';
 import { handleGraphOverview, handleGraphPaths, handleGraphVisualization } from './graph';
 import { handleProviders } from './providers';
@@ -274,6 +280,10 @@ export async function dispatch(
   // Contacts
   if (path === '/api/contacts' && method === 'GET') {
     await handleListContacts(req, res, { conn: ctx.conn, auth });
+    return true;
+  }
+  if (path === '/api/contacts' && method === 'POST') {
+    await handleCreateContact(req, res, { conn: ctx.conn, auth });
     return true;
   }
   if (path.startsWith('/api/contacts/') && method === 'GET') {
@@ -532,6 +542,35 @@ export async function dispatch(
   ) {
     await handleProviders(req, res, { conn: ctx.conn, auth });
     return true;
+  }
+
+  // Credentials — encrypted API-key storage (vault-backed, masked reads)
+  if (path === '/api/credentials' && method === 'GET') {
+    await handleListCredentials(req, res, { conn: ctx.conn, auth });
+    return true;
+  }
+  if (path.startsWith('/api/credentials/') && (method === 'PUT' || method === 'POST' || method === 'DELETE')) {
+    const rest = path.slice('/api/credentials/'.length);
+    const [encodedId, action] = rest.split('/');
+    let providerId: string;
+    try {
+      providerId = decodeURIComponent(encodedId ?? '');
+    } catch {
+      sendJson(res, 400, { error: 'Invalid provider in path.', code: 'unknown_provider' });
+      return true;
+    }
+    if (providerId && !action && method === 'PUT') {
+      await handleSaveCredential(req, res, { conn: ctx.conn, auth }, providerId);
+      return true;
+    }
+    if (providerId && action === 'test' && method === 'POST') {
+      await handleTestCredential(req, res, { conn: ctx.conn, auth }, providerId);
+      return true;
+    }
+    if (providerId && !action && method === 'DELETE') {
+      await handleDeleteCredential(req, res, { conn: ctx.conn, auth }, providerId);
+      return true;
+    }
   }
 
   // ── Fallback: API 404 so the web UI gets JSON, not HTML ──────────

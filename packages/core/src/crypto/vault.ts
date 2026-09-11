@@ -9,6 +9,7 @@ import {
   vaultPrincipal,
   VaultError,
 } from "./key-vault";
+import { writeActivityLog } from "../crm/activity";
 
 export const PROVIDER_KEYS = {
   "outreach.openai": "OPENAI_API_KEY",
@@ -172,6 +173,17 @@ export async function saveVaultKey(
         },
       });
   }
+  // Best-effort audit (never key material — slot name and target only).
+  await writeActivityLog(
+    conn,
+    {
+      action: "credential.saved",
+      entityType: "credential",
+      entityId: name,
+      metadata: { target },
+    },
+    scope,
+  );
 }
 
 export async function removeVaultKey(
@@ -194,6 +206,17 @@ export async function removeVaultKey(
   if (conn.dialect === "sqlite")
     await conn.db.delete(conn.schema.keyVault).where(where);
   else await conn.db.delete(conn.schema.keyVault).where(where);
+  // Best-effort audit (never key material — slot name and target only).
+  await writeActivityLog(
+    conn,
+    {
+      action: "credential.removed",
+      entityType: "credential",
+      entityId: name,
+      metadata: { target },
+    },
+    scope,
+  );
 }
 
 /** Server-only credential use. A corrupt configured vault fails closed; only

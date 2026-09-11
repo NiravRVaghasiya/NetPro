@@ -39,6 +39,11 @@ and `GET /api/server-info` are public.
 | GET | `/api/identity` | `readInstallationIdentity` | installation id + auth mode, never the token |
 | GET | `/api/contacts` | `listCrmContacts` | `?limit=&offset=&sort=recent\|score\|name\|follow-up` |
 | GET | `/api/contacts/:id` | `getContactTimeline` | profile + stats + interactions + follow-ups; 404 when deleted |
+| POST | `/api/contacts` | `addPersonFromLinkedIn` | `{ linkedinUrl, fullName? }` → 201 created / 200 exists (never a silent duplicate); `{ linkedinUrl, dryRun: true }` validates + duplicate-checks without writing |
+| GET | `/api/credentials` | `listVaultKeys` + catalog | every provider's masked status (`lastFour`, never the key) + vault availability |
+| PUT | `/api/credentials/:provider` | `testProviderKey` + `saveVaultKey` | `{ apiKey }` → remote-validates where safe, then saves encrypted; 422/502 leave the stored key untouched; 503 without `ENCRYPTION_MASTER_KEY` |
+| POST | `/api/credentials/:provider/test` | `resolveVaultKey` + `testProviderKey` | tests the stored key; 200 with `{ status, message }`, never the key |
+| DELETE | `/api/credentials/:provider` | `removeVaultKey` | removes the vault row; reports env configuration honestly |
 | GET | `/api/search` | `searchContacts` | `?q=&company=&role=&location=&industry=&seniority=&hasEmail=&minScore=&activeWithin=&skills=&sort=&limit=&offset=&mode=portable\|keyword\|hybrid` |
 | GET | `/api/graph` <br> `GET /api/graph/overview` <br> `GET /api/graph/network` | `getNetworkGraph` | communities, centrality, components, warm-intro candidates; `?limit=&depth=&relation=&status=&minConfidence=` |
 | GET | `/api/graph/path` <br> `GET /api/graph/paths` | `planIntroPaths` | `?target=&from=&k=&depth=`; `target` required |
@@ -114,7 +119,8 @@ packages/server/
 │   ├── server.ts       # listen / shutdown
 │   ├── routes/
 │   │   ├── health.ts
-│   │   ├── contacts.ts      # GET /api/contacts
+│   │   ├── contacts.ts      # GET|POST /api/contacts
+│   │   ├── credentials.ts   # GET|PUT|POST|DELETE /api/credentials*
 │   │   ├── search.ts        # GET /api/search
 │   │   ├── graph.ts         # GET /api/graph* + pathfinder
 │   │   ├── analytics.ts     # GET /api/analytics*

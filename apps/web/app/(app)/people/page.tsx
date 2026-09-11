@@ -17,6 +17,7 @@
 
 import Link from "next/link";
 import { getServerUrl, serverFetchJson } from "@/lib/netpro-server";
+import { AddPersonForm } from "@/components/add-person-form";
 
 export const metadata = { title: "People — NetPro" };
 
@@ -118,6 +119,8 @@ export default async function PeoplePage({
         </div>
       ) : null}
 
+      {contacts.length === 0 ? null : <AddPersonForm />}
+
       <form method="GET" action="/people" style={{ display: "flex", gap: "0.5rem", marginTop: "0.85rem", flexWrap: "wrap" }}>
         <input
           name="q"
@@ -143,17 +146,17 @@ export default async function PeoplePage({
       </form>
 
       {contacts.length === 0 ? (
-        <p style={{ color: "#9ca3af", marginTop: "1rem" }}>
-          No contacts yet.{" "}
-          <Link href="/import" style={{ color: "#2563eb" }}>
-            Import a LinkedIn CSV
-          </Link>{" "}
-          or run <code>netpro import contacts.csv</code> — then watch them appear in{" "}
-          <Link href="/activity" style={{ color: "#2563eb" }}>
-            Activity
-          </Link>
-          .
-        </p>
+        <>
+          <AddPersonForm variant="empty" />
+          <p style={{ color: "#9ca3af", marginTop: "1rem" }}>
+            Prefer the terminal? Run <code>netpro import contacts.csv</code> — then watch new
+            contacts appear in{" "}
+            <Link href="/activity" style={{ color: "#2563eb" }}>
+              Activity
+            </Link>
+            .
+          </p>
+        </>
       ) : (
         <>
           <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "1rem", fontSize: "0.9rem" }}>

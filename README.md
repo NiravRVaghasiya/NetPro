@@ -305,7 +305,12 @@ npm run dev -w apps/web                        # http://localhost:3000
 ```
 
 The web UI is a **pure client**: it opens no database and serves no API of its own.
-If the server isn't running, every page says so instead of failing.
+If the server isn't running, every page says so instead of failing. First run
+onboarding is two pastes: **People → + Add Person** accepts a LinkedIn profile
+URL (`https://www.linkedin.com/in/username`), validates it, and adds the person
+— or points at the existing contact instead of duplicating; **Settings →
+Connect an API** stores a provider key encrypted on the server after verifying
+it where the provider allows a safe check.
 
 ### Docker (PostgreSQL, self-hosted)
 
@@ -457,13 +462,17 @@ netpro track list --overdue
 `/api/health` and `/api/server-info` are public, everything else requires the local
 operator (loopback in `local` mode, bearer token otherwise). Representative routes:
 `GET /api/search`, `GET /api/analytics`, `GET /api/graph/path?target=…`,
-`GET /api/contacts/:id`, `POST /api/import`, `POST /api/scan`, `GET /api/jobs`,
-SSE `GET /api/events`. The full route table, job model and SSE contract live in
+`GET /api/contacts/:id`, `POST /api/contacts` (add a person from a LinkedIn URL),
+`POST /api/import`, `POST /api/scan`, `GET /api/jobs`, SSE `GET /api/events`,
+`GET /api/credentials` + `PUT /api/credentials/:provider` (encrypted API-key
+storage, masked reads). The full route table, job model and SSE contract live in
 [`packages/server/README.md`](packages/server/README.md).
 
 **Web UI.** Eleven pages backed entirely by that API: landing, **Observatory**,
 **Network** graph, **Search**, **Pathfinder**, **People** (CRM list + contact
-timeline), **Activity** (live SSE feed), **Scan**, **Import**, **Settings**. Deeper
+timeline, with **+ Add Person** from a LinkedIn URL), **Activity** (live SSE
+feed), **Scan**, **Import** (CSV flow plus single-profile add), **Settings**
+(provider status plus **Connect an API** for BYO keys). Deeper
 capabilities (campaigns, skills, events, content, teams, plugins, webhooks) are
 CLI-first by design.
 

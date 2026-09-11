@@ -4,6 +4,7 @@ import {
   ProviderStatus,
   type ProviderStatusPayload,
 } from "@/components/provider-status";
+import { ApiKeyForm } from "@/components/api-key-form";
 
 export const metadata = {
   title: "Settings — NetPro",
@@ -83,13 +84,18 @@ export default async function SettingsPage() {
         <ProviderStatus status={providers} title="AI &amp; enrichment providers" />
       </section>
 
+      <section className="my-5">
+        <ApiKeyForm />
+      </section>
+
       <p className="my-5 text-sm leading-6 text-slate-500">
-        Integrations are configured with server-side environment variables (BYO
-        API keys — NetPro never stores them in the browser). Set them on the
-        process that runs <code>netpro serve</code> (or the{" "}
-        <code>server</code> service in <code>docker-compose.yml</code>) and
-        restart it. Optional providers enhance NetPro; without them it still
-        runs.
+        Keys saved above are stored encrypted on this machine (BYO API keys —
+        NetPro never stores them in the browser) and can also be provided as
+        server-side environment variables on the process that runs{" "}
+        <code>netpro serve</code> (or the <code>server</code> service in{" "}
+        <code>docker-compose.yml</code>). Storing a key needs{" "}
+        <code>ENCRYPTION_MASTER_KEY</code> set on the server. Optional
+        providers enhance NetPro; without them it still runs.
       </p>
 
       <p className="my-5 text-sm leading-6 text-slate-500">

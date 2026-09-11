@@ -138,6 +138,13 @@ node apps/cli/dist/index.js --help
 node apps/cli/dist/index.js import --linkedin ~/Downloads/Connections.csv
 ```
 
+Adding one person, not a whole export? Open **People → + Add Person** in the
+web UI and paste their LinkedIn profile URL
+(`https://www.linkedin.com/in/username`). NetPro validates the URL, skips the
+add when the profile is already in your network (pointing at the existing
+contact instead of duplicating), and creates the person otherwise. The same
+single-profile add is embedded in the **Import** page.
+
 The first run creates and migrates the local database
 (`~/.netpro/netpro.db` — see [local-first.md](local-first.md)) automatically.
 Re-importing the same file merges instead of duplicating.
@@ -152,8 +159,15 @@ node apps/cli/dist/index.js enrich --source all
 ```
 
 Enrichment is BYO-key — without a configured key, each provider is skipped
-(not an error). For the web app, set `HUNTER_API_KEY`/`PDL_API_KEY`/`CLEARBIT_API_KEY`
-as server-side environment variables instead (see `apps/web/.env.example`).
+(not an error). Give the server a key either as a server-side environment
+variable (`HUNTER_API_KEY`/`PDL_API_KEY`/`CLEARBIT_API_KEY`, see
+`apps/web/.env.example`) or in the web UI under **Settings → Connect an API**,
+which verifies the key where the provider allows a safe check and then stores
+it encrypted (AES-256-GCM) on the server. UI storage needs
+`ENCRYPTION_MASTER_KEY` (at least 32 characters) set on the process running
+`netpro serve`; without it, key management is read-only and environment keys
+keep working. Stored keys are never shown again — only the last four
+characters — and can be tested, replaced, or removed from the same card.
 
 ## Export your contacts
 
@@ -419,8 +433,10 @@ netpro outreach --to "Jane Doe" --json           # scriptable JSON output
 The `/outreach` page was removed in Phase 24 — drafting is CLI-first
 (`netpro outreach` above). Configure the server with `AI_PROVIDER`,
 `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`), optionally `OPENAI_BASE_URL` for an
-OpenAI-compatible endpoint, and `OPENAI_MODEL`/`ANTHROPIC_MODEL` overrides; the
-**Settings** page shows which integrations are configured.
+OpenAI-compatible endpoint, and `OPENAI_MODEL`/`ANTHROPIC_MODEL` overrides — or
+paste the key in the web UI under **Settings → Connect an API** (stored
+encrypted, verified with the provider before saving); the **Settings** page
+shows which integrations are configured either way.
 
 ## Track relationships & follow-ups
 
