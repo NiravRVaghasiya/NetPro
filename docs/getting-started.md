@@ -7,12 +7,19 @@
 
 ## Install
 
-For normal use, install the published CLI globally:
+For normal use, install the CLI globally from the release bundle:
 
 ```bash
-npm install -g netpro
+npm install -g https://github.com/NiravRVaghasiya/NetPro/releases/download/v3.0.0/netpro-3.0.0.tgz
 netpro --version
 ```
+
+> The unscoped npm name `netpro` belongs to an unrelated package, so NetPro is
+> not published to the npm registry and `npm install -g netpro` does not install
+> this project. Each [release](https://github.com/NiravRVaghasiya/NetPro/releases)
+> attaches an installable `netpro-<version>.tgz` (checksummed in `SHA256SUMS`)
+> that installs the same CLI with its bundled server, migrations and native
+> drivers. See [releasing.md](releasing.md).
 
 For repository development, install the workspace instead:
 

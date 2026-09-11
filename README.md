@@ -6,7 +6,7 @@ understand the graph, keep the relationships alive — from a CLI, a local HTTP 
 and a web UI that owns none of your data.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-3.0.0-informational.svg)](package.json)
+[![Release](https://img.shields.io/github/v/release/NiravRVaghasiya/NetPro)](https://github.com/NiravRVaghasiya/NetPro/releases/latest)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
 [![CI](https://github.com/NiravRVaghasiya/NetPro/actions/workflows/ci.yml/badge.svg)](https://github.com/NiravRVaghasiya/NetPro/actions/workflows/ci.yml)
 
@@ -271,12 +271,20 @@ an un-migrated database, still completes and still reports real numbers.
 account.
 
 ```bash
-npm install -g netpro
+# Install the CLI from the v3.0.0 release bundle
+npm install -g https://github.com/NiravRVaghasiya/NetPro/releases/download/v3.0.0/netpro-3.0.0.tgz
 
 netpro init       # creates ~/.netpro: config.toml, SQLite db, logs, keys
 netpro serve      # http://127.0.0.1:3777 (foreground; Ctrl+C stops it)
 netpro status     # install · database · identity · server health · providers
 ```
+
+> The unscoped npm name `netpro` belongs to an unrelated package, so the CLI is
+> distributed as the installable tarball attached to each
+> [release](https://github.com/NiravRVaghasiya/NetPro/releases/latest) instead of
+> from the npm registry — the tarball installs the same `netpro` binary, with its
+> bundled server, migrations and native drivers. The source-checkout and Docker
+> paths below are unaffected. See [`docs/releasing.md`](docs/releasing.md).
 
 `netpro init` output on a fresh machine:
 
@@ -771,13 +779,13 @@ NetPro/
 │   ├── db/                  # Drizzle schema (SQLite + Postgres) and migrations
 │   └── config/              # shared ESLint + Tailwind configs
 ├── docs/                    # getting-started, local-first, deployment, webhooks,
-│                            # example profile JSON
+│                            # releasing, per-release notes, example profile JSON
 ├── marketplace/             # self-hosted plugin index + reference tarball
 ├── plugins/                 # in-tree reference plugin (example-event-discovery)
 ├── scripts/                 # package check + CLI/server/web smoke tests
 ├── Dockerfile               # three roles, one image
 ├── docker-compose.yml       # migrate → server → web + Postgres
-└── .github/workflows/ci.yml # the full release gate
+└── .github/workflows/       # ci.yml (the gate) · release.yml (tag → release)
 ```
 
 ---
@@ -795,8 +803,8 @@ npm run smoke        # CLI + server + web UI smoke tests against shipped artifac
 npm run dev          # workspace dev scripts
 ```
 
-Current local run (Node 22.22.3): **1,644 tests passing** — CLI 360, core 998,
-db 120, server 136, web 30 — with **60 PostgreSQL-backed tests skipped** because
+Current local run (Node 22.22.3): **1,647 tests passing** in 135 test files —
+CLI 363, core 998, db 120, server 136, web 30 — with **60 PostgreSQL-backed tests skipped** because
 no `NETPRO_TEST_DATABASE_URL` was present; those run in CI against a real
 Postgres server. Measured performance budgets also ship as tests (graph analytics
 at 3,000 nodes / 8,000 edges, skills extraction at 5,000 contacts, search and
@@ -826,7 +834,9 @@ the real deploy path end to end.
 
 ## Project status
 
-**v3.0.0 — “The Platform”** (released 2026-09-10), built on v1.0 (import,
+**v3.0.0 — “The Platform”** — the
+[first tagged release](https://github.com/NiravRVaghasiya/NetPro/releases/tag/v3.0.0)
+(2026-09-11) — built on v1.0 (import,
 enrichment, export, search, analytics, AI drafts, profile card), v1.5 (CRM
 tracking, follow-up reminders, campaigns), v2.0 “The Strategist” (graph engine,
 pathfinder, hybrid search, skills, events) and v2.5 “The Observer” (privacy-first
@@ -845,7 +855,9 @@ profile views and the content tracker).
 - a curated plugin store (the marketplace is a checksummed static index);
 - a background webhook delivery worker and inbound webhook ingestion;
 - web pages for the CLI-only capabilities listed in
-  [Where each capability lives](#where-each-capability-lives).
+  [Where each capability lives](#where-each-capability-lives);
+- publishing to the npm registry — the unscoped name is taken, so each release
+  ships an installable tarball instead (see [Releasing](#documentation)).
 
 ---
 
@@ -857,6 +869,8 @@ profile views and the content tracker).
 | [`docs/local-first.md`](docs/local-first.md) | The `~/.netpro` install, identity, `serve`, config precedence, one-operation/two-interface design |
 | [`docs/deployment.md`](docs/deployment.md) | Postgres, migrations, TLS, pooling, health checks, search engines, retention, remote-exposure checklist |
 | [`docs/webhooks.md`](docs/webhooks.md) | Event catalog, signature verification, receiver recipes (Zapier, n8n, Make, Node) |
+| [`docs/releasing.md`](docs/releasing.md) | Cutting a release: the tag gate, the installable CLI bundle, notes files, why the npm registry name is not used |
+| [`docs/releases/`](docs/releases) | The notes published with each release (`v3.0.0` and later) |
 | [`docs/examples/profile.json`](docs/examples/profile.json) | Input shape for `netpro card --generate` |
 | [`packages/server/README.md`](packages/server/README.md) | The server's API contract, job model and SSE transport |
 
