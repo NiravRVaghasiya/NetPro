@@ -3,8 +3,6 @@
 > Your professional network, owned by you. Open source LinkedIn Premium alternative.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Release: v3.0.0](https://img.shields.io/badge/Release-v3.0.0-2ea44f)](https://github.com/NiravRVaghasiya/NetPro/releases)
-[![Changelog](https://img.shields.io/badge/Changelog-CHANGELOG.md-8A2BE2)](CHANGELOG.md)
 
 > **Phase 24 (local-first) — the Web UI is a pure client.** The Web UI's own
 > API routes, Auth.js sign-in, and legacy pages (`/dashboard`, `/contacts`,
@@ -12,9 +10,8 @@
 > `/settings/*` sub-pages, the public `/card`) were removed: it now renders
 > Observatory, Network, People, Search, Pathfinder, Activity, Scan, Import,
 > and Settings entirely from the standalone server. Everything those legacy
-> pages did is still available through the CLI (`netpro …`). See
-> [docs/phase-24-deprecate-old-web.md](docs/phase-24-deprecate-old-web.md).
-> The `/dashboard`, `/settings/*`, `/api/*`, and Auth.js / GitHub OAuth
+> pages did is still available through the CLI (`netpro …`). The
+> `/dashboard`, `/settings/*`, `/api/*`, and Auth.js / GitHub OAuth
 > references in the release history below describe the releases that shipped
 > them, before this cleanup — the current architecture has none of them.
 
@@ -91,8 +88,8 @@
   no credentials. `netpro init` writes an installation identity to
   `~/.netpro/config.toml` and a `0600` access token; requests from
   `127.0.0.1` are the operator; `NETPRO_AUTH_MODE` selects `local` (default),
-  `token`, `github`, or `open`. GitHub OAuth is now an optional integration.
-  See [docs/phase-5-authentication.md](docs/phase-5-authentication.md).
+  `token`, or `open`. GitHub OAuth is never required.
+  See [docs/local-first.md](docs/local-first.md).
 
 - **Phase 7 — CRM Tracking & Follow-up Reminders:** per-contact interaction
   history (email, meeting, call, note, LinkedIn message, intro) with a
@@ -120,7 +117,7 @@
 > installation identity and trust this machine. To reach an instance from
 > elsewhere, use the server's `token` mode (or `open` behind your own auth) —
 > Phase 24 removed the Web UI's Auth.js sign-in entirely. See
-> [docs/phase-5-authentication.md](docs/phase-5-authentication.md).
+> [docs/local-first.md](docs/local-first.md).
 
 The full monorepo (CLI + web, dual-dialect Drizzle database, and a local
 installation identity — GitHub OAuth/Auth.js removed in Phase 24) builds,
@@ -202,7 +199,7 @@ complete**, shipped as `v3.0.0` on 2026-09-10:
   live event *discovery* ships as a disabled provider interface — no scraping,
   no network.
 - **Phase 7 — Release readiness & the `v2.0.0` cut (shipped):** workspace
-  versions moved to `2.0.0`; the CHANGELOG closed out with an explicit
+  versions moved to `2.0.0`; the release closed out with an explicit
   **Deferred** list; deployment docs gained the skills, events and graph
   operating notes; and the release gate now includes a **performance pass
   against a real PostgreSQL server** — 5k contacts / 20k edges, timing the
@@ -258,7 +255,7 @@ complete**, shipped as `v3.0.0` on 2026-09-10:
   metrics (~53 ms dashboard / ~10 ms views / ~2 ms content on SQLite) and
   ship as hermetic budget tests.
 - **Phase 7 — Release readiness & the `v2.5.0` cut (shipped):** workspace
-  versions moved to `2.5.0`; the CHANGELOG closed out with explicit privacy
+  versions moved to `2.5.0`; the release closed out with explicit privacy
   notes and a **Deferred** list (what The Observer deliberately is not:
   cross-day tracking, stranger deanonymization, platform metric
   integrations, third-party scripts); and the **release performance pass
@@ -366,7 +363,7 @@ from IP/email/user-agent (only the owner's signed `?v=` links), no platform
 metric integrations beyond the disabled provider stubs (`manual` + `rss`
 ship; devto/twitter/github name the key that would enable them), and no
 cookies, third-party scripts, or off-site beacons anywhere in the observer
-features — see the CHANGELOG's v2.5 Deferred section.
+features.
 
 **Deferred from v3.0 (deliberate, not forgotten):** no plugin sandbox — a
 plugin runs in-process with the server's Node privileges, which is exactly why
@@ -379,8 +376,7 @@ retried on demand (`netpro webhook retry`); private-network webhook targets
 are **warned** about in the CLI, not blocked (the pattern check is
 hostname-only and never resolves DNS), so egress policy stays with the
 operator; no inbound webhook ingestion; and
-still no SMTP — campaigns draft, a human sends. See the CHANGELOG's v3.0
-Deferred section.
+still no SMTP — campaigns draft, a human sends.
 
 > **Analytics scope note:** the clustering story is **two-section** and, since
 > v2.0 Phase 3, graph-native end to end: attribute clusters (normalized
@@ -402,9 +398,6 @@ Deferred section.
 > working; the keyword and semantic arms light up when the migration and a key
 > are present. A native pgvector column for the semantic arm remains a
 > documented later optimization.
-
-The [CHANGELOG](CHANGELOG.md) records what each phase shipped and the
-reasoning behind its design decisions.
 
 ## Local-first quickstart
 
@@ -430,13 +423,12 @@ Contributors can run the equivalent source checkout flow with
 `npm install && npm run build -w apps/cli && node apps/cli/dist/index.js ...`.
 SQLite at `~/.netpro/netpro.db` is the default; PostgreSQL stays available for
 Docker/team deployments via `~/.netpro/config.toml` or environment. See
-[`docs/phase-18-packaging.md`](docs/phase-18-packaging.md),
-[`docs/phase-19-docker.md`](docs/phase-19-docker.md), and
-[`docs/local-first.md`](docs/local-first.md).
+[`docs/local-first.md`](docs/local-first.md) and
+[`docs/deployment.md`](docs/deployment.md).
 
 ## Structure
 
-- `apps/web` — Next.js app (App Router), a pure client of the standalone NetPro server (no database, no API routes, no Auth.js — see `docs/phase-24-deprecate-old-web.md`)
+- `apps/web` — Next.js app (App Router), a pure client of the standalone NetPro server (no database, no API routes, no Auth.js)
 - `apps/cli` — commander CLI (`netpro init|serve|status|token|config|import|enrich|search|reindex|outreach|analyze|path|track|edge|campaign|export|card|migrate|skills|events|content`)
 - `packages/db` — Drizzle ORM schema, dual SQLite/Postgres dialects
 - `packages/core` — shared business logic: import, enrichment, export, faceted search, the network analytics engine, the AI outreach drafting engine, profile-card validation/publishing/exports, the CRM (interaction tracking, relationship scoring, follow-up reminders), the draft-only batch campaign engine, graph edge provenance, the v2.0 graph analytics engine (Louvain communities, centrality, warm-intro paths), the Phase 3 pathfinder surface (ranking, first-ask, per-contact graph position), the v2.0 skills taxonomy/gap analyzer, the Phase 6 event matcher (CSV import, attendee matching, recommendations), the v2.5 profile-view beacon + viewer analytics (privacy-hardened ingestion, windowed stats, timelines, known-visitor matches), the v2.5 content tracker data model (URL identity, CSV/feed import, metrics snapshots, mentions, provider interface), the v2.5 daily retention purge (90-day views / 365-day snapshots with latest-per-piece survival, at-most-once-per-24 h, audit-logged), and v3.0 Phase 2's workspace-scoped CRM engine (explicit `workspace_id` predicates threading an optional `WorkspaceScope`, authorship on interactions/follow-ups, and a cross-tenant scope-guard suite)
@@ -454,8 +446,7 @@ Read [`docs/deployment.md`](docs/deployment.md) first — it covers the
 Postgres setup, migrations, authentication modes, TLS, and a production
 checklist.
 
-See [`docs/getting-started.md`](docs/getting-started.md) to run it locally,
-and the [CHANGELOG](CHANGELOG.md) for what each release shipped and why.
+See [`docs/getting-started.md`](docs/getting-started.md) to run it locally.
 
 ## License
 

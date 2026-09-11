@@ -241,11 +241,4 @@ no surface — CLI, API, or UI — ever prints one.
 
 - [docs/getting-started.md](getting-started.md) — install and first import
 - [docs/deployment.md](deployment.md) — Docker / self-hosted PostgreSQL path
-- [docs/phase-2-serve.md](phase-2-serve.md),
-  [docs/phase-3-local-database.md](phase-3-local-database.md), and
-  [docs/phase-5-authentication.md](phase-5-authentication.md) — the
-  implementation reports for the phases that introduced this behaviour
-- [docs/phase-16-cli-web-integration.md](phase-16-cli-web-integration.md) —
-  one operation, one job system, one event stream, two clients
-- [docs/phase-17-optional-ai-enrichment.md](phase-17-optional-ai-enrichment.md) —
-  providers are optional, and the UI says which are on
+- [docs/webhooks.md](webhooks.md) — outbound webhook receivers
