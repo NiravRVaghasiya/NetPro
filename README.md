@@ -256,7 +256,7 @@ server.
 
 ```bash
 # Install the CLI from the release bundle
-npm install -g https://github.com/NiravRVaghasiya/NetPro/releases/download/v3.0.1/netpro-3.0.1.tgz
+npm install -g https://github.com/NiravRVaghasiya/NetPro/releases/download/v3.0.2/netpro-3.0.2.tgz
 
 netpro init       # creates ~/.netpro: config.toml, SQLite db, logs, keys
 netpro serve      # runs the API + built-in console at http://127.0.0.1:3777
@@ -520,15 +520,16 @@ secrets: provider keys belong in the environment, the CLI keychain
 
 ## Project status
 
-**v3.0.1 — "The Platform"** (2026-09-11) is the current
-[release](https://github.com/NiravRVaghasiya/NetPro/releases/tag/v3.0.1): the
-first tagged cut of the platform, re-issued as a patch because the v3.0.0 asset
-installed but could not run `netpro init` (what happened, and what the gate now
-proves instead: [v3.0.1 notes](docs/releases/v3.0.1.md)). The platform was built
-in public through a phased roadmap (v1.0 import/search/analytics/AI drafts → v1.5
-CRM and campaigns → v2.0 graph engine, pathfinder, hybrid search, skills, events →
-v2.5 privacy-first profile views and content tracking → v3.0 workspaces, key vault,
-plugins, marketplace, webhooks, retention).
+**v3.0.2 — "The Platform"** (2026-09-12) is the current
+[release](https://github.com/NiravRVaghasiya/NetPro/releases/tag/v3.0.2): the
+platform, with the `netpro serve` banner fixed so it no longer advertises the API
+port as the Web UI (what changed: [v3.0.2 notes](docs/releases/v3.0.2.md); the
+v3.0.1 patch that made the bundle actually run: [v3.0.1 notes](docs/releases/v3.0.1.md);
+the withdrawn v3.0.0 is still on record). The platform was built in public through
+a phased roadmap (v1.0 import/search/analytics/AI drafts → v1.5 CRM and campaigns →
+v2.0 graph engine, pathfinder, hybrid search, skills, events → v2.5 privacy-first
+profile views and content tracking → v3.0 workspaces, key vault, plugins,
+marketplace, webhooks, retention).
 
 **Stable today:** import/export, dual-dialect storage and migrations, hybrid search,
 graph analytics and pathfinding, CRM scoring and follow-ups, campaigns and outreach

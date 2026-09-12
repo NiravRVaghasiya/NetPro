@@ -1,6 +1,6 @@
 {
   "name": "@netpro/server",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "private": true,
   "description": "NetPro local HTTP server \u2014 API, auth, jobs, SSE (local-first; no hosted-platform or Web UI dependency)",
   "type": "module",
