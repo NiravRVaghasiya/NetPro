@@ -18,7 +18,10 @@
 //   * The server URL defaults to http://127.0.0.1:3777 (netpro serve).
 //     Production / Docker can relocate it via NETPRO_SERVER_URL or
 //     NEXT_PUBLIC_NETPRO_SERVER_URL — the latter is readable in the browser
-//     for EventSource.
+//     for EventSource. In development the browser uses same-origin `/api/*`
+//     paths, which the Next.js dev server proxies to the NetPro server (see
+//     rewrites() in next.config.ts); the page's CSP allows the server origin
+//     in every mode (connect-src in next.config.ts).
 //
 // When the server is unreachable (e.g. during `next dev` without `netpro
 // serve`), callers degrade gracefully: every page shows a banner
@@ -26,18 +29,36 @@
 // renders an empty shell. Phase 24 removed the direct-DB fallback, so the Web
 // UI is a pure client of the server: no database access, no business logic.
 
+import {
+  resolveBrowserServerOrigin,
+  resolveServerOrigin,
+} from "./server-origin";
+
 /** The local NetPro server's origin. */
 export function getServerUrl(env: NodeJS.ProcessEnv = process.env): string {
-  const raw =
-    env.NETPRO_SERVER_URL?.trim() ||
-    env.NEXT_PUBLIC_NETPRO_SERVER_URL?.trim() ||
-    'http://127.0.0.1:3777';
-  // Never double-slash when callers do `${url}/api/...`.
-  return raw.replace(/\/$/, '');
+  const publicUrl = env.NEXT_PUBLIC_NETPRO_SERVER_URL?.trim();
+
+  // In development, the Next.js dev server forwards same-origin `/api/*` to
+  // the NetPro server (rewrites() in next.config.ts), so browser-side code
+  // uses a relative base and never dials 127.0.0.1 from the viewer's machine.
+  // Production keeps absolute URLs: the Docker build bakes an explicit
+  // NEXT_PUBLIC_NETPRO_SERVER_URL, and a bare standalone run falls back to
+  // the local server (allowed by the connect-src policy).
+  const inBrowser = typeof window !== "undefined";
+  if (inBrowser && process.env.NODE_ENV === "development" && !publicUrl) {
+    return "";
+  }
+
+  // Server-rendered requests prefer NETPRO_SERVER_URL (the private compose
+  // hostname in Docker); the browser prefers the baked public URL.
+  return inBrowser ? resolveBrowserServerOrigin(env) : resolveServerOrigin(env);
 }
 
 /** Whether the server URL points at loopback (so no token is needed in local mode). */
 export function isLoopbackServerUrl(url: string): boolean {
+  // A relative (same-origin) base is proxied by the page's own origin — the
+  // trusted local path — so no token is needed there either.
+  if (!url) return true;
   try {
     const host = new URL(url).hostname.toLowerCase();
     return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.startsWith('127.');
@@ -122,8 +143,9 @@ export function getEventsUrl(
   }
   const token =
     env.NETPRO_AUTH_TOKEN?.trim() || env.NEXT_PUBLIC_NETPRO_AUTH_TOKEN?.trim() || '';
-  // EventSource cannot set headers, so the token must be a query param when not loopback.
-  if (token && !isLoopbackServerUrl(base)) {
+  // EventSource cannot set headers, so the token must be a query param when
+  // not loopback. A relative (same-origin, proxied) base needs no token.
+  if (token && base && !isLoopbackServerUrl(base)) {
     params.set('token', token);
   }
   const qs = params.toString();
