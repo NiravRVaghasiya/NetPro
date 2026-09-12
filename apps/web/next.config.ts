@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { connectSrcDirective } from "./lib/server-origin";
 
 // Phase 6 — production security headers.
 //
@@ -16,6 +17,11 @@ import type { NextConfig } from "next";
 //    get 'unsafe-inline'. 'unsafe-eval' is dev-only (React Refresh).
 //  - No remote images are configured on purpose: the profile card never loads
 //    third-party avatars, which is a Phase 5 privacy guarantee.
+//  - `connect-src` names the standalone NetPro server's origin in addition to
+//    'self'. The Web UI is a pure client of that server, so the browser must
+//    be allowed to reach it — otherwise every client-side call (the provider
+//    list behind "Connect an API", the API itself, and the SSE feed) is
+//    silently blocked and the UI degrades to an empty shell.
 const isProduction = process.env.NODE_ENV === "production";
 
 const contentSecurityPolicy = [
@@ -26,8 +32,8 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  // GitHub OAuth is a top-level redirect, not a fetch, so 'self' suffices.
-  "connect-src 'self'",
+  // The NetPro server is a separate origin from the Web UI (see above).
+  `connect-src ${connectSrcDirective()}`,
   "form-action 'self'",
   "frame-ancestors 'self'",
   "base-uri 'self'",
@@ -70,6 +76,25 @@ const nextConfig: NextConfig = {
   typescript: { ignoreBuildErrors: false },
   // Don't advertise the framework version to attackers.
   poweredByHeader: false,
+  async rewrites() {
+    // Development only: forward the browser's same-origin `/api/*` calls to
+    // the standalone NetPro server. `next dev` then serves the UI from any
+    // host (e.g. a remote preview) without the browser dialing 127.0.0.1 —
+    // which would resolve to the viewer's machine, not the machine running
+    // `netpro serve`. The browser-side client uses relative paths in dev (see
+    // lib/netpro-server.ts).
+    //
+    // Production returns nothing on purpose: the Phase 24 contract is that
+    // the built Web UI exposes no /api surface of its own. Browsers there
+    // reach the server origin directly (allowed by the connect-src above).
+    if (process.env.NODE_ENV === "production") return [];
+    const serverUrl = (
+      process.env.NETPRO_SERVER_URL ||
+      process.env.NEXT_PUBLIC_NETPRO_SERVER_URL ||
+      "http://127.0.0.1:3777"
+    ).replace(/\/+$/, "");
+    return [{ source: "/api/:path*", destination: `${serverUrl}/api/:path*` }];
+  },
   async headers() {
     return [
       {
