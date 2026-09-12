@@ -10,8 +10,8 @@
 For normal use, install the CLI globally from the release bundle:
 
 ```bash
-npm install -g https://github.com/NiravRVaghasiya/NetPro/releases/download/v3.0.1/netpro-3.0.1.tgz
-netpro --version      # 3.0.1
+npm install -g https://github.com/NiravRVaghasiya/NetPro/releases/download/v3.0.2/netpro-3.0.2.tgz
+netpro --version      # 3.0.2
 ```
 
 > The unscoped npm name `netpro` belongs to an unrelated package, so NetPro is

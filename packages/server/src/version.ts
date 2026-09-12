@@ -9,4 +9,4 @@
 // a copy per route) means a version bump touches one line, and
 // `version.test.ts` fails if that line and the root `package.json` disagree.
 
-export const SERVER_VERSION = "3.0.1";
+export const SERVER_VERSION = "3.0.2";
