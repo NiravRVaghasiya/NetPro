@@ -16,10 +16,18 @@
 
 //     NetPro server started
 //
-//     Local:    http://127.0.0.1:3777
+//     Local:    http://127.0.0.1:3777  (API + built-in console)
 //     Database: ~/.netpro/netpro.db
 //
-//     Web UI:   http://127.0.0.1:3777
+//     Web UI:   not running — start it with `npm run dev -w apps/web`
+//
+// The banner used to print the same address twice, once as `Local:` and once
+// as `Web UI:`, which read like two services and was wrong twice over: this
+// process serves the REST API and the built-in console page (routes/home.ts),
+// while the full Web UI is the separate Next.js app in apps/web that talks to
+// this port over HTTP. `Web UI:` now names that app's real address when the
+// operator configures one (NETPRO_WEB_URL / [server] web_url) and otherwise
+// says it is not running, instead of pointing at the API.
 
 import {
   describeConn,
@@ -225,7 +233,10 @@ function printBanner(
 
   log('NetPro server started');
   log('');
-  log(`Local:    ${displayUrl}`);
+  // Say what actually answers on this port: the REST API plus the built-in
+  // console page. Calling it the "Web UI" sent people looking for the
+  // Observatory on an address that only serves a status page.
+  log(`Local:    ${displayUrl}  (API + built-in console)`);
   log(`Database: ${database}`);
   if (policy.installation) {
     const owner = policy.installation.owner ? ` (${policy.installation.owner})` : '';
@@ -235,7 +246,14 @@ function printBanner(
   }
   log(`Auth:     ${describeAuthPolicy(policy)}`);
   log('');
-  log(`Web UI:   ${displayUrl}`);
+  // The Web UI is a separate process (apps/web). Only claim an address when
+  // one is configured; otherwise tell the user how to start it.
+  if (app.config.webUrl) {
+    log(`Web UI:   ${app.config.webUrl}  (separate app, points at this server)`);
+  } else {
+    log('Web UI:   not running — start it with `npm run dev -w apps/web`');
+    log('          (set NETPRO_WEB_URL or [server] web_url once it has a fixed address)');
+  }
   log('');
 
   if (createdToken) {

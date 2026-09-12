@@ -296,6 +296,19 @@ mode = "token"
     expect(() => readLocalConfig()).toThrow(/unknown key "allow_origin" in \[server\]/);
   });
 
+  it('reads [server] web_url — the separate Web UI address for the serve banner', () => {
+    const home = scratchHome();
+    writeConfig(home, '[server]\nweb_url = "http://localhost:3000"\n');
+    expect(readLocalConfig().server).toEqual({
+      host: undefined,
+      port: undefined,
+      webUrl: 'http://localhost:3000',
+    });
+
+    writeConfig(home, '[server]\nweb_url = 3000\n');
+    expect(() => readLocalConfig()).toThrow(/must be a non-empty string/);
+  });
+
   it('surfaces TOML syntax errors with the file path and line number', () => {
     const home = scratchHome();
     const path = writeConfig(home, 'broken syntax here\n');

@@ -56,10 +56,39 @@ export type ServerConfig = {
   rateLimit?: RateLimitConfig;
   /** Phase 23 — send HSTS. Opt-in, and only meaningful behind a TLS-terminating proxy. */
   hsts?: boolean;
+  /**
+   * Where the separate Web UI (apps/web, a pure client of this server) is
+   * reachable, when the operator runs one. This process never serves that UI:
+   * the value exists so `netpro serve` can point at the real address instead
+   * of implying its own port is the UI. `null` means "no Web UI configured".
+   */
+  webUrl?: string | null;
 };
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3777;
+
+/**
+ * Resolve the optional Web UI address (`NETPRO_WEB_URL`, else `[server]
+ * web_url`). Returns null when unset or unparseable — the banner then tells
+ * the user how to start a UI rather than printing a broken link.
+ */
+export function resolveWebUrl(
+  env: NodeJS.ProcessEnv = process.env,
+  fileValue?: string
+): string | null {
+  const raw = (env.NETPRO_WEB_URL ?? '').trim() || (fileValue ?? '').trim();
+  if (raw === '') return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+  // Normalised so callers can append paths without double slashes.
+  return parsed.toString().replace(/\/$/, '');
+}
 
 function positivePort(value: string | undefined, fallback: number): number {
   if (value === undefined || value.trim() === '') return fallback;
@@ -80,6 +109,7 @@ function positivePort(value: string | undefined, fallback: number): number {
  * - `NETPRO_ALLOWED_ORIGINS` — CSV CORS allow-list (default: loopback only)
  * - `NETPRO_RATE_LIMIT_ENABLED` / `NETPRO_RATE_LIMIT_MAX` / `NETPRO_RATE_LIMIT_WINDOW_MS`
  * - `NETPRO_HSTS` — send Strict-Transport-Security (behind TLS only)
+ * - `NETPRO_WEB_URL` — where the separate Web UI runs (banner display only)
  *
  * No cloud-platform, AUTH_URL, or GitHub OAuth variables are required.
  *
@@ -116,6 +146,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     allowedOrigins: resolveAllowedOrigins(env, file.server?.allowedOrigins),
     rateLimit: resolveRateLimitConfig(env),
     hsts: ['1', 'true', 'yes', 'on'].includes((env.NETPRO_HSTS ?? '').trim().toLowerCase()),
+    // Display-only: the address of the separate Web UI, if the operator runs one.
+    webUrl: resolveWebUrl(env, file.server?.webUrl),
   };
 }
 

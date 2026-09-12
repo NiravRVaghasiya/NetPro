@@ -32,6 +32,7 @@ describe('loadConfig', () => {
       allowedOrigins: null,
       rateLimit: { enabled: true, max: 600, windowMs: 60_000 },
       hsts: false,
+      webUrl: null,
     });
     expect(cfg.host).toBe('127.0.0.1');
     expect(cfg.port).toBe(3777);
@@ -86,6 +87,31 @@ describe('loadConfig remote-exposure settings (phase 23)', () => {
     expect(loadConfig({ NETPRO_RATE_LIMIT_ENABLED: '0' }).rateLimit?.enabled).toBe(false);
   });
 
+  // The `netpro serve` banner used to print the server's own URL as the
+  // "Web UI". The UI is a separate app, so its address is configured, never
+  // assumed — and a null result makes the banner say "not running".
+  it('resolves the Web UI address: env wins over the config file, null by default', () => {
+    expect(loadConfig({}).webUrl).toBeNull();
+
+    const home = homeWithConfig('[server]\nweb_url = "http://localhost:3000"\n');
+    expect(loadConfig().webUrl).toBe('http://localhost:3000');
+    expect(
+      loadConfig({ NETPRO_HOME: home, NETPRO_WEB_URL: 'https://netpro.example.com' }).webUrl
+    ).toBe('https://netpro.example.com');
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('ignores a Web UI address that is not a usable http(s) URL', () => {
+    // Better to say "not running" than to print a link that goes nowhere.
+    expect(loadConfig({ NETPRO_WEB_URL: 'localhost:3000' }).webUrl).toBeNull();
+    expect(loadConfig({ NETPRO_WEB_URL: 'file:///tmp/ui' }).webUrl).toBeNull();
+    expect(loadConfig({ NETPRO_WEB_URL: '   ' }).webUrl).toBeNull();
+    // Trailing slashes are normalised away so callers can append paths.
+    expect(loadConfig({ NETPRO_WEB_URL: 'http://localhost:3000/' }).webUrl).toBe(
+      'http://localhost:3000'
+    );
+  });
+
   it('keeps HSTS off unless explicitly enabled', () => {
     expect(loadConfig({}).hsts).toBe(false);
     expect(loadConfig({ NETPRO_HSTS: 'true' }).hsts).toBe(true);
@@ -105,6 +131,7 @@ describe('loadConfig with ~/.netpro/config.toml', () => {
       allowedOrigins: null,
       rateLimit: { enabled: true, max: 600, windowMs: 60_000 },
       hsts: false,
+      webUrl: null,
     });
   });
 
@@ -135,6 +162,7 @@ describe('loadConfig with ~/.netpro/config.toml', () => {
       allowedOrigins: null,
       rateLimit: { enabled: true, max: 600, windowMs: 60_000 },
       hsts: false,
+      webUrl: null,
     });
   });
 
@@ -148,6 +176,7 @@ describe('loadConfig with ~/.netpro/config.toml', () => {
       allowedOrigins: null,
       rateLimit: { enabled: true, max: 600, windowMs: 60_000 },
       hsts: false,
+      webUrl: null,
     });
   });
 
@@ -162,6 +191,7 @@ describe('loadConfig with ~/.netpro/config.toml', () => {
       allowedOrigins: null,
       rateLimit: { enabled: true, max: 600, windowMs: 60_000 },
       hsts: false,
+      webUrl: null,
     });
   });
 

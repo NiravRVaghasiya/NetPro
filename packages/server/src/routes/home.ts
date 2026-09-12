@@ -2,11 +2,13 @@
 //
 // GET / — the built-in local console page.
 //
-// The Phase 2 plan prints `Web UI: http://127.0.0.1:3777` when the server
-// starts, so that URL must show something useful even before the full
-// Observatory UI (Phase 9+) exists: server identity, database location, and
-// live health, fetched client-side from /api/health. One dependency-free HTML
-// string — no framework, no external assets, no build step.
+// `netpro serve` prints this address as "API + built-in console", so it must
+// show something useful to a human who opens it: server identity, database
+// location, and live health, fetched client-side from /api/health. One
+// dependency-free HTML string — no framework, no external assets, no build
+// step. The full Observatory UI is the separate apps/web client (see the
+// footer), which is why the banner no longer advertises this port as the
+// "Web UI".
 
 import type { ServerResponse } from 'node:http';
 import { sendText } from '../middleware/json';

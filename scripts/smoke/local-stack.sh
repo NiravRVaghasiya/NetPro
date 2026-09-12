@@ -14,7 +14,8 @@
 # What it asserts (every named check in the Phase 21 list except Web UI):
 #   • netpro init creates the install, identity, token, and migrates
 #   • netpro init is idempotent (config kept, migrations no-op)
-#   • netpro serve binds 127.0.0.1, prints the Phase 2 banner, shuts down
+#   • netpro serve binds 127.0.0.1, prints the Phase 2 banner (naming the bound
+#     address as the API + built-in console, never as the Web UI), shuts down
 #   • /api/health is healthy and names the dialect (SQLite/PG startup)
 #   • core API calls answer: contacts, search, graph, jobs, settings, providers
 #   • POST /api/scan creates an observable job
@@ -69,6 +70,13 @@ assert_contains() {
   grep -Eq "$pattern" "$file" || die "$message"
 }
 
+assert_not_contains() {
+  local file="$1" pattern="$2"
+  local message="${3:-expected NO /$pattern/ in $file}"
+  grep -Eq "$pattern" "$file" && die "$message"
+  return 0
+}
+
 # ── 0. The CLI bundle loads and exposes its command tree ─────────────────
 step 'CLI bundle: --help lists init and serve'
 cli --help >"$WORKDIR/help.txt"
@@ -120,7 +128,15 @@ sed 's/^/    /' "$SERVER_LOG"
 
 wait_for_http "$BASE/api/health"
 assert_contains "$SERVER_LOG" 'Auth:     local' 'banner must name the local auth policy'
-assert_contains "$SERVER_LOG" "Web UI:   http://127.0.0.1:$PORT"
+# This port serves the API and the built-in console, not the Web UI — the Web
+# UI is the separate apps/web client on its own port. The banner used to print
+# the server's own URL on both lines; it must never claim that again.
+assert_contains "$SERVER_LOG" "Local:    http://127\.0\.0\.1:$PORT  \(API \+ built-in console\)" \
+  'banner must label the bound address as the API + built-in console'
+assert_contains "$SERVER_LOG" 'Web UI:   not running' \
+  'with no NETPRO_WEB_URL configured the banner must say the Web UI is not running'
+assert_not_contains "$SERVER_LOG" "Web UI:   http://127\.0\.0\.1:$PORT" \
+  'banner must not advertise the API port as the Web UI'
 
 # ── 3. Health and SQLite/PostgreSQL startup ──────────────────────────────
 step 'GET /api/health'
@@ -252,7 +268,10 @@ SMOKE_PIDS=()
 # ── 10. The standalone @netpro/server bin (what Docker Compose runs) ──────
 step 'standalone netpro-server bin starts and answers health'
 SERVER2_LOG="$WORKDIR/server2.log"
-node "$SERVER_BIN" --host 127.0.0.1 --port 0 >"$SERVER2_LOG" 2>&1 &
+# NETPRO_WEB_URL is display-only metadata: it must appear on the banner's
+# Web UI line without changing what this process binds or serves.
+NETPRO_WEB_URL='http://localhost:3000' \
+  node "$SERVER_BIN" --host 127.0.0.1 --port 0 >"$SERVER2_LOG" 2>&1 &
 SERVER_PID=$!
 SMOKE_PIDS+=("$SERVER_PID")
 PORT2=''
@@ -268,7 +287,13 @@ wait_for_http "$BASE2/api/health"
 curl -fsS "$BASE2/api/health" >"$WORKDIR/health2.json"
 assert_contains "$WORKDIR/health2.json" "\"dialect\":\"$HEALTH_DIALECT\""
 curl -fsS "$BASE2/api/contacts" >/dev/null
-ok 'standalone netpro-server bin serves the API'
+# A configured Web UI address is announced as such, and is never the bind.
+assert_contains "$SERVER2_LOG" 'Web UI:   http://localhost:3000' \
+  'a configured NETPRO_WEB_URL must appear on the banner'
+assert_not_contains "$SERVER2_LOG" 'Web UI:   not running' \
+  'the banner must not say "not running" when NETPRO_WEB_URL is set'
+[ "$PORT2" != '3000' ] || die 'NETPRO_WEB_URL must not influence the bound port'
+ok 'standalone netpro-server bin serves the API and names the configured Web UI'
 kill -TERM "$SERVER_PID" 2>/dev/null || true
 
 printf '\n%s%s local-stack smoke passed (%s)%s\n' "$C_GREEN$C_BOLD" '✓' "$DIALECT" "$C_OFF"
