@@ -96,6 +96,7 @@ OAuth app to configure.
 | `NETPRO_RATE_LIMIT_MAX` / `_WINDOW_MS` / `_ENABLED` | Optional | Per-IP rate limit (default 600/min, on) |
 | `NETPRO_HSTS` | Behind TLS | `true` to send `Strict-Transport-Security` (reverse proxy terminates HTTPS) |
 | `NETPRO_WEBHOOKS_ALLOW_PRIVATE` | Optional | `1` to let webhooks deliver to localhost/LAN receivers deliberately |
+| `NETPRO_WEB_URL` | Optional | Where the Web UI runs, printed in the `netpro serve` banner (display only — the server never serves the UI) |
 | `NETPRO_SERVERLESS` | Optional | `1` when many short-lived instances share one database |
 | `HUNTER_API_KEY`, `PDL_API_KEY`, `CLEARBIT_API_KEY` | Optional | Enrichment providers (BYO key) |
 | `AI_PROVIDER`, `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Optional | AI outreach drafting (BYO key) |

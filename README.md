@@ -294,10 +294,11 @@ npm install
 npm run build
 
 node apps/cli/dist/index.js init
-node apps/cli/dist/index.js serve       # http://127.0.0.1:3777
+node apps/cli/dist/index.js serve       # API + console at http://127.0.0.1:3777
 ```
 
-Run the web UI (Next.js) against the running server:
+Run the web UI (Next.js) against the running server — it is a separate process
+on its own port, not the `:3777` address the server prints:
 
 ```bash
 cp apps/web/.env.example apps/web/.env.local   # defaults to http://127.0.0.1:3777

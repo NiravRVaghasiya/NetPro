@@ -71,15 +71,23 @@ framework) and prints:
 ```text
 NetPro server started
 
-Local:    http://127.0.0.1:3777
+Local:    http://127.0.0.1:3777  (API + built-in console)
 Database: ~/.netpro/netpro.db
 Identity: ins_7a4546a7d03292e3ea3f4d4a
 Auth:     local — loopback trusted; access token set for remote callers
 
-Web UI:   http://127.0.0.1:3777
+Web UI:   not running — start it with `npm run dev -w apps/web`
+          (set NETPRO_WEB_URL or [server] web_url once it has a fixed address)
 ```
 
-- The URL serves the built-in console page (live health, database, API link).
+- The URL serves the REST API and the built-in console page (live health,
+  database, API link). It is **not** the full Web UI.
+- The Web UI is the separate Next.js app in `apps/web` (Observatory, People,
+  Search, Import, Settings), a pure HTTP client of this server that runs on its
+  own port — `http://localhost:3000` under `npm run dev -w apps/web`. Tell the
+  server where it lives with `NETPRO_WEB_URL` (or `[server] web_url`) and the
+  banner prints that address instead of "not running"; the server never serves
+  the UI itself.
 - `GET /api/health` is the machine-readable readiness probe.
 - Pending migrations are applied on startup (opt out with
   `NETPRO_AUTO_MIGRATE=false` and run `netpro migrate` yourself).
@@ -112,7 +120,8 @@ Settings layer, highest wins:
 
 1. **CLI flags** (`netpro serve --host … --port …`)
 2. **Environment variables** — `NETPRO_HOST`/`HOST`, `NETPRO_PORT`/`PORT`,
-   `NETPRO_AUTO_MIGRATE`, `NETPRO_URL` (status probes), plus the database
+   `NETPRO_AUTO_MIGRATE`, `NETPRO_URL` (status probes), `NETPRO_WEB_URL` (the
+   separate Web UI's address, shown in the banner), plus the database
    variables below
 3. **`~/.netpro/config.toml`**
 4. **Defaults** — loopback, port 3777, SQLite
@@ -128,6 +137,8 @@ Settings layer, highest wins:
 [server]
 # host = "127.0.0.1"              # Loopback by default — expose deliberately.
 # port = 3777
+# web_url = "http://localhost:3000"  # Where apps/web runs, for the serve banner.
+#                                    # Display only — the server never serves the UI.
 
 [auth]
 # mode = "local"                  # local (default) | token | open

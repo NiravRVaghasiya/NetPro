@@ -48,9 +48,12 @@ describe('runServe (netpro serve core)', () => {
     // Banner matches the plan's example shape.
     const text = lines.join('\n');
     expect(text).toContain('NetPro server started');
-    expect(text).toContain(`Local:    ${handle.url}`);
+    expect(text).toContain(`Local:    ${handle.url}  (API + built-in console)`);
     expect(text).toContain('Database: ');
-    expect(text).toContain(`Web UI:   ${handle.url}`);
+    // The Web UI is a separate app: with none configured the banner must say
+    // so rather than advertising this server's own address as the UI.
+    expect(text).toContain('Web UI:   not running');
+    expect(text).not.toContain(`Web UI:   ${handle.url}`);
     expect(text).not.toContain('⚠');
     // Isolated install: SQLite file under the scratch home, not ~/.netpro.
     expect(text).toMatch(/Database: .*netpro-serve-/);
@@ -71,6 +74,45 @@ describe('runServe (netpro serve core)', () => {
     // Graceful close resolves `stopped` and releases everything.
     await handle.close();
     await expect(handle.stopped).resolves.toEqual({ reason: 'close' });
+  });
+
+  // The banner used to print the server's own address on both the `Local:`
+  // and `Web UI:` lines, which read as two services when only one was
+  // running — and named the API port as the UI. The Web UI is the separate
+  // apps/web client, so it is only ever announced when one is configured.
+  it('names the configured Web UI address, distinct from the server address', async () => {
+    const lines: string[] = [];
+    const handle = await runServe({
+      env: { ...scratchEnv(), NETPRO_WEB_URL: 'http://localhost:3000' },
+      host: '127.0.0.1',
+      port: 0,
+      log: (line) => lines.push(line),
+      signals: [],
+    });
+    handles.push(handle);
+
+    const text = lines.join('\n');
+    expect(text).toContain('Web UI:   http://localhost:3000');
+    expect(text).toContain(`Local:    ${handle.url}`);
+    // The two lines must not be the same address.
+    expect(text).not.toContain(`Web UI:   ${handle.url}`);
+    expect(text).not.toContain('Web UI:   not running');
+  });
+
+  it('ignores an unusable NETPRO_WEB_URL rather than printing a broken link', async () => {
+    const lines: string[] = [];
+    const handle = await runServe({
+      env: { ...scratchEnv(), NETPRO_WEB_URL: 'not a url' },
+      host: '127.0.0.1',
+      port: 0,
+      log: (line) => lines.push(line),
+      signals: [],
+    });
+    handles.push(handle);
+
+    const text = lines.join('\n');
+    expect(text).toContain('Web UI:   not running');
+    expect(text).not.toContain('not a url');
   });
 
   it('binds loopback by default from config defaults', async () => {
@@ -94,7 +136,7 @@ describe('runServe (netpro serve core)', () => {
     expect(text).toMatch(/⚠ Binding 0\.0\.0\.0/);
     expect(text).toMatch(/reachable from your network/i);
     // Wildcard binds advertise the browsable loopback URL, not 0.0.0.0 itself.
-    expect(text).toContain(`Local:    http://127.0.0.1:${handle.port}`);
+    expect(text).toContain(`Local:    http://127.0.0.1:${handle.port}  (API + built-in console)`);
 
     // Phase 5: a remote bind is never accidentally unprotected — NetPro mints
     // a token rather than denying every remote caller, and never prints it in

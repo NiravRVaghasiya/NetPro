@@ -347,7 +347,7 @@ export function resolveAuthMode(env: NodeJS.ProcessEnv = process.env): LocalAuth
 export type LocalConfig = {
   database?: LocalDatabaseConfig;
   /** Validated by readLocalConfig: host is a string, port an integer 1–65535. */
-  server?: { host?: string; port?: number; allowedOrigins?: string };
+  server?: { host?: string; port?: number; allowedOrigins?: string; webUrl?: string };
   installation?: LocalInstallationConfig;
   auth?: { mode?: LocalAuthMode };
   raw: TomlTable;
@@ -430,10 +430,10 @@ export function readLocalConfig(env: NodeJS.ProcessEnv = process.env): LocalConf
   // Phase 23 — unknown [server] keys are rejected, not ignored: a typo in a
   // security setting must never silently leave the default in force.
   for (const key of Object.keys(serverTable)) {
-    if (!['host', 'port', 'allowed_origins'].includes(key)) {
+    if (!['host', 'port', 'allowed_origins', 'web_url'].includes(key)) {
       throw new LocalConfigError(
         `${path}: unknown key "${key}" in [server] ` +
-          `(NetPro understands host, port, allowed_origins)`
+          `(NetPro understands host, port, allowed_origins, web_url)`
       );
     }
   }
@@ -446,11 +446,21 @@ export function readLocalConfig(env: NodeJS.ProcessEnv = process.env): LocalConf
   // allowed_origins = "https://ui.example.com, https://netpro.example.com".
   // NETPRO_ALLOWED_ORIGINS wins over this when both are set.
   const allowedOrigins = expectString('server', 'allowed_origins', serverTable.allowed_origins);
-  if (host !== undefined || port !== undefined || allowedOrigins !== undefined) {
+  // Where the separate Web UI (apps/web) is reachable, when the operator runs
+  // one. The server does not serve that UI — it only advertises the address in
+  // the `netpro serve` banner — so this is display metadata, not a bind target.
+  const webUrl = expectString('server', 'web_url', serverTable.web_url);
+  if (
+    host !== undefined ||
+    port !== undefined ||
+    allowedOrigins !== undefined ||
+    webUrl !== undefined
+  ) {
     config.server = {
       host,
       port: port as number, // validated above
       ...(allowedOrigins === undefined ? {} : { allowedOrigins }),
+      ...(webUrl === undefined ? {} : { webUrl }),
     };
   }
 

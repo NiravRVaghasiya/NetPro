@@ -69,8 +69,12 @@ No cloud account, no GitHub OAuth, no `DATABASE_URL`:
 
 ```bash
 netpro init     # ~/.netpro: config.toml, identity, SQLite db, logs, keys
-netpro serve    # NetPro at http://127.0.0.1:3777
+netpro serve    # API + built-in console at http://127.0.0.1:3777
 ```
+
+That port serves the REST API and a built-in console page (health, database,
+identity). The full Web UI is a separate app on its own port — see
+[Run the web app](#run-the-web-app-sqlite-local) below.
 
 When running from a source checkout, the equivalent commands are
 `npm run build -w apps/cli` and `node apps/cli/dist/index.js <command>`.
@@ -102,8 +106,10 @@ cp apps/web/.env.example apps/web/.env.local
 npm run dev -w apps/web
 ```
 
-Visit http://localhost:3000. The Web UI is a pure client of the standalone
-server (Phase 24): requests from this machine reach the server as the operator
+Visit http://localhost:3000 — a different port from the server's own
+`:3777`, which serves only the API and its console page. The Web UI is a pure
+client of the standalone server (Phase 24): requests from this machine reach
+the server as the operator
 (see [Authentication modes](#authentication-modes)). Start the server first —
 `netpro serve` — and the Observatory, Network, People, Search, Pathfinder,
 Activity, Scan, Import, and Settings pages all render from it.
