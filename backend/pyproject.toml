@@ -1,0 +1,102 @@
+# backend/pyproject.toml
+#
+# Phase 1 of the Python-first migration — the Python foundation.
+#
+# This project will grow into the authoritative Python implementation of
+# NetPro's domain, intelligence, API, CLI and jobs (see
+# NetPro_Python_First_Implementation_Plan.md). Phase 1 deliberately ships no
+# production feature: it establishes the project layout, toolchain and
+# conventions so later phases have a boring place to land.
+#
+# Conventions pinned here:
+#   * Python 3.12+ (the plan's floor), managed by uv.
+#   * src/ layout so tests run against the installed package, not the checkout.
+#   * Version tracks the product version in the root package.json (3.0.2) —
+#     the CLI, API banner and release tooling all report the same number.
+#   * uv.lock is committed: reproducible installs are part of the migration's
+#     "trustworthy baseline" principle.
+
+[project]
+name = "netpro"
+version = "3.0.2"
+description = "NetPro — local-first professional relationship intelligence (Python core, API and CLI)"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    # Phase 12 target stack, declared now so the foundation installs the
+    # full toolchain it will grow into. Nothing imports these yet except
+    # the FastAPI/Typer skeletons.
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy>=2.0.36",   # Phase 2 — persistence over the existing schema
+    "alembic>=1.14",        # Phase 2 — adopts the schema at migration 0014
+    "typer>=0.14",
+    "httpx>=0.28",
+]
+
+[project.scripts]
+netpro = "netpro.cli.main:run"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/netpro"]
+
+# ── Ruff: lint + format (the Python side's eslint/prettier) ──────────────
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # import order
+    "UP",  # modernize for 3.12+
+    "B",   # bugbear (likely bugs)
+    "C4",  # comprehensions
+    "SIM", # simplification
+    "RUF", # ruff-specific rules
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may construct literal assertion data that looks "unused".
+"tests/*" = ["RUF012"]
+
+# ── pytest ────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+filterwarnings = [
+    # starlette 1.6 deprecates its httpx-based TestClient in favour of
+    # httpx2. Still functional; revisit when httpx2 is the settled standard.
+    # (StarletteDeprecationWarning is not a DeprecationWarning subclass, so
+    # the filters match on message, not category.)
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated",
+]
+
+# ── mypy: strict from day one — the migration's safety net depends on types ──
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+mypy_path = "src"
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_for_extra_fields = "forbid"
