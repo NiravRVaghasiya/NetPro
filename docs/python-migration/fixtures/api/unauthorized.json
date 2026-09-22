@@ -1,0 +1,6 @@
+{
+  "error": "Unauthorized",
+  "reason": "missing-credentials",
+  "authMode": "token",
+  "hint": "Send the local access token as `Authorization: Bearer <token>` (see `netpro token`)."
+}

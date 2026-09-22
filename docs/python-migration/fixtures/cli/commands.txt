@@ -1,0 +1,32 @@
+netpro — 27 top-level commands (v3.0.2)
+
+  init          Create the local install (~/.netpro), identity, and database
+  serve         Run the local NetPro server (default 127.0.0.1:3777)
+  status        Show install, database, and local server status
+  token         Show the local access token (remote/non-loopback access)
+  config        Encrypted CLI keychain / config
+  import        Import connections from LinkedIn CSV
+  scan          Reindex, enrich, and analyze the network in one sweep
+  enrich        Enrich contacts via BYO-key providers
+  search        Faceted hybrid search
+  reindex       Rebuild search index (optional embeddings)
+  outreach      AI-drafted messages (never sent)
+  analyze       Health score, growth, clusters, dormant ties, graph, views
+  path          Ranked warm-intro chains (+ --draft)
+  track         CRM interactions and follow-ups
+  edge          Graph edge provenance (add, import, merge, confirm, reject)
+  campaign      Draft-only drip campaigns
+  export        Contacts as CSV, JSON, or vCard
+  card          Profile cards (HTML / vCard)
+  migrate       Apply pending database migrations
+  backup        Snapshot SQLite or pg_dump PostgreSQL
+  restore       Restore a backup
+  skills        Skills gap / extract / status
+  events        Event attendee matching and recommendations
+  content       Content tracker (CSV / RSS / mentions)
+  team          Workspace members and invites
+  plugin        Plugin runtime and marketplace
+  webhook       Outbound webhooks
+
+Global: --workspace <id>   Operate in workspace <id> (default: bootstrap workspace)
+Most commands support --help and --json.

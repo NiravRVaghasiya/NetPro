@@ -1,0 +1,8 @@
+{
+  "name": "NetPro",
+  "service": "@netpro/server",
+  "message": "Local-first NetPro HTTP server",
+  "health": "/api/health",
+  "authMode": "local",
+  "authenticationRequired": false
+}

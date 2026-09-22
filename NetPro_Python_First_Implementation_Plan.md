@@ -3,6 +3,8 @@
 > **Goal:** Evolve NetPro into a **Python-first professional relationship intelligence platform**, while preserving the existing product capabilities, data, privacy model, and user experience.
 >
 > **Repository:** https://github.com/NiravRVaghasiya/NetPro
+>
+> **Phase 0 status (2026-09-22):** complete. Baseline freeze is commit `19f888c` (v3.0.2). Governance docs live in [`docs/python-migration/`](docs/python-migration/README.md). Next: Phase 1 (`backend/` Python foundation, no production feature moved).
 
 ## Executive decision
 

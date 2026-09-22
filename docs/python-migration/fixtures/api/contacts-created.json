@@ -1,0 +1,13 @@
+{
+  "status": "created",
+  "contact": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "fullName": "Ada Lovelace",
+    "linkedinUrl": "https://www.linkedin.com/in/ada-lovelace"
+  },
+  "profile": {
+    "username": "ada-lovelace",
+    "usernameKey": "ada-lovelace",
+    "normalizedUrl": "https://www.linkedin.com/in/ada-lovelace"
+  }
+}

@@ -592,6 +592,7 @@ Issues and feature requests are welcome via
 | [`docs/releasing.md`](docs/releasing.md) | Cutting a release: the tag gate and the installable CLI bundle |
 | [`docs/releases/`](docs/releases) | Notes published with each release |
 | [`packages/server/README.md`](packages/server/README.md) | The HTTP API contract, job model and SSE transport |
+| [`docs/python-migration/`](docs/python-migration) | Phase 0 baseline for the Python-first strangler migration |
 
 ---
 
