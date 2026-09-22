@@ -1,0 +1,8 @@
+Notes:
+This is a sample LinkedIn Connections export. NetPro skips the preamble and starts at the header row containing "First Name" and "Last Name".
+
+First Name,Last Name,URL,Email Address,Company,Position,Connected On
+Ada,Lovelace,https://www.linkedin.com/in/ada-lovelace,ada@example.com,Analytical Engines,Mathematician,15 Jan 2024
+Sarah,Chen,https://www.linkedin.com/in/sarah-chen,sarah@example.com,Acme AI,Founder,03 Mar 2025
+Mark,Rivera,https://www.linkedin.com/in/mark-rivera,mark@example.com,NeurIPS,Program Chair,12 Jun 2025
+Jane,Doe,https://www.linkedin.com/in/jane-doe,,Independent,Consultant,01 Sep 2025

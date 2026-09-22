@@ -1,0 +1,11 @@
+retry: 3000
+: connected
+
+event: job.queued
+data: {"type":"job.queued","jobId":"11111111-1111-4111-8111-111111111111","progress":0,"timestamp":"2026-09-22T00:00:00.000Z","seq":1}
+
+event: scan.progress
+data: {"type":"scan.progress","jobId":"11111111-1111-4111-8111-111111111111","progress":15,"message":"Discovering contacts","timestamp":"2026-09-22T00:00:01.000Z","seq":2}
+
+event: job.completed
+data: {"type":"job.completed","jobId":"11111111-1111-4111-8111-111111111111","progress":100,"timestamp":"2026-09-22T00:00:05.000Z","seq":3}

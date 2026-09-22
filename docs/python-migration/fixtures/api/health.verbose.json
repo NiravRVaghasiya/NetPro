@@ -1,0 +1,13 @@
+{
+  "status": "healthy",
+  "dialect": "sqlite",
+  "latencyMs": 2,
+  "timestamp": "2026-09-22T00:00:00.000Z",
+  "migrations": { "applied": 15, "expected": 15 },
+  "search": {
+    "mode": "portable",
+    "indexed": 0,
+    "contacts": 0,
+    "embedded": 0
+  }
+}
