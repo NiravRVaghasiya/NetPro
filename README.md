@@ -592,7 +592,9 @@ Issues and feature requests are welcome via
 | [`docs/releasing.md`](docs/releasing.md) | Cutting a release: the tag gate and the installable CLI bundle |
 | [`docs/releases/`](docs/releases) | Notes published with each release |
 | [`packages/server/README.md`](packages/server/README.md) | The HTTP API contract, job model and SSE transport |
-| [`docs/python-migration/`](docs/python-migration) | Phase 0 baseline for the Python-first strangler migration |
+| [`docs/python-migration/`](docs/python-migration) | Governance for the Python-first strangler migration: baseline, capability matrix, API contracts, rules |
+| [`docs/adr/`](docs/adr) | Architecture decision records |
+| [`backend/README.md`](backend/README.md) | The Python foundation (migration Phase 1) — not the shipped product yet |
 
 ---
 

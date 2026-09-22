@@ -4,6 +4,14 @@ The HTTP + SSE contract the Web UI and `netpro serve` already depend on. Python 
 
 Source of truth in TypeScript: `packages/server/src/routes/index.ts`, `packages/server/README.md`, route handlers under `packages/server/src/routes/`.
 
+**Python status (Phase 1):** `backend/` serves the two public probes
+(`GET /api/health`, `/health`, `GET /api/server-info`) with the shapes below,
+including the transport headers, the request-id rule, and the 404/405/500
+envelopes. It adds exactly one field to `server-info`:
+`implementation: "python"` (plus `version`), so a caller can tell which side of
+the strangler answered. Nothing was renamed or removed. The rest of this table
+is still served only by the TypeScript server until Phases 11–12.
+
 ---
 
 ## Transport

@@ -1,0 +1,83 @@
+name: Python CI
+
+# Python gate for the migration (`backend/`).
+#
+# Per `docs/python-migration/migration-rules.md` §14 this runs *beside* the
+# TypeScript `ci.yml`, never instead of it: the shipped product is still the
+# TypeScript CLI/server/web bundle, so removing the TS gate would leave the
+# shipped artifact unverified. TypeScript CI stays until migration Phase 17.
+#
+# There is no `paths:` filter on purpose. The Python `contract` tests read the
+# TypeScript sources (`packages/server/src/events`, `packages/server/src/jobs`)
+# and the Phase 0 fixtures directly, so a rename on the TypeScript side has to
+# fail this workflow too.
+#
+#   ruff check → ruff format --check → mypy (strict) → pytest
+#
+# No stage needs a database or network access beyond installing dependencies:
+# the suite is hermetic (temp install directory, in-process ASGI transport).
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: python-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  python:
+    name: Python ${{ matrix.python-version }} — lint, types, tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 is the documented floor (plan §4); 3.13 keeps the migration
+        # honest about not depending on a single patch release.
+        python-version: ['3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: 'backend/pyproject.toml'
+
+      - name: Install Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      # `uv.lock` is not committed yet: it can only be produced by a machine
+      # that has a 3.12 interpreter, and the foundation was authored where one
+      # could not be downloaded. Commit the lock (and switch to
+      # `uv sync --frozen`) as the first Phase 2 change.
+      - name: Install dependencies
+        run: uv sync --group dev --python ${{ matrix.python-version }}
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Typecheck (strict)
+        run: uv run mypy
+
+      - name: Tests
+        run: uv run pytest
+
+      - name: Contract tests only (frozen TypeScript fixtures)
+        run: uv run pytest -m contract -v
+
+      - name: CLI smoke
+        run: |
+          uv run netpro --version
+          uv run netpro version --json
+          uv run netpro --help

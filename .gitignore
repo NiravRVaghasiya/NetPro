@@ -43,6 +43,16 @@ coverage/
 *.sqlite-shm
 *.sqlite-wal
 
+# Python (backend/)
+__pycache__/
+*.py[cod]
+.venv/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+*.egg-info/
+# `uv.lock` IS committed once it exists — see backend/pyproject.toml.
+
 # IDE
 .vscode/*
 !.vscode/extensions.json

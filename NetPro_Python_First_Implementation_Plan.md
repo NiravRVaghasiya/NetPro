@@ -4,7 +4,7 @@
 >
 > **Repository:** https://github.com/NiravRVaghasiya/NetPro
 >
-> **Phase 0 status (2026-09-22):** complete. Baseline freeze is commit `19f888c` (v3.0.2). Governance docs live in [`docs/python-migration/`](docs/python-migration/README.md). Next: Phase 1 (`backend/` Python foundation, no production feature moved).
+> **Phase status (2026-09-22):** Phase 0 complete — baseline freeze is commit `19f888c` (v3.0.2), governance docs in [`docs/python-migration/`](docs/python-migration/README.md). Phase 1 complete — [`backend/`](backend/README.md) is the Python foundation (uv, Ruff, mypy strict, pytest, FastAPI public probes, Typer CLI); no production feature has moved and the TypeScript product still ships. Decisions are recorded in [`docs/adr/`](docs/adr/README.md). Next: Phase 2 (database & persistence).
 
 ## Executive decision
 
